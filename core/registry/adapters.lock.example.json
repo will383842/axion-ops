@@ -1,0 +1,45 @@
+{
+  "_lisez_moi": [
+    "EXEMPLE de format. Le vrai fichier vit à la racine du socle sous le nom",
+    "`adapters.lock.json`, et il est versionné : c'est un commit du socle, relu",
+    "par un humain, qui autorise une version d'adaptateur — jamais l'adaptateur",
+    "lui-même. Ce fichier-ci est lu par `core/registry/lock.spec.ts`, si bien",
+    "qu'un exemple devenu faux fait rougir la suite au lieu de vieillir en",
+    "silence. Le champ `_lisez_moi` n'est PAS admis par le schéma : la lecture de",
+    "cet exemple le retire d'abord, et le test le vérifie.",
+    "",
+    "`manifestSha` se calcule avec `empreinteDuManifesteProduit(manifeste)`. Il",
+    "n'y a aucune raison de l'écrire à la main, et une bonne raison de ne pas le",
+    "faire : un SHA recopié à un caractère près refuse l'admission sans dire",
+    "pourquoi.",
+    "",
+    "`trustTier` et `maxDataClass` sont décidés ICI, côté socle. Un manifeste qui",
+    "les porterait est refusé (`confiance_auto_decernee`) — sinon un dépôt public",
+    "se décernerait son propre niveau de confiance."
+  ],
+  "lockVersion": 1,
+  "adapters": [
+    {
+      "id": "axionia",
+      "version": "1.0.0",
+      "mode": "fédéré",
+      "manifestSha": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "trustTier": 1,
+      "maxDataClass": "personal",
+      "endpoint": "https://axion-ia.invalid/api/mcp",
+      "authMode": "secret-partage",
+      "secretRef": "axionia.mcp.shared"
+    },
+    {
+      "id": "zoho-mail",
+      "version": "1.0.0",
+      "mode": "hébergé",
+      "manifestSha": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "trustTier": 2,
+      "maxDataClass": "personal",
+      "endpoint": null,
+      "authMode": "en-processus",
+      "secretRef": "zoho.refresh"
+    }
+  ]
+}

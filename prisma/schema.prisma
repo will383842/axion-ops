@@ -258,6 +258,25 @@ model OpsTool {
   /// se refuse à l'ÉTAPE 7, pas seulement en CI.
   enabled Boolean @default(false)
 
+  /// § 13.4 — « une version dépréciée SORT de `tools/list` dès la publication
+  /// de v2 et reste APPELABLE six mois. LE BUDGET COMPTE LES OUTILS EXPOSÉS. »
+  ///
+  /// Sans cette colonne, `retireDeLaListe` — dont `core/profiles/budget.ts`
+  /// fait l'une des trois conditions d'`estServi` — vaudrait `false` pour
+  /// toujours : les v1 dépréciées continueraient de peser au budget du § 14 et
+  /// de partir dans le contexte du modèle. `retireDeLaListe` se DÉRIVE de
+  /// cette colonne (`retiredAt !== null && retiredAt <= maintenant`), jamais
+  /// l'inverse.
+  ///
+  /// ⚠️ RETIRÉE DE LA LISTE ≠ SUPPRIMÉE. `enabled` reste `true` pendant les six
+  ///    mois : l'outil ne s'affiche plus, il répond encore.
+  retiredAt DateTime?
+
+  /// § 13.2 — la date annoncée au client dans le contrat de sortie. Elle est
+  /// distincte de `retiredAt` : on SORT de la liste tout de suite, on cesse de
+  /// RÉPONDRE à l'échéance.
+  sunsetAt DateTime?
+
   /// Dénominateur du quota par défaut de cet outil. Un compteur SANS
   /// dénominateur ne peut ni refuser ni alerter (§ 12, ops_quota).
   limit Int?
