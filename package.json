@@ -1,0 +1,37 @@
+{
+  "name": "axion-ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Socle générique de pilotage — autorise, journalise, limite, route. Aucun métier.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc -p tsconfig.build.json",
+    "prisma:generate": "prisma generate",
+    "prisma:format": "prisma format",
+    "prisma:validate": "prisma validate"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.13.3",
+    "eslint": "^10.9.1",
+    "prettier": "^3.9.6",
+    "prisma": "5.22.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11"
+  }
+}

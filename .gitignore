@@ -1,0 +1,23 @@
+# Dépendances
+node_modules/
+.pnpm-store/
+
+# Secrets — AUCUN secret réel ne doit entrer dans ce dépôt (cf. README, lot 0a)
+.env
+.env.*
+!.env.example
+
+# Sortie de compilation
+dist/
+*.tsbuildinfo
+
+# Journaux et rapports
+*.log
+coverage/
+.vitest/
+
+# Éditeurs et système
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

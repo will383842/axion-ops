@@ -1,0 +1,537 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  axion-ops — modèle de données du socle
+//  Source de vérité : cahier des charges v6, § 12 « Modèle de données du socle ».
+//  DIX tables, sur un PostgreSQL DÉDIÉ — jamais celui d'Axion-IA : le socle ne
+//  doit pas tomber avec lui (§ 07, « Base du socle »).
+//
+//  ⚠️ AUCUNE MIGRATION N'A ÉTÉ LANCÉE. Aucune base ne tourne, aucun secret réel
+//     n'existe. Voir README, « Ce qui n'est pas encore posé ».
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Énumérations — elles reprennent MOT POUR MOT le vocabulaire du CDC.
+//  Les valeurs accentuées sont conservées en base par `@map` : l'identifiant
+//  Prisma doit rester ASCII, la valeur stockée reste celle du document.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 09 — sans valeur par défaut permissive (harnais, contrôle 1).
+enum Effect {
+  read
+  write_draft @map("write-draft")
+  send
+  destructive
+}
+
+/// § 09 — `personal` et `sensitive` MARQUENT la session (§ 20, étape 11).
+enum DataClass {
+  none
+  internal
+  personal
+  sensitive
+}
+
+/// § 08 — l'adaptateur vit chez son produit quand le produit est à toi (fédéré),
+/// dans le socle quand le produit est un tiers (hébergé).
+enum AdapterMode {
+  heberge @map("hébergé")
+  federe  @map("fédéré")
+}
+
+/// § 20 — `brouillon` est le DÉFAUT, et le niveau de repli en cas de panne
+/// (fail-closed, avec une ligne d'historique `setBy: "boot"`).
+enum PolicyLevel {
+  brouillon
+  confirme @map("confirmé")
+  libre
+}
+
+/// § 12 — une clé réutilisée avec un payload différent rend `invalid_input`,
+/// PAS l'autre résultat en silence.
+enum IdempotencyStatus {
+  in_flight
+  done
+  failed
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  1 · ops_secret — le coffre
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// AES-GCM, AAD = `name‖version`, clé hors dépôt (§ 07).
+///
+/// Deux exigences que l'unicité sur `name` seul aurait interdites :
+///  · sans `keyId`, la rotation est un tout-ou-rien qu'une interruption rend
+///    irrattrapable ;
+///  · le § 27 exige de garder l'ancien refresh token Zoho valide PENDANT la
+///    propagation — plusieurs versions vivantes du même `name`.
+model OpsSecret {
+  id String @id @default(cuid())
+
+  /// Composant 1 de l'AAD.
+  name String
+  /// Composant 2 de l'AAD. Plusieurs versions d'un même `name` coexistent.
+  version Int
+
+  /// Quelle clé de chiffrement a produit ce ciphertext. Sans lui, une rotation
+  /// interrompue laisse des lignes qu'aucune clé connue ne rouvre.
+  keyId String
+
+  ciphertext Bytes
+  iv         Bytes
+  tag        Bytes
+
+  /// Dernière rotation effective de CETTE version. `null` = jamais tournée.
+  rotatedAt DateTime?
+
+  /// Nombre de fois où le secret a servi à un amorçage. Un compteur qui ne
+  /// bouge plus est le signal d'un secret orphelin.
+  bootstrapCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, version])
+  @@index([name])
+  @@index([keyId])
+  @@map("ops_secret")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  2 · ops_policy — les garde-fous
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12, règle 1 — LA POLITIQUE SE CALCULE, ELLE NE SE LIT PAS.
+/// Le niveau appliqué est le PLUS STRICT parmi les lignes non expirées dont le
+/// `scope` couvre l'outil appelé. Grammaire de `scope` :
+///   `*`  ·  `adapterId.*`  ·  `adapterId.tool`
+/// Le TTL est évalué PARESSEUSEMENT à l'appel (étape 10) ; l'écran de console
+/// dérive du MÊME calcul, jamais du champ brut.
+///
+/// Aucune ligne n'est jamais supprimée : un desserrage remplacé est marqué
+/// `supersededAt`. Sans cette colonne, l'écran montre un desserrage périmé
+/// comme courant.
+model OpsPolicy {
+  id String @id @default(cuid())
+
+  level PolicyLevel
+
+  /// `*` | `<adapterId>.*` | `<adapterId>.<tool>` — validée par core/policy.
+  scope String
+
+  /// Par quel canal le changement est arrivé. Sans lui, la protection
+  /// « second facteur » (§ 20, TOTP) est INAUDITABLE.
+  /// Un desserrage n'est jamais admis depuis le canal `/api/mcp`.
+  channel String
+
+  /// § 20 — `libre` porte TOUJOURS une durée. `null` n'est licite que pour un
+  /// resserrage, qui n'expire pas.
+  expiresAt DateTime?
+
+  /// Remplacée par une ligne postérieure. Historique, jamais suppression.
+  supersededAt DateTime?
+
+  setBy  String
+  setAt  DateTime @default(now())
+  reason String
+
+  /// Le calcul du niveau appliqué balaie les lignes NON expirées et NON
+  /// remplacées dont le scope couvre l'outil : cet index porte ce balayage.
+  @@index([supersededAt, expiresAt])
+  @@index([scope])
+  @@index([setAt])
+  @@map("ops_policy")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  3 · ops_adapter — le registre
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12 — `trustTier` et `maxDataClass` sont fixés CÔTÉ SOCLE à
+/// l'enregistrement, JAMAIS lus dans le manifeste : sinon le dépôt public se
+/// décerne son propre niveau de confiance.
+model OpsAdapter {
+  /// L'identifiant du CDC : `axionia`, `zoho-mail`. Les préfixes d'outils en
+  /// sont DÉRIVÉS, jamais saisis (§ 09, harnais, contrôle 5).
+  id String @id
+
+  version String
+
+  mode AdapterMode
+
+  /// Comment le socle s'authentifie auprès de l'endpoint (secret partagé en
+  /// en-tête, § 08). Le vocabulaire est celui de core/registry.
+  authMode String
+
+  /// Renvoi vers `ops_secret.name`. JAMAIS le secret lui-même.
+  /// § 09 : en mode `fédéré`, le socle n'émet jamais un secret déchiffré hors
+  /// de son processus — assertion au registre, `mode === "fédéré" &&
+  /// secrets.length > 0` ⇒ enregistrement refusé.
+  secretRef String?
+
+  /// `null` en mode hébergé : l'adaptateur vit dans le processus du socle.
+  endpoint String?
+
+  /// Empreinte du manifeste ÉPINGLÉE. Elle doit correspondre à l'entrée
+  /// d'`adapters.lock.json` versionné dans le socle (§ 09).
+  manifestSha String
+
+  /// Niveau de confiance, ordonné. Fixé par le socle, pas par l'adaptateur.
+  trustTier Int
+
+  /// Plafond de classe de données que cet adaptateur peut porter. Un outil
+  /// déclarant plus strict que son adaptateur est refusé à l'enregistrement.
+  maxDataClass DataClass
+
+  lastSeenAt DateTime?
+  healthy    Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tools     OpsTool[]
+  discovery OpsDiscovery[]
+
+  @@index([mode])
+  @@index([healthy])
+  @@map("ops_adapter")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  4 · ops_tool — les outils exposés
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12 — sans `description`, `inputSchema`, `outputSchema` et `bytes`,
+/// `tools/list`, l'écran Outils et TOUTE MESURE DE BUDGET n'ont aucune source.
+///
+/// § 13.4 — la version est portée par l'OUTIL, pas par l'adaptateur. Une version
+/// dépréciée sort de `tools/list` dès la publication de v2 et reste appelable
+/// six mois. LE BUDGET COMPTE LES OUTILS EXPOSÉS.
+///
+/// § 20, épinglage — tout écart entre `effect`/`dataClass` épinglés ici et la
+/// valeur reçue DÉSACTIVE l'outil et alerte, au lieu de mettre à jour en
+/// silence. Un `effect` basculé de `send` à `read` n'est ni un champ ajouté ni
+/// un champ disparu : sans cette règle il n'apparaît nulle part.
+model OpsTool {
+  id String @id @default(cuid())
+
+  /// Préfixé par l'id de l'adaptateur : `inbox.recent` sous `axionia`.
+  name      String
+  adapterId String
+  version   String
+
+  /// Obligatoire, journalisée, COMPTÉE AU BUDGET (§ 09).
+  description String
+
+  /// JSON Schema draft 2020-12, produit par `z.toJSONSchema()` (zod/v4).
+  /// FERMÉ (`.strict()` ⇒ `additionalProperties: false`) : un champ
+  /// d'autorisation glissé dans la charge utile doit être un refus VISIBLE.
+  inputSchema Json
+
+  /// JSON Schema de la forme NON COMPACTÉE (§ 13.3). Tout champ de rang 2 y est
+  /// OPTIONNEL, sinon une charge compactée ne valide plus le schéma publié.
+  outputSchema Json
+
+  /// Taille en OCTETS UTF-8 du JSON canonique de la définition servie.
+  /// § 14, correction 1 : la garde bloquante porte sur les octets — aucun
+  /// tokenizer n'est installé, `countTokens` du SDK est un appel HTTP.
+  bytes Int
+
+  effect    Effect
+  dataClass DataClass
+
+  /// Typé côté code sur l'ÉNUMÉRATION FERMÉE de `core/profiles/` (§ 14).
+  /// Un profil inconnu est une erreur de compilation chez l'adaptateur ; ici
+  /// la colonne est une liste de chaînes, et le registre valide à l'écriture.
+  profiles String[]
+
+  /// Bascule de console, SANS redéploiement. § 14, correction 3 : la valeur
+  /// mesurée en CI n'est jamais celle qui est servie — le plafond de 40 outils
+  /// se refuse à l'ÉTAPE 7, pas seulement en CI.
+  enabled Boolean @default(false)
+
+  /// Dénominateur du quota par défaut de cet outil. Un compteur SANS
+  /// dénominateur ne peut ni refuser ni alerter (§ 12, ops_quota).
+  limit Int?
+
+  /// Seuil d'alerte, en valeur absolue (ex. 80 % de `limit`).
+  warnAt Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  adapter OpsAdapter @relation(fields: [adapterId], references: [id], onDelete: Cascade)
+
+  /// Deux versions d'un même outil coexistent (§ 13.4).
+  @@unique([name, version])
+  @@index([adapterId])
+  @@index([enabled])
+  @@index([effect])
+  @@map("ops_tool")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  5 · ops_audit — le journal chaîné
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 11 — LE JOURNAL N'EST PAS UNE ÉTAPE, C'EST UN INVARIANT DE SORTIE.
+/// Toute terminaison, Y COMPRIS CHAQUE REFUS, écrit une ligne portant le NUMÉRO
+/// DE L'ÉTAPE qui a refusé (`stepDenied`). Sans cela l'objectif O6 est faux dès
+/// le premier jour, et la métrique « refus de politique » du § 24 n'a aucune
+/// source.
+///
+/// § 12 — ORDONNER PAR `seq`, JAMAIS PAR `at`. Deux horodatages peuvent être
+/// égaux ou reculer ; `seq` est un ordre TOTAL, et c'est lui que le chaînage
+/// `prevHash`/`selfHash` suit.
+/// Modèle à copier : `KnowledgeAuditLog` + `src/lib/knowledge/audit-log.ts`.
+model OpsAudit {
+  /// Ordre TOTAL. C'est la clé primaire : rien ne s'insère « entre ».
+  seq BigInt @id @default(autoincrement())
+
+  at DateTime @default(now())
+
+  principal String
+
+  /// Session de PILOTAGE (pas d'authentification, § 11). Elle porte le marquage
+  /// de provenance du § 20 : un résultat `personal`/`sensitive` la marque.
+  sessionId String
+
+  tool           String
+  toolVersion    String
+  adapterVersion String
+
+  effect      Effect
+  policyLevel PolicyLevel
+
+  /// Issue de la décision d'autorisation. Vocabulaire fixé par core/audit.
+  decision String
+
+  /// Numéro de l'étape (1..14, § 11) qui a REFUSÉ. `null` = aucun refus.
+  /// Typé côté code par `AppelStep` (core/types.ts).
+  stepDenied Int?
+
+  /// HMAC-SHA-256, clé issue du coffre, séparation de domaine PAR OUTIL,
+  /// FAIL-LOUD si la clé manque (§ 12, règle 2). Jamais un SHA nu.
+  /// Motif en service : `src/lib/security/email-hash.ts`.
+  /// La clé est tournée ou purgée AVEC le journal, sinon la rétention ne
+  /// réduit rien.
+  argHash String
+
+  /// § 12, règle 3 — CE N'EST PAS ANONYME. C'est de la PSEUDONYMISATION : un
+  /// identifiant `CalendlyEvent` mène à une fiche portant `cancelUrl` et
+  /// `rescheduleUrl` — des URL-capacités. Purgés à la même échéance que
+  /// `argHash`. Le socle ne les devine pas : les champs porteurs sont
+  /// DÉCLARÉS par l'outil (`idFields`, § 09).
+  recordIds String[]
+
+  /// § 13.2 — les sources d'un outil composite qui ont échoué ou coupé.
+  /// Sans emplacement, la boîte revient amputée d'un canal sur quatre SOUS
+  /// L'APPARENCE D'UNE RÉPONSE NORMALE.
+  partialSources String[]
+
+  durationMs Int
+
+  outcome String
+
+  /// `selfHash` de la ligne précédente. `null` sur la toute première ligne.
+  prevHash String?
+
+  /// Empreinte de CETTE ligne, chaînage compris. UNIQUE : une réécriture
+  /// silencieuse produit une collision ou casse la chaîne.
+  selfHash String @unique
+
+  @@index([sessionId])
+  @@index([principal, at])
+  @@index([tool])
+  @@index([stepDenied])
+  @@map("ops_audit")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  6 · ops_idempotency — le rejeu
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 11, étape 13 — `(tool, key)` est INSÉRÉ en `in_flight`, puis `argHash` est
+/// comparé. C'est l'insertion qui verrouille, pas une lecture préalable.
+///
+/// § 12 — une clé réutilisée avec un payload DIFFÉRENT doit rendre
+/// `invalid_input`, PAS L'AUTRE RÉSULTAT EN SILENCE.
+///
+/// § 20 — la clé voyage dans `ctx.idempotencyKey`, JAMAIS dans `input`.
+model OpsIdempotency {
+  tool String
+  key  String
+
+  status IdempotencyStatus
+
+  argHash String
+
+  /// Renvoi vers le résultat conservé. Jamais le résultat lui-même : le § 31
+  /// interdit tout cache de contenu sur disque.
+  resultRef String?
+
+  completedAt DateTime?
+
+  /// Le « TTL chiffré » du § 12, matérialisé : au-delà, la ligne ne sert plus
+  /// de rejeu et la purge peut l'emporter.
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  @@id([tool, key])
+  @@index([expiresAt])
+  @@index([status])
+  @@map("ops_idempotency")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  7 · ops_quota — le débit
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12 — UN COMPTEUR SANS DÉNOMINATEUR NE PEUT NI REFUSER NI ALERTER À 80 %.
+/// `limit` et `warnAt` sont donc portés par la ligne, pas devinés à la lecture.
+///
+/// § 11, étape 12 — l'incrément est ATOMIQUE ET CONDITIONNEL : `count + 1 <=
+/// limit` dans la même instruction, sinon deux appels concurrents passent tous
+/// deux le plafond.
+///
+/// § 11 — LE SCHÉMA AVANT LE QUOTA (étape 8 avant étape 12). Un appel malformé
+/// ne consomme rien : l'ordre inverse produit une boucle où le quota brûle, le
+/// 429 dit « quand réessayer », et le modèle rejoue le même appel invalide.
+model OpsQuota {
+  id String @id @default(cuid())
+
+  /// Fenêtre de comptage, sous forme canonique (ex. `2026-08-30T14`).
+  window String
+
+  tool      String
+  principal String
+
+  count Int @default(0)
+
+  /// Le dénominateur. Sans lui, aucun refus n'est décidable.
+  limit Int
+
+  /// Seuil d'alerte, en valeur absolue.
+  warnAt Int
+
+  resetAt DateTime
+
+  @@unique([window, tool, principal])
+  @@index([resetAt])
+  @@index([principal])
+  @@map("ops_quota")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  8 · ops_discovery — ce que le scan trouve
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12 — SANS L'UNICITÉ, L'ACTION « IGNORER » NE SURVIT PAS AU SCAN SUIVANT :
+/// le scan réinsère le même sujet, et la décision humaine est perdue en silence.
+model OpsDiscovery {
+  id String @id @default(cuid())
+
+  adapterId String
+
+  /// Nature de ce qui a été trouvé (outil, endpoint, capacité…).
+  kind String
+
+  /// Ce qui a été trouvé, sous sa forme canonique.
+  subject String
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  /// Décision humaine sur ce sujet. Vocabulaire fixé par core/registry.
+  status String
+
+  decidedBy String?
+  decidedAt DateTime?
+
+  adapter OpsAdapter @relation(fields: [adapterId], references: [id], onDelete: Cascade)
+
+  @@unique([adapterId, kind, subject])
+  @@index([status])
+  @@index([lastSeenAt])
+  @@map("ops_discovery")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  9 · ops_token — NOUVELLE au § 12
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12 — SANS ELLE, « RÉVOQUE LES JETONS DU SOCLE » N'A AUCUN OBJET.
+/// § 19.1 — access token 1 h, refresh 30 j ROTATIF. Seule une EMPREINTE SALÉE
+/// est conservée ; le jeton ne s'affiche en clair QU'UNE FOIS.
+///
+/// § 11, étape 4 — `jti` non révoqué. C'est cette table que l'étape interroge.
+model OpsToken {
+  /// `jti` de la RFC 7519. Clé primaire : c'est ce que le jeton présente.
+  jti String @id
+
+  /// Empreinte SHA-256 SALÉE du jeton. Le jeton en clair n'est jamais stocké.
+  tokenHash String @unique
+
+  /// À qui le jeton a été délivré. Ajouté par la Fondation : sans lui,
+  /// « révoque les jetons du socle » ne sait pas DE QUI. Voir README, décisions.
+  principal String
+
+  /// `access` (1 h) ou `refresh` (30 j rotatif). Ajouté par la Fondation : le
+  /// § 19.1 range deux durées de vie dans une seule table, il faut les
+  /// distinguer pour faire tourner la chaîne de refresh. Voir README, décisions.
+  kind String
+
+  /// § 19.2 — `ops:read` | `ops:draft` | `ops:send` | `ops:admin` | `ops:policy`.
+  /// LE JETON DU CONNECTEUR NE PORTE JAMAIS `ops:policy`.
+  scopes String[]
+
+  /// RFC 8707, indicateur de ressource. L'étape 3 le compare.
+  /// § 19.1 : l'identifiant de ressource qui sert d'audience se décide et
+  /// s'écrit AVANT le lot 1 — l'étape 3 n'a aucun sens sans lui.
+  audience String
+
+  issuedAt   DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  @@index([principal])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("ops_token")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  10 · ops_runtime — NOUVELLE au § 12
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// § 12 — L'ÉTAPE 7 LISAIT UN PROFIL COURANT QU'AUCUNE TABLE NE STOCKAIT, et
+/// qu'on change à la voix.
+///
+/// § 11 — c'est un état de PILOTAGE, pas de PROTOCOLE : il n'y a aucune session
+/// d'AUTHENTIFICATION serveur, le jeton porte les droits.
+///
+/// § 20 — « passe en mode dev » suit LE CHEMIN DU DESSERRAGE : changer de profil
+/// change la surface exposée, donc facteur, TTL, ligne au journal. Une commande
+/// hors modèle n'est admise sans facteur que si elle RÉDUIT STRICTEMENT
+/// l'ensemble des outils exposés.
+model OpsRuntime {
+  /// Un profil actif PAR PRINCIPAL.
+  principal String @id
+
+  /// Valeur de l'énumération fermée de `core/profiles/`.
+  activeProfile String
+
+  updatedAt DateTime @updatedAt
+
+  @@map("ops_runtime")
+}

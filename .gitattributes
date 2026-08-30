@@ -1,0 +1,4 @@
+# Fins de ligne LF partout : six constructeurs travaillent en parallele,
+# un melange CRLF/LF fabriquerait des conflits qui ne portent aucun sens.
+* text=auto eol=lf
+pnpm-lock.yaml -diff

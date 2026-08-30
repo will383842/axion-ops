@@ -1,0 +1,9 @@
+{
+  // Compilation de livraison : le code, sans les tests ni les fichiers de configuration.
+  // `pnpm typecheck` couvre l'ensemble ; `pnpm build` n'émet que ce qui tourne.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false
+  },
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "*.config.ts"]
+}
