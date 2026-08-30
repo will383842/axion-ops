@@ -13,8 +13,8 @@ export default defineConfig({
       "ops/**/*.spec.ts",
     ],
     environment: "node",
-    // Aucun réseau : le socle ne sort pas de la machine tant que le lot 0a
-    // (Cloudflare Access, rotation du jeton Coolify) n'est pas posé.
+    // Aucun réseau : le socle ne sort pas de la machine tant que les prérequis
+    // d'exploitation du lot 0a ne sont pas remplis.
     globals: false,
     reporters: ["default"],
   },

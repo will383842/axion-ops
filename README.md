@@ -2,11 +2,8 @@
 
 > **⚠️ AUCUN SECRET RÉEL. AUCUN DÉPLOIEMENT TANT QUE LE LOT 0a N'EST PAS FAIT.**
 >
-> Les trois portes du § 16 ne sont pas posées : Cloudflare Access n'est pas
-> configuré et le jeton d'API Coolify — qui a circulé en clair et ouvre les
-> variables d'environnement de **toutes** les applications — n'est pas encore
-> tourné. Tant que ces deux gestes ne sont pas faits, ce dépôt **n'expose
-> rien** : pas de conteneur en production, pas d'URL publique, pas de valeur
+> Les prérequis d'exploitation du § 16 ne sont pas remplis. Tant qu'ils ne le
+> sont pas, ce dépôt **n'expose rien** : pas de conteneur en production, pas d'URL publique, pas de valeur
 > d'identifiant réelle dans un fichier, un test, un commentaire ou un message
 > de commit. `.env.example` ne porte que des valeurs factices sur l'hôte
 > `stub.invalid` (TLD réservé, RFC 2606 : il ne résout jamais).
@@ -216,8 +213,8 @@ Trois points où le CDC se contredit ou laisse un trou. Ils sont laissés
 
 ## Ce qui n'est pas encore posé
 
-- **Lot 0a — les trois portes** : Cloudflare Access, rotation du jeton Coolify,
-  et le troisième garde du § 16. Rien ne s'expose avant.
+- **Lot 0a — les prérequis d'exploitation du § 16.** Ils se traitent hors de ce
+  dépôt et ne sont pas décrits ici. Rien ne s'expose avant qu'ils soient remplis.
 - **L'identifiant de ressource servant d'audience** (§ 19.1) : il se décide et
   s'écrit **avant le lot 1**. L'étape 3 de la chaîne d'appel n'a aucun sens
   sans lui. `.env.example` en porte l'emplacement, pas la valeur.
@@ -227,3 +224,26 @@ Trois points où le CDC se contredit ou laisse un trou. Ils sont laissés
 - **Décision W-6** (§ 19 bis) : au nom de quel rôle console l'adaptateur agit-il ?
   Défaut retenu en l'absence de réponse : **le rôle le plus faible**, donc
   `peutVoirAppels: false` et coordonnées masquées.
+
+---
+
+## Ce dépôt est PUBLIC
+
+Décision de Williams Jullin, 2026-08-30. Trois règles en découlent, et elles
+tiennent quel que soit le contenu du code :
+
+1. **La sécurité ne repose sur aucun secret de conception.** Tout ce qui protège
+   le socle doit tenir alors qu'un attaquant lit le code. C'est déjà le parti pris
+   du § 09 de la spécification — le rendre public le rend vérifiable, pas plus
+   faible.
+2. **Aucun identifiant d'infrastructure n'entre ici** : adresse IP, UUID
+   d'application, sous-domaine, préfixe d'administration, nom d'hôte réel,
+   identifiant de compte. Les exemples emploient l'hôte réservé `stub.invalid`
+   (RFC 2606).
+3. **Aucune description d'une faiblesse non corrigée.** Un dépôt ouvert qui
+   raconte quelle porte est ouverte, et qu'elle l'est encore, transforme une
+   documentation honnête en indication. Les prérequis d'exploitation se
+   nomment ; leur état ne se publie pas.
+
+Aucune donnée personnelle, sous aucune forme — ni dans le code, ni dans un test,
+ni dans une fixture, ni dans un message de commit.
