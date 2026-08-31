@@ -171,19 +171,23 @@ function annonceIdFields(resultat: ReturnType<typeof enregistrerAdaptateur>): {
 describe("TÉMOIN ADR 0015 — un `idFields` posé sur un champ de TEXTE LIBRE", () => {
   it("est ADMIS — et l'annonce dit ce qu'il faut ajouter AU SCHÉMA", () => {
     // ⚠️ LE TÉMOIN QUI A MOTIVÉ L'ADR. `idFields: ["requete"]` sur un
-    //    `{"type":"string"}` suffit, jusqu'à la bascule de l'étape 11, à retirer
-    //    le champ de la surveillance du § 20 — c'est-à-dire à désarmer la garde
-    //    d'exfiltration DEPUIS LE MANIFESTE, donc depuis un dépôt tiers.
+    //    `{"type":"string"}` suffisait à retirer le champ de la surveillance du
+    //    § 20 — c'est-à-dire à désarmer la garde d'exfiltration DEPUIS LE
+    //    MANIFESTE, donc depuis un dépôt tiers.
     //
-    // 🔧 **LA FERMETURE A DEUX MOITIÉS, ET UNE SEULE EST ICI.** Ce test tient la
-    //    moitié « registre » : la déclaration est confrontée au schéma et son
-    //    absence d'effet est DITE. L'autre moitié — le retrait du paramètre
-    //    `idFields` d'`analyserArgumentsDuSchema()` — appartient au constructeur
-    //    ② (ADR 0015, point 1) ; tant qu'elle n'a pas atterri, l'exonération
-    //    vit encore à l'étape 11, et c'est le témoin
-    //    `core/epreuve/exfiltration-par-les-arguments.temoin.spec.ts` qui la
-    //    compte. Ce fichier ne prétend donc PAS que le trou est refermé : il
-    //    prouve que l'admission ne le couvre plus d'un silence.
+    // ✅ **LA FERMETURE AVAIT DEUX MOITIÉS ; LA SECONDE A ATTERRI AU LOT 1d.** Ce
+    //    test tient la moitié « registre » : la déclaration est confrontée au
+    //    schéma et son absence d'effet est DITE, sans que le manifeste soit
+    //    refusé (« on n'interdit pas ce qu'on ignore »). L'autre moitié — le
+    //    retrait du paramètre `idFields` d'`analyserArgumentsDuSchema()` — est
+    //    faite : la signature ne l'accepte plus, et le témoin A2 de
+    //    `core/epreuve/verrous-du-paragraphe-20.temoin.spec.ts` annonce l'arité
+    //    qui le prouve.
+    //
+    //    Ce fichier reste néanmoins la moitié « registre », et il ne prétend
+    //    toujours pas fermer le trou : il prouve que l'admission ne le couvre
+    //    pas d'un silence, et c'est par elle que l'adaptateur APPREND qu'il doit
+    //    refermer ses identifiants dans son schéma.
     const manifeste = recu(
       manifesteAvec({
         entree: z.object({ requete: z.string() }).strict(),

@@ -20,6 +20,7 @@ import { JournalMemoire } from "./memoire.js";
 import { creerScelleurJournal } from "../sceau/index.js";
 import type { Horloge, ScelleurJournal } from "./ports.js";
 import type { ContenuLigne, LigneAudit } from "./vocabulaire.js";
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 import { EFFET_EXTERIEUR_NON_SURVENU } from "./vocabulaire.js";
 
 /**
@@ -60,6 +61,23 @@ export class HorlogeFigee implements Horloge {
 }
 
 /**
+ * LES DEUX SESSIONS DES LIGNES TÉMOINS, frappées UNE FOIS au chargement.
+ *
+ * ⚠️ **DÉTERMINISME DANS UN PROCESSUS, PAS ENTRE DEUX.** Deux appels de
+ *    `contenuTemoin(1)` rendent la même ligne — c'est ce dont
+ *    `core/audit/canonique.spec.ts` a besoin pour comparer deux empreintes — mais
+ *    deux exécutions du programme rendent deux sessions différentes. Une garde
+ *    qui aurait besoin d'un vecteur d'empreinte FIXE doit passer sa session par
+ *    la surcharge ; aucune ne le fait aujourd'hui, et c'est mesuré.
+ *
+ * ⚠️ **DEUX, ET NON UNE.** C'est ce que ce kit portait avant l'ADR 0014
+ *    (`session-${rang % 2}`) : deux lignes voisines n'appartiennent pas
+ *    forcément au même appel, et une garde du § 20 fabriquée sur ce kit doit
+ *    pouvoir rencontrer les deux cas.
+ */
+const SESSIONS_DES_TEMOINS = [sessionIdDeTemoin(), sessionIdDeTemoin()] as const;
+
+/**
  * Le contenu d'une ligne témoin. Toutes ses valeurs passent la garde de forme du
  * § 31 : c'est délibéré, pour qu'une garde qui rougit rougisse de ce qu'elle
  * mesure, et non du décor.
@@ -68,7 +86,30 @@ export function contenuTemoin(rang: number, surcharge: Partial<ContenuLigne> = {
   const base: ContenuLigne = {
     at: new Date(INSTANT_ZERO + rang * 1000),
     principal: `temoin-${String(rang % 3)}`,
-    sessionId: `session-${String(rang % 2)}`,
+    // ✅ **REPLI LEVÉ À LA RECETTE DU LOT 1d.** Ce champ a porté
+    //    `session-${rang % 2}`, puis — l'ADR 0014 l'ayant resserré en `SessionId`,
+    //    un type marqué que seule `core/identite/` sait frapper — la valeur
+    //    réservée `SESSION_HORS_APPEL`, faute de pouvoir importer la fabrique :
+    //    la garde G2 refuse à tout fichier LIVRÉ d'importer une VALEUR de ce
+    //    dossier, et ce kit-ci ÉTAIT livré.
+    //
+    //    La décision 3 de l'ADR 0019 a ajouté tout `fixtures.ts` à l'`exclude` de
+    //    `tsconfig.build.json` : ce kit n'est plus émis par `pnpm build`, G2 ne le
+    //    compte plus parmi les fichiers livrés, et la ligne redevient ce qu'elle
+    //    doit être — une session frappée par la fabrique NOMMÉE. Une ligne témoin
+    //    représente un APPEL ; lui donner la valeur des lignes hors appel était
+    //    sémantiquement faux, et c'était écrit comme tel.
+    //
+    // ⚠️ **ET LE REPLI NE SE LÈVE PAS EN APPELANT LA FABRIQUE ICI — MESURÉ.**
+    //    `sessionIdDeTemoin()` rend DEUX sessions différentes à deux appels, par
+    //    décision écrite (`core/identite/fixtures.ts`) : l'appeler dans le corps
+    //    de `contenuTemoin` rendrait ce kit NON DÉTERMINISTE, et
+    //    `core/audit/canonique.spec.ts` › « rougit sur un témoin fabriqué dont un
+    //    champ est modifié hors empreinte » a rougi sur-le-champ — deux appels de
+    //    `contenuTemoin(1)` ne donnaient plus la même empreinte. Les sessions sont
+    //    donc frappées UNE FOIS au chargement du module, et alternées comme
+    //    l'était `session-${rang % 2}` avant l'ADR 0014.
+    sessionId: SESSIONS_DES_TEMOINS[rang % SESSIONS_DES_TEMOINS.length] ?? SESSIONS_DES_TEMOINS[0],
     tool: "ops.temoin.lire",
     toolVersion: "1.0.0",
     adapterVersion: "1.0.0",

@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { APPEL_STEPS } from "../types.js";
 import { SCELLEUR_TEMOIN, HorlogeFigee } from "./fixtures.js";
+// ADR 0014 — la session d'un témoin vient de la fabrique NOMMÉE de
+// `core/identite/`, jamais d'un littéral : le type marqué ne l'accepte plus.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 import { sha256Hex } from "./canonique.js";
 import type { EnteteAppel } from "./journal.js";
 import {
@@ -31,7 +34,7 @@ import { verifierChaine } from "./verification.js";
 
 const ENTETE: EnteteAppel = {
   principal: "temoin-appelant",
-  sessionId: "session-temoin",
+  sessionId: sessionIdDeTemoin(),
   tool: "ops.temoin.lire",
   toolVersion: "1.0.0",
   adapterVersion: "1.0.0",
@@ -223,7 +226,7 @@ describe("core/audit — un refus AVANT identification s'écrit quand même (§ 
     for (const etape of httpSeul) {
       await avecJournal(
         journal,
-        enteteAvantIdentification("hôte-inconnu", `session-${String(etape.numero)}`),
+        enteteAvantIdentification("hôte-inconnu", sessionIdDeTemoin()),
         () =>
           Promise.resolve<Terminaison<string>>({
             genre: "refus",

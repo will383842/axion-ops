@@ -14,6 +14,7 @@ import type { JournalMemoire } from "./memoire.js";
 import { ErreurPurge, cumulAncrageTete, dateLimiteRetention, preparerPurge } from "./purge.js";
 import { verifierChaine } from "./verification.js";
 import type { LigneAudit } from "./vocabulaire.js";
+import { SESSION_HORS_APPEL } from "./vocabulaire.js";
 
 /**
  * Gardes de LA PURGE ANCRÉE (§ 31).
@@ -203,7 +204,9 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     await journal.journaliser({
       at: new Date(Date.UTC(2026, 8, 1)),
       principal: "system",
-      sessionId: "purge-faussee",
+      // ADR 0014 — un témoin de clôture porte la MÊME valeur réservée que
+      // `construireCloture()` : une purge n'a pas de session de pilotage.
+      sessionId: SESSION_HORS_APPEL,
       tool: "ops.audit.purge",
       toolVersion: "1",
       adapterVersion: "1",
@@ -262,7 +265,9 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     await journal.journaliser({
       at: new Date(Date.UTC(2026, 8, 1)),
       principal: "system",
-      sessionId: "purge-recopiee",
+      // ADR 0014 — un témoin de clôture porte la MÊME valeur réservée que
+      // `construireCloture()` : une purge n'a pas de session de pilotage.
+      sessionId: SESSION_HORS_APPEL,
       tool: "ops.audit.purge",
       toolVersion: "1",
       adapterVersion: "1",
@@ -303,7 +308,9 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     await journal.journaliser({
       at: new Date(Date.UTC(2026, 8, 1)),
       principal: "system",
-      sessionId: "purge-illisible",
+      // ADR 0014 — un témoin de clôture porte la MÊME valeur réservée que
+      // `construireCloture()` : une purge n'a pas de session de pilotage.
+      sessionId: SESSION_HORS_APPEL,
       tool: "ops.audit.purge",
       toolVersion: "1",
       adapterVersion: "1",

@@ -74,8 +74,16 @@ export {
   reserver,
   MODES_IDEMPOTENCE,
   STATUTS_IDEMPOTENCE,
+  // ── ADR 0020 — la clé n'atteint plus l'adaptateur, et sa forme est fermée ──
+  empreinteDeCleDIdempotence,
+  formeAttendueDeCle,
+  formeDeCleValide,
+  FORME_CLE_IDEMPOTENCE,
+  // ── ADR 0021 — l'issue se DÉRIVE du cliquet, jamais du genre de la fin ────
+  issueDeReservation,
   type DemandeReservation,
   type DepotIdempotence,
+  type FaitsDeCloture,
   type LigneIdempotence,
   type ModeIdempotence,
   type ResultatIdempotence,

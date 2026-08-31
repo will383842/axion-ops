@@ -38,8 +38,13 @@ import { describe, expect, it } from "vitest";
 
 import { analyserFermeture } from "../adapter-kit/fermeture.js";
 import { versValeurJson } from "../adapter-kit/json.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 import { ETAPE_PROVENANCE } from "../chaine/etapes.js";
 import type { ContexteProvenance } from "../chaine/etapes.js";
+// ADR 0014 — la session de témoin vient de la fabrique NOMMÉE de `core/identite/` :
+// le type marqué de `SessionId` ne se laisse plus écrire en littéral.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
+import type { SessionId } from "../identite/session.js";
 import {
   IndexProvenanceMemoire,
   analyserArgumentsDuSchema,
@@ -54,7 +59,7 @@ import {
 
 const DOMAINE_LU = "boite-courrier";
 const DOMAINE_TIERS = "annuaire-externe";
-const SESSION = "session-de-l-attaquant";
+const SESSION: SessionId = sessionIdDeTemoin();
 
 /**
  * Le contenu que l'attaquant veut faire sortir. AUCUNE DONNÉE RÉELLE : une
@@ -280,8 +285,11 @@ const TEMOINS_SCHEMA: readonly TemoinSchema[] = [
     idFields: ["requete"],
     charge: CONTENU_LU,
     motif:
-      "`idFields` est DÉCLARÉ par l'adaptateur et confronté à rien — ni au schéma, ni au " +
-      "type du champ. Le déclarer suffit à retirer le champ de `libres`.",
+      "`idFields` était DÉCLARÉ par l'adaptateur et confronté à rien — ni au schéma, ni au " +
+      "type du champ ; le déclarer suffisait à retirer le champ de `libres`. ADR 0015 : " +
+      "l'étape 11 ne lit plus la déclaration. Le champ reste écrit ici POUR QUE LA " +
+      "DÉCLARATION EXISTE ENCORE — un témoin qui ne déclarerait plus rien ne pourrait " +
+      "plus prouver qu'elle est sans effet.",
   },
 ];
 
@@ -291,7 +299,7 @@ describe("§ 18 — exfiltration par les arguments : contourner la DÉRIVATION d
     let proprietesTotales = 0;
 
     for (const temoin of TEMOINS_SCHEMA) {
-      const analyse = analyserArgumentsDuSchema(temoin.schema, temoin.idFields);
+      const analyse = analyserArgumentsDuSchema(temoin.schema, AUCUN_CHAMP_DE_GOUVERNANCE);
       proprietesTotales += analyse.proprietesInspectees;
 
       // Chaque témoin doit avoir été RÉELLEMENT inspecté : une dérivation qui
@@ -316,29 +324,39 @@ describe("§ 18 — exfiltration par les arguments : contourner la DÉRIVATION d
 
     expect(TEMOINS_SCHEMA.length, "plancher-témoin").toBeGreaterThanOrEqual(8);
 
-    // ⚠️ CINQ DES SIX CONTOURNEMENTS SONT FERMÉS. `estTexteLibre()` ne traite
-    //    plus `pattern`, `format` ni `{type:"object"}` comme des fermetures :
-    //    un `format` ne referme qu'au vu d'une liste fermée de formats
-    //    réellement contraignants (`uri` en est exclu nommément), un `pattern`
-    //    ne referme que s'il REJETTE des témoins de prose fabriqués, et un
-    //    conteneur d'objet ouvert est LIBRE.
+    // ⚠️ CINQ DES SIX CONTOURNEMENTS ÉTAIENT DÉJÀ FERMÉS. `estTexteLibre()` ne
+    //    traite plus `pattern`, `format` ni `{type:"object"}` comme des
+    //    fermetures : un `format` ne referme qu'au vu d'une liste fermée de
+    //    formats réellement contraignants (`uri` en est exclu nommément), un
+    //    `pattern` ne referme que s'il REJETTE des témoins de prose fabriqués, et
+    //    un conteneur d'objet ouvert est LIBRE.
     //
-    // 🔴 LE SIXIÈME RESTE OUVERT, ET IL EST NOMMÉ. `idFields` est DÉCLARÉ par
-    //    l'adaptateur et confronté à rien — ni au schéma, ni au type du champ.
-    //    Le fermer demande un ARBITRAGE que la recette n'avait pas à prendre :
-    //    un identifiant légitime (`messageId`) est souvent `{"type":"string"}`
-    //    sans motif, et exiger sa fermeture rejetterait de vrais outils. La
-    //    règle appartient au registre, pas à l'étape 11. Écart au rapport.
+    // ✅ **LE SIXIÈME EST FERMÉ AU LOT 1d — ADR 0015.** `idFields` était DÉCLARÉ
+    //    par l'adaptateur et confronté à rien — ni au schéma, ni au type du
+    //    champ —, et l'étape 11 en retirait chaque champ nommé de la liste des
+    //    arguments libres. L'arbitrage a été rendu : ce qui referme un champ est
+    //    le SCHÉMA, et lui seul. Le paramètre a disparu de la signature.
     //
-    //    Le jour où il sera tranché, CE TEST ROUGIT — et c'est ce qu'on veut.
-    expect(passants).toEqual(["`idFields` qui désigne un champ de texte libre"]);
+    //    ⚠️ CE QUE ÇA COÛTE EST ÉCRIT, ET CE N'EST PAS NUL : un `messageId`
+    //       légitime déclaré `{"type":"string"}` sans motif redevient un argument
+    //       libre, donc une confirmation là où l'adaptateur n'en attendait pas —
+    //       dans une session DÉJÀ marquée par une lecture `personal` seulement.
+    //       Le remède est une ligne de Zod chez l'adaptateur (`.uuid()`, un
+    //       `pattern` ancré), et l'admission le lui ANNONCE sans le refuser
+    //       (`idFieldsSansEffet`, `core/registry/enregistrer.ts`).
+    //
+    // ⚠️ **CE TÉMOIN N'EST PAS DEVENU DÉCORATIF.** Le schéma F déclare toujours
+    //    `idFields: ["requete"]` — la déclaration existe encore, elle est
+    //    simplement sans effet. Le jour où une exonération reviendrait, ce compte
+    //    remonterait à 1 et ce test rougirait, exactement comme avant.
+    expect(passants).toEqual([]);
   });
 
   it("les deux premiers témoins PROUVENT que la garde sait mordre", () => {
     // Sans ce cliquet, « six contournements sur huit » pourrait vouloir dire
     // « la dérivation ne fonctionne pas du tout ».
     for (const temoin of TEMOINS_SCHEMA.slice(0, 2)) {
-      const analyse = analyserArgumentsDuSchema(temoin.schema, temoin.idFields);
+      const analyse = analyserArgumentsDuSchema(temoin.schema, AUCUN_CHAMP_DE_GOUVERNANCE);
       expect(analyse.porteUnArgumentLibre, temoin.nom).toBe(true);
       expect(passe(contexte({ porteUnArgumentLibre: true })), temoin.nom).toBe(false);
     }
@@ -477,7 +495,7 @@ describe("§ 18 — exfiltration par les arguments : renommer l'argument de gouv
       emailTo: { type: "string", format: "email" },
       corps: { type: "string" },
     });
-    const analyse = analyserArgumentsDuSchema(schema, []);
+    const analyse = analyserArgumentsDuSchema(schema, AUCUN_CHAMP_DE_GOUVERNANCE);
 
     console.log(
       `[témoin emailTo] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
@@ -536,23 +554,42 @@ describe("§ 18 — exfiltration par les arguments : changer de `sessionId` entr
    * garde d'exfiltration ne voit plus rien à confronter.
    */
   it("lire sous une session puis appeler sous une autre annule entièrement l'étape 11", () => {
+    // ⚠️ **CE QUE CE TÉMOIN MESURE A CHANGÉ DE NATURE — ADR 0014, LOT 1d.** Les
+    //    deux sessions ci-dessous sont désormais des `SessionId`, frappées par la
+    //    fabrique NOMMÉE des témoins. Un test PEUT encore en frapper deux : c'est
+    //    le propre de `core/identite/fixtures.ts`, et le retirer rendrait ce
+    //    fichier incapable de décrire l'attaque.
+    //
+    //    Ce qui est fermé n'est donc pas mesuré ici, et il faut l'écrire : c'est
+    //    qu'AUCUN CHEMIN CONTRÔLÉ PAR L'APPELANT ne produit plus une `SessionId`
+    //    — ni `input` (contrôle 7 du § 09), ni `AppelEntrant`, ni un paramètre de
+    //    transport. La preuve est un GRAPHE D'IMPORTS, pas un verdict : gardes G2
+    //    et G3 de `core/chaine/identite.spec.ts`.
+    //
+    //    Ce témoin-ci garde son rôle propre, et il est intact : il montre que
+    //    l'index ne rattrape RIEN de lui-même. Le jour où quelqu'un rouvrirait le
+    //    choix de la session côté transport, l'attaque redeviendrait celle-ci,
+    //    mot pour mot.
+    const sessionDeLecture: SessionId = sessionIdDeTemoin();
+    const sessionSuivante: SessionId = sessionIdDeTemoin();
+
     const index = new IndexProvenanceMemoire();
     marquerResultat(index, {
-      sessionId: "session-de-lecture",
+      sessionId: sessionDeLecture,
       adapterId: DOMAINE_LU,
       dataClass: "personal",
       empreintes: ["empreinte-de-l-extrait-lu"],
     });
 
     const memeSession: ContexteProvenance = {
-      sessionId: "session-de-lecture",
+      sessionId: sessionDeLecture,
       adapterId: DOMAINE_TIERS,
       porteUnArgumentLibre: true,
       porteUnArgumentDeGouvernance: true,
       niveau: "brouillon",
       index,
     };
-    const sessionRenouvelee: ContexteProvenance = { ...memeSession, sessionId: "session-suivante" };
+    const sessionRenouvelee: ContexteProvenance = { ...memeSession, sessionId: sessionSuivante };
 
     // L'index reste PEUPLÉ : ce n'est pas une marque perdue, c'est une marque
     // qu'on ne cherche plus au bon endroit. Sans ce compte, un verdict
@@ -572,7 +609,10 @@ describe("§ 18 — exfiltration par les arguments : changer de `sessionId` entr
 
     // Le cliquet : sous la BONNE session, même la branche « JAMAIS » mord.
     expect(etape11Provenance(memeSession).issue).toBe("refuse");
-    // 🔴 Sous une session renouvelée, plus rien. Un identifiant changé suffit.
+    // 🔴 Sous une session renouvelée, plus rien — l'index ne rattrape rien de
+    //    lui-même, et c'est ce que ce fichier mesure. Ce qui a changé au lot 1d
+    //    est que l'appelant n'a plus AUCUN moyen d'en frapper une seconde ; voir
+    //    la garde G1 de `core/chaine/identite.spec.ts`, qui porte cette preuve-là.
     expect(etape11Provenance(sessionRenouvelee).issue).toBe("autorise");
   });
 });

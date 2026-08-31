@@ -13,6 +13,21 @@
  *           § 15 (codes d'erreur), § 19 (identité), § 20 (garde-fous).
  */
 
+/**
+ * ⚠️ L'UNIQUE IMPORT DE CE FICHIER, ET IL EST DE TYPE — ADR 0014.
+ *
+ * La règle de tenue ci-dessus tient encore : ce module ne dépend d'AUCUNE
+ * valeur, il n'exécute rien au chargement, et `core/identite/session.ts`
+ * n'importe lui-même que `node:crypto`. Aucun cycle n'est possible.
+ *
+ * Un import DE TYPE plutôt que de valeur, et ce n'est pas un détail de style :
+ * la garde G2 de l'ADR 0014 refuse à tout module livré hors de
+ * `core/identite/` d'importer une VALEUR d'ici — le droit de FRAPPER une
+ * session. Nommer le type n'est pas ce droit-là, et la garde fait la
+ * différence.
+ */
+import type { SessionId } from "./identite/session.js";
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  Effect — § 09
 // ═════════════════════════════════════════════════════════════════════════════
@@ -233,13 +248,20 @@ export interface ToolContext<TProfile extends string = string> {
    *       redéclare une. `sessionId` en fait partie depuis toujours ;
    *     · le TRANSPORT — ouverte, et c'est ce que l'ADR 0014 ferme.
    *
-   * 🔧 **TYPE À RESSERRER PAR LE CONSTRUCTEUR ① :** `SessionId`, le type marqué
-   *    de `core/identite/session.ts`. La Fondation ne peut pas le poser ici tant
-   *    que la fabrique n'existe pas — elle ne saurait ni la dériver ni la
-   *    recopier, ce qui est exactement le motif qui laisse `TProfile` ouvert
-   *    ci-dessus.
+   * ✅ **TYPE RESSERRÉ — ADR 0014, LOT 1d.** {@link SessionId}, le type marqué de
+   *    `core/identite/session.ts`. La Fondation ne pouvait pas le poser tant que
+   *    la fabrique n'existait pas ; elle existe. La moitié TRANSPORT du verrou
+   *    se ferme ici : un `ctx` fabriqué à partir d'une chaîne venue du réseau
+   *    **ne compile plus**.
+   *
+   * ⚠️ CE RESSERREMENT NE CHANGE RIEN AU CONTRÔLE 7 DU § 09, ET IL FALLAIT LE
+   *    VÉRIFIER. `clesDAutorisationDepuisSource()` dérive les noms interdits des
+   *    NOMS DE PROPRIÉTÉ lus dans le source de ce fichier — son motif s'arrête au
+   *    `:`, il ne lit jamais le type. `sessionId` reste donc refusé dans tout
+   *    schéma d'entrée, et le plancher-témoin de la dérivation le dirait s'il
+   *    cessait de l'être.
    */
-  readonly sessionId: string;
+  readonly sessionId: SessionId;
 
   /** § 19.2 — ce que le jeton autorise EN PRINCIPE. */
   readonly scopes: readonly OpsScope[];
@@ -254,21 +276,228 @@ export interface ToolContext<TProfile extends string = string> {
   readonly profile: TProfile;
 
   /**
-   * § 20 — la clé d'idempotence voyage ICI, JAMAIS DANS `input`.
-   * `null` quand l'outil déclare `idempotency: "n/a"`.
+   * § 20 — l'EMPREINTE de la clé d'idempotence. **JAMAIS LA CLÉ — ADR 0020.**
+   *
+   * `null` quand l'outil déclare `idempotency: "n/a"`, ou quand l'appel n'en
+   * porte aucune. Sinon soixante-quatre caractères hexadécimaux minuscules,
+   * calculés par `empreinteDeCleDIdempotence` (`core/limits/idempotency.ts`).
+   *
+   * ⚠️ **CE CHAMP A PORTÉ LA CLÉ BRUTE, ET C'ÉTAIT UN CANAL.** L'anti-exfiltration
+   *    du § 20 (étape 11) dérive « cet appel porte-t-il un argument libre ? » du
+   *    SEUL `inputSchema`. La clé d'idempotence, elle, est une chaîne choisie
+   *    librement par l'appelant qui voyage HORS d'`input` — c'est même le point du
+   *    § 20 — et elle atteignait l'adaptateur telle quelle. Un appel vers un outil
+   *    dont le schéma ne déclare aucun champ libre traversait donc l'étape 11 avec
+   *    `porteUnArgumentLibre: false` en remettant une chaîne arbitraire à
+   *    l'adaptateur. La garde était exacte sur son périmètre, et son périmètre
+   *    n'était pas celui qu'on croyait.
+   *
+   * ⚠️ **POURQUOI UNE EMPREINTE ET NON UN RETRAIT PUR.** Un adaptateur qui relaie
+   *    vers une API tierce portant sa propre idempotence a besoin d'un jeton
+   *    STABLE par appel — et les outils concernés sont précisément les `send`.
+   *    L'empreinte sert ce besoin à l'identique et REFERME le canal : l'appelant
+   *    choisit le préimage, jamais le condensat.
+   *
+   * ⚠️ **ET LE NOM EST LUI-MÊME UNE GARDE.** Un champ nommé `idempotencyKey` qui
+   *    ne porterait plus la clé serait un mensonge de type, et il survivrait à
+   *    toutes les relectures. `idempotencyRef` dit ce qu'il contient, et le
+   *    compilateur casse chez tout appelant qui croyait tenir la clé.
+   *
+   * ⚠️ **LE NOM RETIRÉ NE SORT PAS DE LA GARDE :** voir
+   *    {@link NOMS_RESERVES_HORS_CONTEXTE}. Sans lui, ce retrait aurait ROUVERT
+   *    un canal en en fermant un autre, et en silence.
    */
-  readonly idempotencyKey: string | null;
+  readonly idempotencyRef: string | null;
 
-  /** Identifiant de corrélation. C'est lui, et lui seul, que rend `internal`
-   *  (§ 15) — jamais une trace de pile. */
+  /**
+   * Identifiant de corrélation. C'est lui, et lui seul, que rend `internal`
+   * (§ 15) — jamais une trace de pile.
+   *
+   * 🔴 **IL EST FRAPPÉ PAR LE SOCLE, JAMAIS RECOPIÉ D'UNE VALEUR REÇUE —
+   *    ADR 0020.** Ni un en-tête client, ni l'`id` d'une enveloppe JSON-RPC. Un
+   *    identifiant de corrélation recopié est deux choses à la fois : une chaîne
+   *    libre de plusieurs dizaines d'octets choisie par l'appelant — donc le même
+   *    canal que celui qu'`idempotencyRef` vient de fermer — et un identifiant
+   *    qui cesse d'être unique dès que le client en réutilise un.
+   *
+   *    C'est le motif exact de l'ADR 0014 appliqué au SECOND identifiant du `ctx`.
+   *    La règle est posée AVANT que `core/transport/` existe : c'est le moment le
+   *    moins cher de la vie du projet, et le seul où elle ne coûte aucune
+   *    migration. Sa COUTURE appartient au transport, et le registre des coutures
+   *    (ADR 0019) la surveille sous l'ADR 0001.
+   */
   readonly requestId: string;
 
-  /** Échéance au-delà de laquelle le handler doit abandonner. */
+  /**
+   * Échéance au-delà de laquelle le handler doit abandonner.
+   *
+   * 🔴 **ELLE EST CALCULÉE PAR LE SOCLE — ADR 0020.** `maintenant()` plus un
+   *    budget borné par l'outil, jamais un horodatage reçu recopié tel quel. Un
+   *    `Date` recopié est une valeur de plusieurs dizaines de bits choisie par
+   *    l'appelant, et elle atteint l'adaptateur. Même remarque que pour
+   *    `requestId` : la règle est posée avant le transport, sa couture y
+   *    appartient, et le registre des coutures la surveille.
+   */
   readonly deadline: Date;
 
   /** § 19 bis — calculé PAR LE SOCLE. Un handler ne le reconstitue jamais. */
   readonly habilitations: Habilitations;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Les noms que `ToolContext` ne porte PLUS — ADR 0020
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * NOMS QU'UN SCHÉMA D'ENTRÉE NE PEUT PAS PORTER, ET QUE `ToolContext` NE PORTE
+ * PLUS. **ADR 0020, et ce tableau est OBLIGATOIRE avec le retrait.**
+ *
+ * ═══ LE PIÈGE QU'IL REFERME, ET IL N'EN EXISTE AUCUNE TRACE AILLEURS ═══
+ *
+ * Le contrôle 7 du § 09 (`core/adapter-kit/autorisation.ts`) DÉRIVE sa liste de
+ * noms interdits des propriétés de {@link ToolContext}, lues dans le SOURCE de ce
+ * fichier. C'est ce qui interdit à un schéma d'entrée de déclarer un champ
+ * `idempotencyKey` — la règle que le § 20 énonce en toutes lettres, « la clé
+ * voyage dans `ctx`, JAMAIS dans `input` ».
+ *
+ * **Retirer la propriété retire donc le nom de la liste, EN SILENCE.** La
+ * décision qui ferme un canal en aurait ouvert un autre, et aucune garde
+ * n'aurait bronché : le contrôle serait resté vert, simplement plus étroit d'un
+ * nom. C'est le mode de défaillance le plus coûteux qu'on connaisse ici — une
+ * garde qui rétrécit sans changer de couleur.
+ *
+ * ⚠️ **UN NOM N'EN SORT JAMAIS PARCE QU'IL A DISPARU DU TYPE.** C'est
+ *    exactement l'inverse : il y ENTRE le jour où il quitte `ToolContext`. Ce
+ *    tableau ne se vide pas, il s'allonge.
+ *
+ * ⚠️ **CE QU'IL NE PROUVE PAS.** Il compare des NOMS. Un champ d'entrée nommé
+ *    autrement transporte la même chose et passe — c'est la borne déjà écrite du
+ *    contrôle 7, et elle vaut ici mot pour mot.
+ */
+export const NOMS_RESERVES_HORS_CONTEXTE = ["idempotencyKey"] as const;
+
+/** Un nom que `ToolContext` a porté et ne porte plus. */
+export type NomReserveHorsContexte = (typeof NOMS_RESERVES_HORS_CONTEXTE)[number];
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  L'INVENTAIRE DES CANAUX DU `ctx` — ADR 0020
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * SOUS QUEL RÉGIME UN CHAMP DU `ctx` ATTEINT L'ADAPTATEUR.
+ *
+ * ═══ LA MÉTHODE D'ABORD, PARCE QU'ELLE VAUT PLUS QUE LA LISTE ═══
+ *
+ * Ce qui atteint un adaptateur est DÉRIVABLE, sans inspection et sans reste :
+ * `AppelAdaptateur` a exactement deux paramètres — le `ctx` et l'entrée
+ * VALIDÉE. L'entrée validée est le périmètre que le § 20 voit déjà (étape 11,
+ * `porteUnArgumentLibre`). **L'inventaire des canaux INVISIBLES est donc,
+ * exactement, les propriétés de {@link ToolContext}.**
+ *
+ * Le défaut d'`idempotencyKey` n'a pas été trouvé en inspectant du code : il a
+ * été trouvé en fermant cette liste. C'est pour qu'elle reste fermée que le
+ * régime de chaque champ est ÉCRIT.
+ */
+export const REGIMES_DE_CANAL = [
+  /** Le TYPE ferme le canal : type marqué, union fermée, booléen calculé. */
+  "fermé-par-construction",
+  /** Le champ porte une chaîne, mais c'est LE SOCLE qui l'écrit, pas l'appelant. */
+  "fermé-par-le-socle",
+  /** La règle est posée ; sa COUTURE appartient à `core/transport/`, qui n'existe pas. */
+  "à-fermer-au-transport",
+  /** Canal RÉEL, non refermé, écart assumé et daté. */
+  "ouvert-signalé",
+] as const;
+
+export type RegimeDeCanal = (typeof REGIMES_DE_CANAL)[number];
+
+/** Le régime d'un champ, et le MOTIF qui le justifie. Le motif est obligatoire. */
+export interface StatutDeCanal {
+  readonly regime: RegimeDeCanal;
+  /** Pourquoi. Une garde refuse un motif vide : un régime sans motif est une opinion. */
+  readonly motif: string;
+}
+
+/**
+ * LE RÉGIME DE CHACUN DES CHAMPS DU `ctx` — ADR 0020.
+ *
+ * ⚠️ **C'EST `keyof ToolContext` QUI FAIT LA TOTALITÉ, PAS CETTE LISTE.** Ajouter
+ *    un champ à {@link ToolContext} sans le classer ici est une **erreur de
+ *    compilation** ; en classer un qui n'existe pas aussi. Un tableau écrit à la
+ *    main aurait vieilli en silence — c'est précisément ce qui est arrivé au
+ *    canal `idempotencyKey`, resté hors de tout inventaire pendant trois lots.
+ *
+ * ⚠️ **ET LA GARDE CONFRONTE CE TYPE AU SOURCE.** `core/types.canaux.temoin.spec.ts`
+ *    relit les propriétés dans le SOURCE de ce fichier — la même lecture que le
+ *    contrôle 7 du § 09 — et vérifie deux choses : que les deux dérivations
+ *    voient les mêmes champs, et qu'aucun champ déclaré `fermé-par-construction`
+ *    ne porte en réalité une chaîne libre. Une seule des deux ne suffirait pas :
+ *    le type dit la TOTALITÉ, le source dit le TYPE RÉEL de chaque champ.
+ */
+export const STATUT_DES_CANAUX_DE_CONTEXTE: Readonly<Record<keyof ToolContext, StatutDeCanal>> = {
+  principal: {
+    regime: "ouvert-signalé",
+    motif:
+      "Sa forme n'est bornée par rien, parce que rien ne l'émet : l'émetteur de jetons est " +
+      "l'ADR 0001, et `core/auth/` n'existe pas. Un principal est une valeur d'annuaire et " +
+      "non une chaîne libre, mais cela n'est écrit nulle part et aucune garde ne le tient. " +
+      "À trancher AVEC l'émetteur, pas avant : une borne posée ici serait devinée.",
+  },
+  sessionId: {
+    regime: "fermé-par-construction",
+    motif:
+      "`SessionId` est un type MARQUÉ (ADR 0014) : une chaîne venue du réseau ne compile pas " +
+      "à cette place. Le socle la frappe, il ne l'accepte jamais du client.",
+  },
+  scopes: {
+    regime: "fermé-par-construction",
+    motif: "`readonly OpsScope[]` — énumération FERMÉE du § 19.2. Aucun texte ne s'y encode.",
+  },
+  policyLevel: {
+    regime: "fermé-par-construction",
+    motif:
+      "`PolicyLevel` — trois valeurs, et c'est le socle qui les CALCULE à l'étape 10 (§ 12, " +
+      "règle 1). Un niveau hors énumération replie sur le plus strict.",
+  },
+  profile: {
+    regime: "fermé-par-construction",
+    motif:
+      "Resserré en `ProfileName` par `core/profiles/` — énumération fermée, lue dans " +
+      "`ops_runtime` à l'étape 7. Le paramètre reste ouvert ICI pour que la Fondation ne " +
+      "recopie pas une liste qu'elle ne peut pas dériver ; les adaptateurs n'emploient que " +
+      "la forme resserrée.",
+  },
+  idempotencyRef: {
+    regime: "fermé-par-le-socle",
+    motif:
+      "Le champ porte bien une chaîne, mais c'est un CONDENSAT SHA-256 que le socle calcule : " +
+      "l'appelant choisit le préimage, jamais le condensat. Aucun extrait marqué ne survit à " +
+      "un SHA-256. C'était le seul canal ouvert du `ctx`, et l'ADR 0020 le referme.",
+  },
+  requestId: {
+    regime: "à-fermer-au-transport",
+    motif:
+      "FRAPPÉ par le socle, jamais recopié d'un en-tête client ni de l'`id` d'une enveloppe " +
+      "JSON-RPC. La règle est posée ; les étapes 1 à 4 (« HTTP seul ») se passent dans " +
+      "`core/transport/`, qui n'existe pas. Le registre des coutures la surveille sous " +
+      "l'ADR 0001 : c'est là qu'elle devra être cousue.",
+  },
+  deadline: {
+    regime: "à-fermer-au-transport",
+    motif:
+      "CALCULÉE par le socle — `maintenant()` plus un budget borné par l'outil —, jamais un " +
+      "horodatage reçu recopié tel quel : un `Date` recopié est une valeur de plusieurs " +
+      "dizaines de bits choisie par l'appelant. Même borne que `requestId` : le transport " +
+      "n'existe pas, la couture y appartient.",
+  },
+  habilitations: {
+    regime: "fermé-par-construction",
+    motif:
+      "Un objet de booléens CALCULÉS par le socle (§ 19 bis). Un drapeau nouveau s'ajoute " +
+      "dans `Habilitations`, jamais dans un `input` — et le contrôle 7 en dérive aussi ses " +
+      "noms interdits.",
+  },
+};
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  ErrorCode — § 15

@@ -47,6 +47,8 @@
 
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+
 import type { Habilitations, OpsScope, PolicyLevel } from "../types.js";
 import { Journal, JournalMemoire, type LigneAudit } from "../audit/index.js";
 import { verifierAucunContenu } from "../audit/contenu.js";
@@ -56,6 +58,10 @@ import { ARG_HASH_NON_LU } from "../audit/vocabulaire.js";
 import type { LigneAAjouter, LigneEcrite } from "../audit/vocabulaire.js";
 import type { JournalStore } from "../audit/ports.js";
 import { correspondance } from "./outils.js";
+// ADR 0020 — `ops_idempotency.key` porte l'EMPREINTE de la clé, jamais la clé.
+// Une garde qui interrogerait le dépôt par la chaîne d'origine ne trouverait
+// RIEN, et lirait ce vide comme « la clé n'a jamais été prise ».
+import { empreinteDeCleDIdempotence } from "../limits/index.js";
 import type {
   CalculArgHash,
   DemandeIncrement,
@@ -158,6 +164,8 @@ function outilTemoin(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogu
     compaction: { free: [], tier2: [], aggregateBy: null },
     maxBytes: 4096,
     idFields: [],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
   };
   return { ...base, ...surcharge };
 }
@@ -459,7 +467,9 @@ function fabriquerHarnais(reglages: Reglages = {}): Harnais {
         scopes: identiteRecue.scopes,
         policyLevel: niveau,
         profile: profil,
-        idempotencyKey: appel.idempotencyKey,
+        // ADR 0020 — le `ctx` ne porte PLUS la clé. C'est l'orchestrateur, en
+        // production, qui pose `idempotencyRef` (l'empreinte) ; un constructeur
+        // de contexte ne le peut plus, et le type le lui interdit.
         requestId: identiteRecue.requestId,
         deadline: identiteRecue.deadline,
         habilitations: identiteRecue.habilitations,
@@ -668,7 +678,10 @@ describe("§ 11 — l'invariant de sortie face à ce que l'adaptateur rend", () 
     });
 
     const issue = await issueDe(harnais, appelTemoin({ idempotencyKey: "cle-panne-journal" }));
-    const idem = await harnais.idempotence.lire("temoin.lire", "cle-panne-journal");
+    const idem = await harnais.idempotence.lire(
+      "temoin.lire",
+      empreinteDeCleDIdempotence("cle-panne-journal"),
+    );
 
     console.log(
       `[garde journal en panne] ${String(store.tentatives)} tentative(s) d'écriture mesurée(s) — ` +
@@ -717,7 +730,10 @@ describe("§ 11 — l'invariant de sortie face à ce que l'adaptateur rend", () 
     });
 
     const issue = await issueDe(harnais, appelTemoin({ idempotencyKey: "cle-intention" }));
-    const idem = await harnais.idempotence.lire("temoin.lire", "cle-intention");
+    const idem = await harnais.idempotence.lire(
+      "temoin.lire",
+      empreinteDeCleDIdempotence("cle-intention"),
+    );
 
     console.log(
       "[garde clôtures] 2 clôtures attendues dans le bloc `finally`, statut d'idempotence mesuré : " +
@@ -1348,7 +1364,10 @@ describe("§ 13.3 — une charge démesurée doit être refusée, et coûter ce 
       harnais.deps,
     );
     const ecrites = lignes(harnais.store);
-    const idem = await harnais.idempotence.lire("temoin.lire", "cle-demesuree");
+    const idem = await harnais.idempotence.lire(
+      "temoin.lire",
+      empreinteDeCleDIdempotence("cle-demesuree"),
+    );
 
     console.log(
       `[garde charge démesurée] ${String(items.length)} élément(s) mesuré(s), ~` +

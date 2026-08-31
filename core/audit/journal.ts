@@ -43,6 +43,9 @@ import { calculerSelfHash } from "./canonique.js";
 import type { Horloge, JournalStore, ScelleurJournal } from "./ports.js";
 import { HORLOGE_SYSTEME } from "./ports.js";
 import type { ContenuLigne, Decision, LigneEcrite, Outcome, Terminaison } from "./vocabulaire.js";
+// ADR 0014 — import de TYPE : nommer `SessionId` n'est pas le droit d'en frapper
+// une, et la garde G2 refuse l'import de VALEUR, pas celui du nom.
+import type { SessionId } from "../identite/session.js";
 import {
   ARG_HASH_NON_LU,
   ARG_HASH_NON_VALIDE,
@@ -158,7 +161,14 @@ export class Journal {
  */
 export interface EnteteAppel {
   readonly principal: string;
-  readonly sessionId: string;
+  /**
+   * ✅ **TYPE RESSERRÉ — ADR 0014, LOT 1d.** Un en-tête d'appel décrit un APPEL :
+   * il a donc toujours une session de pilotage, frappée par le socle. C'est la
+   * ligne de CLÔTURE (`cloture.ts`) qui n'en a pas, et elle ne passe pas par ici —
+   * elle porte `SESSION_HORS_APPEL`, l'autre membre de l'union de
+   * `ContenuLigne.sessionId`.
+   */
+  readonly sessionId: SessionId;
   readonly tool: string;
   readonly toolVersion: string;
   readonly adapterVersion: string;
@@ -183,7 +193,7 @@ export interface EnteteAppel {
  *    balayage de port. TOUTE mesure d'effets doit donc EXCLURE les lignes dont
  *    le `tool` vaut `OUTIL_INCONNU`. Écart signalé au rapport.
  */
-export function enteteAvantIdentification(principal: string, sessionId: string): EnteteAppel {
+export function enteteAvantIdentification(principal: string, sessionId: SessionId): EnteteAppel {
   return {
     principal,
     sessionId,
@@ -225,21 +235,53 @@ export type AffineurDEntete = (argHashValide: string) => void;
 export type SignalEffetExterieur = () => void;
 
 /**
- * CE QUE LE CORPS REÇOIT — ADR 0017, câblé au lot 1d.
+ * LA LECTURE DU CLIQUET — **ADR 0021.**
+ *
+ * ⚠️ **ELLE NE PEUT NI LEVER NI BAISSER LE CLIQUET.** C'est une fonction SANS
+ *    ARGUMENT qui rend un booléen : le sens unique de l'ADR 0017 est intact, et
+ *    {@link SignalEffetExterieur} garde son appelant unique.
+ *
+ * ⚠️ **POURQUOI LE LECTEUR VIT ICI, ET NULLE PART AILLEURS.** Le cliquet est une
+ *    variable de la fermeture d'{@link avecJournal}. L'orchestrateur, qui a
+ *    besoin de la réponse dans son `finally` pour décider de l'issue
+ *    d'idempotence, n'a que le SIGNAL. Trois autres emplacements ont été pesés et
+ *    écartés (ADR 0021) : une variable tenue EN PARALLÈLE dans l'orchestrateur —
+ *    deux dérivations d'un même fait, qui finissent par se contredire ; un
+ *    cliquet rendu mutable et lisible (`{ get, set }`) — un objet qui expose son
+ *    état invite à l'écrire ; la lecture de `ligne.externalEffect` après coup —
+ *    impossible, la ligne s'écrit APRÈS le `finally` qui a besoin de la réponse.
+ */
+export type LecteurEffetExterieur = () => boolean;
+
+/**
+ * CE QUE LE CORPS REÇOIT — ADR 0017, câblé au lot 1c ; **troisième membre au
+ * lot 1d (ADR 0021).**
  *
  * C'est le paramètre UNIQUE de `corps` : `corps: (affineurs: AffineursDAppel)
  * => Promise<Terminaison<T>>`. Un objet plutôt qu'un second paramètre
  * positionnel, pour qu'un troisième affineur — il y en aura — n'oblige personne
- * à relire l'ordre des arguments.
+ * à relire l'ordre des arguments. **C'était celui-là**, et la forme n'a pas eu à
+ * être trouvée : elle était décidée.
  *
- * ⚠️ CE QUE CET OBJET N'EST PAS : un sac de réglages. Chacun de ses membres est
- *    un point de MUTATION de la ligne qui sera écrite, et il n'existe qu'UN
- *    endroit où chacun mute. C'est ce qui rend l'affirmation « la ligne dit ce
- *    qui s'est passé » démontrable plutôt que crue sur parole.
+ * ⚠️ CE QUE CET OBJET N'EST PAS : un sac de réglages. C'est ce que le corps
+ *    reçoit pour CONNAÎTRE et pour AFFINER la ligne qui sera écrite.
+ *
+ * ⚠️ **CETTE PHRASE A ÉTÉ RÉÉCRITE, ET LE MOTIF COMPTE.** Elle disait : « chacun
+ *    de ses membres est un point de MUTATION de la ligne ». Elle est devenue
+ *    fausse d'un tiers le jour où {@link LecteurEffetExterieur} est entré — il ne
+ *    mute rien. Une phrase fausse sur un contrat est précisément ce qui fait
+ *    supprimer la garde suivante ; on la réécrit plutôt que de la laisser.
+ *
+ *    La règle qu'elle portait, elle, tient toujours et vaut d'être dite à part :
+ *    **pour chaque membre qui MUTE, il n'existe qu'UN endroit où la valeur
+ *    change.** C'est vrai d'`affinerArgHash` et de `signalerEffetExterieur` ;
+ *    `effetExterieurSurvenu` n'en mute aucune, et ne peut pas en muter.
  */
 export interface AffineursDAppel {
   readonly affinerArgHash: AffineurDEntete;
   readonly signalerEffetExterieur: SignalEffetExterieur;
+  /** ADR 0021 — la LECTURE du cliquet. Elle ne mute rien, et ne le peut pas. */
+  readonly effetExterieurSurvenu: LecteurEffetExterieur;
 }
 
 /** Ce que `avecJournal` rend : la terminaison, ET la ligne qui l'atteste. */
@@ -427,7 +469,18 @@ export async function avecJournal<T>(
     effetExterieurSurvenu = true;
   };
 
-  const affineurs: AffineursDAppel = { affinerArgHash, signalerEffetExterieur };
+  /**
+   * ADR 0021 — LA MÊME VARIABLE, LUE. Pas une copie, pas un second état : la
+   * fermeture qui porte le cliquet est aussi celle qui le rend lisible, et c'est
+   * ce qui interdit à un lecteur et à un cliquet de se contredire.
+   */
+  const lireEffetExterieur: LecteurEffetExterieur = (): boolean => effetExterieurSurvenu;
+
+  const affineurs: AffineursDAppel = {
+    affinerArgHash,
+    signalerEffetExterieur,
+    effetExterieurSurvenu: lireEffetExterieur,
+  };
 
   const ecrire = async (terminaison: Terminaison<T> | null): Promise<LigneEcrite> => {
     const fin = journal.horloge.maintenant();

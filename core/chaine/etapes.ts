@@ -74,6 +74,9 @@ import type {
   PolicyLevel,
 } from "../types.js";
 import type { AnnotationsCompaction, Pagination } from "../adapter-kit/types.js";
+// ADR 0014 — import de TYPE, jamais de valeur : nommer `SessionId` n'est pas le
+// droit d'en frapper une, et la garde G2 fait la différence.
+import type { SessionId } from "../identite/session.js";
 import type { DefinitionOutil, ProfileName } from "../profiles/index.js";
 import type { Outcome } from "../audit/index.js";
 import { MODULES_ETAPES_CHAINE } from "./modules.js";
@@ -330,18 +333,40 @@ export interface OutilDuCatalogue extends DefinitionOutil {
    *    § 20 : ce qui referme un champ d'entrée est le SCHÉMA, et lui seul. Voir
    *    `core/adapter-kit/types.ts`, `idFields`.
    *
-   * 🔧 **À RETIRER DE `ContexteProvenance` PAR LE CONSTRUCTEUR ②**, avec le
-   *    paramètre `idFields` d'`analyserArgumentsDuSchema()` : tant que la
-   *    signature l'accepte, un appelant peut le renseigner et rouvrir le trou.
+   * ✅ **LE PARAMÈTRE `idFields` D'`analyserArgumentsDuSchema()` A DISPARU** de
+   *    la signature (lot 1d) : tant qu'elle l'acceptait, un appelant pouvait le
+   *    renseigner et rouvrir le trou. Ce champ ne sert donc plus qu'au § 12.
    */
   readonly idFields: readonly string[];
   /**
-   * 🔧 **CHAMP À AJOUTER PAR LE CONSTRUCTEUR ③ — ADR 0016.**
-   * `governanceFields: readonly string[]`, propagé depuis `ops_tool`, cumulé
-   * PAR UNION avec la reconnaissance par nom de `FAMILLES_GOUVERNANCE`. Une
-   * déclaration ne peut qu'AJOUTER des champs surveillés. Voir
-   * `core/adapter-kit/types.ts`, `ChampsDeGouvernanceDeclares`.
+   * § 09 — les champs d'entrée que l'outil DÉCLARE de gouvernance (ADR 0016).
+   *
+   * ⚠️ **UNE DÉCLARATION NE PEUT QU'AJOUTER — C'EST L'EXACT INVERSE
+   *    D'`idFields`.** Le filet au nom (`FAMILLES_GOUVERNANCE`,
+   *    `etape-11-provenance.ts`) RESTE, et l'étape 11 prend l'UNION des deux
+   *    sources par `cumulerChampsDeGouvernance()`. Un outil ne peut donc pas se
+   *    retirer de la surveillance en déclarant une liste courte : ce que sa
+   *    liste omet, le filet le retient encore. C'est pour cette seule raison
+   *    que la déclaration est CRUE ici alors qu'`idFields` ne l'est plus —
+   *    « resserrer est toujours libre, desserrer ne l'est jamais » (§ 20,
+   *    protection 1).
+   *
+   * ⚠️ **OBLIGATOIRE, ET SA VALEUR NEUTRE PORTE UN NOM** —
+   *    `AUCUN_CHAMP_DE_GOUVERNANCE` (`core/adapter-kit/types.ts`). Le rendre
+   *    facultatif aurait fait de l'arbitrage un oubli : personne n'aurait eu à
+   *    ÉCRIRE qu'il ne déclarait rien, et seul ce qui est écrit se relit en
+   *    revue. C'est le motif d'`INTENTION_NON_ARMEE`, mot pour mot.
+   *
+   * 🔴 **ÉCART SIGNALÉ — `ops_tool` NE PORTE PAS ENCORE LA COLONNE.** L'ADR 0016
+   *    la nomme (`prisma/schema.prisma`, `governanceFields String[]`) ; elle n'y
+   *    est pas, et aucune implémentation de `CatalogueOutils` ne lit Prisma
+   *    aujourd'hui — le port n'a que des doubles en mémoire. La déclaration
+   *    voyage donc du manifeste jusqu'ici PAR LE TYPE, et d'ici jusqu'à
+   *    l'étape 11 par l'orchestrateur ; le dernier tronçon — colonne, migration,
+   *    adaptateur de lecture — reste à poser avec `core/transport/`. Tant qu'il
+   *    manque, la couture est complète sur tout le chemin qui EXISTE.
    */
+  readonly governanceFields: readonly string[];
 }
 
 /**
@@ -536,11 +561,25 @@ export interface IndexProvenance {
    * Marque la session : un résultat de `dataClass` `personal` ou `sensitive`
    * vient d'en sortir. `marqueLaSession()` de `core/types.ts` décide QUELLES
    * classes marquent — cette décision ne se recopie pas ici.
+   *
+   * ✅ **`sessionId` EST UNE {@link SessionId} — ADR 0014, LOT 1d.** C'est LE
+   *    VERROU N° 1 DU § 20, et il portait une `string` jusqu'ici : n'importe
+   *    quelle valeur pouvait ouvrir un casier dans l'index, donc n'importe
+   *    quelle valeur pouvait en ouvrir un SECOND et laisser le premier — marqué
+   *    — derrière elle. Marquer et interroger sont désormais tenus d'employer la
+   *    même monnaie, et cette monnaie ne se frappe qu'en un seul endroit.
    */
-  marquer(sessionId: string, adapterId: string, empreintes: readonly string[]): void;
+  marquer(sessionId: SessionId, adapterId: string, empreintes: readonly string[]): void;
 
-  /** Les domaines (`adapterId`) qui ont marqué cette session. */
-  domainesMarquants(sessionId: string): readonly string[];
+  /**
+   * Les domaines (`adapterId`) qui ont marqué cette session.
+   *
+   * ✅ **RESSERRÉE EN MÊME TEMPS QUE {@link IndexProvenance.marquer} — ADR 0014.**
+   *    Les resserrer séparément n'aurait rien tenu : la garde ne vaut que si les
+   *    DEUX bouts — ce qui pose la marque et ce qui la cherche — refusent la
+   *    même chose.
+   */
+  domainesMarquants(sessionId: SessionId): readonly string[];
 
   /**
    * Le nombre d'extraits indexés, TOUTES SESSIONS CONFONDUES. Signal positif
@@ -567,12 +606,13 @@ export interface IndexProvenance {
  *    aucun compte ne bouge. Le `sessionId` est donc ÉTABLI PAR LE SOCLE et
  *    jamais accepté d'un appelant — voir `core/identite/session.ts`.
  *
- * 🔧 **TYPE À RESSERRER PAR LE CONSTRUCTEUR ① :** `sessionId: SessionId`, le
- *    type marqué de `core/identite/`. Tant qu'il est une `string`, la règle
- *    ci-dessus est une consigne, pas une propriété.
+ * ✅ **TYPE RESSERRÉ — ADR 0014, LOT 1d :** `sessionId: SessionId`, le type marqué
+ *    de `core/identite/`. Tant qu'il était une `string`, la règle ci-dessus
+ *    était une consigne ; c'est maintenant une propriété que la compilation
+ *    tient.
  */
 export interface ContexteProvenance {
-  readonly sessionId: string;
+  readonly sessionId: SessionId;
   /** Le domaine de l'appel COURANT. La règle porte sur « un AUTRE domaine ». */
   readonly adapterId: string;
   /**

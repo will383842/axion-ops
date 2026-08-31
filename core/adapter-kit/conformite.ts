@@ -494,10 +494,18 @@ export async function executerHarnais<TProfile extends string>(
       mesures: manifeste === null ? 0 : manifeste.tools.length,
       plancher: 1,
       anomalies,
+      // ⚠️ TROIS COMPTES, PAS DEUX — ADR 0020. Le troisième ensemble porte les
+      //    noms que `ToolContext` a PORTÉS et ne porte plus. Sans lui annoncé à
+      //    part, un retrait qui rétrécit la garde ne se verrait dans aucun
+      //    chiffre : un total seul ne distingue pas « un nom ajouté ici » de
+      //    « un nom perdu là ».
       detail:
         `${String(proprietesInspectees)} propriété(s) d'entrée confrontée(s) à ` +
-        `${String(interdits.size)} nom(s) interdit(s) dérivé(s) : ` +
-        `${entree.clesDAutorisation.toutes.join(", ")}.`,
+        `${String(interdits.size)} nom(s) interdit(s) dérivé(s) — ` +
+        `${String(entree.clesDAutorisation.toolContext.length)} de \`ToolContext\`, ` +
+        `${String(entree.clesDAutorisation.habilitations.length)} d'\`Habilitations\`, ` +
+        `${String(entree.clesDAutorisation.reservesHorsContexte.length)} réservé(s) hors ` +
+        `contexte : ${entree.clesDAutorisation.toutes.join(", ")}.`,
     });
   }
 

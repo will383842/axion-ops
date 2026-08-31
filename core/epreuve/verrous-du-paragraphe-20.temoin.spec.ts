@@ -60,21 +60,29 @@
  * ce dossier et nommées comme telles.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import type { Habilitations, OpsScope, PolicyLevel } from "../types.js";
 import { Journal, JournalMemoire, type LigneAudit } from "../audit/index.js";
 import { HorlogeFigee, SCELLEUR_TEMOIN } from "../audit/fixtures.js";
 import { lireClesDAutorisation } from "../adapter-kit/autorisation.js";
-import { analyserChampsDeclares } from "../adapter-kit/champs-declares.js";
+import { analyserChampsDeclares, occurrencesDuSchema } from "../adapter-kit/champs-declares.js";
 import { analyserFermeture, chercherChampsDAutorisation } from "../adapter-kit/fermeture.js";
 import { octetsCanoniques, versValeurJson, type ObjetJson } from "../adapter-kit/json.js";
 import { VERSION_MANIFESTE, type Manifeste } from "../adapter-kit/manifest.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 import { PROFILE_NAMES, SCEAU_PROFILS, type ProfileName } from "../profiles/index.js";
 import { enregistrerAdaptateur } from "../registry/enregistrer.js";
 import { empreinteDuManifesteRecu } from "../registry/lock.js";
 import type { VerrouAdaptateurs } from "../registry/types.js";
 import type { NiveauApplique } from "../policy/index.js";
+// ADR 0020 — la section B2 CONFRONTE l'objet reçu par l'adaptateur à l'empreinte
+// que le socle est censé y avoir posée. Elle appelle donc la même fonction que
+// l'orchestrateur, jamais un second SHA-256 écrit dans ce fichier.
+import { empreinteDeCleDIdempotence } from "../limits/index.js";
 import type {
   DemandeIncrement,
   DepotIdempotence,
@@ -112,6 +120,9 @@ import {
   identiteStdio,
   orchestrerAppel,
   type AppelEntrant,
+  // ADR 0020 — ce qu'un constructeur de contexte a le droit de fabriquer.
+  // `idempotencyRef` n'en fait PAS partie : l'orchestrateur le pose lui-même.
+  type ContexteSansEmpreinte,
   type DependancesOrchestrateur,
   type IdentiteAppelante,
   type ReglagesDeLOutil,
@@ -276,6 +287,8 @@ function outilDuCatalogue(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCat
     compaction: { free: [], tier2: [], aggregateBy: null },
     maxBytes: 8192,
     idFields: [],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
   };
   return { ...base, ...surcharge };
 }
@@ -427,18 +440,21 @@ function fabriquerSocle(reglages: Reglages = {}): Harnais {
     fabriqueMasquage(): Masquage {
       return MASQUAGE_NEUTRE;
     },
-    construireContexteOutil(identiteRecue, appel, profil, niveau): ToolContext<ProfileName> {
+    construireContexteOutil(identiteRecue, _appel, profil, niveau): ContexteSansEmpreinte {
       return {
         principal: identiteRecue.principal,
         sessionId: identiteRecue.sessionId,
         scopes: identiteRecue.scopes,
         policyLevel: niveau,
         profile: profil,
-        // ⚠️ RECOPIÉE DEPUIS L'APPEL, ET C'EST LE CONTRAT, PAS UN CHOIX DE CE
-        //    HARNAIS : `ToolContext.idempotencyKey` est déclarée dans
-        //    `core/types.ts`, et sa seule source est `AppelEntrant`. La
-        //    section B2 mesure ce que ce chemin transporte.
-        idempotencyKey: appel.idempotencyKey,
+        // ⚠️ CE HARNAIS NE PEUT PLUS POSER L'EMPREINTE, ET C'EST LA COUTURE —
+        //    ADR 0020. `ConstruireContexteOutil` rend un `ContexteSansEmpreinte` :
+        //    `idempotencyRef` est posé par l'ORCHESTRATEUR, en production, par
+        //    `empreinteDeCleDIdempotence(appel.idempotencyKey)`. Un harnais qui
+        //    voudrait y remettre la clé brute ne compile pas ; s'il l'ajoutait
+        //    comme propriété SURNUMÉRAIRE, la reconstruction champ par champ de
+        //    l'orchestrateur la laisserait dehors. La section B2 mesure ce que ce
+        //    chemin transporte VRAIMENT, sur l'objet reçu par l'adaptateur.
         requestId: identiteRecue.requestId,
         deadline: identiteRecue.deadline,
         habilitations: identiteRecue.habilitations,
@@ -707,7 +723,7 @@ describe("A2 · voie ② — `idFields` déclaré sur un champ de texte libre", 
       ),
     );
 
-    const analyse = analyserArgumentsDuSchema(SCHEMA_DE_L_ATTAQUANT, []);
+    const analyse = analyserArgumentsDuSchema(SCHEMA_DE_L_ATTAQUANT, AUCUN_CHAMP_DE_GOUVERNANCE);
     console.info(
       `[A2 · capacité] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
         `${String(analyse.libres.length)} champ(s) libre(s) dérivé(s) · ` +
@@ -720,64 +736,148 @@ describe("A2 · voie ② — `idFields` déclaré sur un champ de texte libre", 
   });
 
   /**
-   * 🔴 LE CONTOURNEMENT, DE BOUT EN BOUT. **BLOQUANT.**
+   * ✅ **LE CONTOURNEMENT EST FERMÉ — ADR 0015, COUSU AU LOT 1d.**
    *
-   * L'ADR 0015 déclare que « `idFields` n'exonère plus rien », et
-   * `core/adapter-kit/champs-declares.ts` le tient — pour SES appelants. Mais
-   * `core/chaine/etape-11-provenance.ts` n'a pas été rebranché : la signature
-   * `analyserArgumentsDuSchema(inputSchema, idFields)` accepte toujours la
-   * liste, le corps fait toujours `if (identifiants.has(nom)) continue`, et
-   * `orchestrateur.ts` la lui passe toujours depuis `outil.idFields`. Les deux
-   * commentaires 🔧 qui le demandent sont encore dans le source.
+   * Ce témoin a été un `it.fails` BLOQUANT. Il l'était pour une raison précise :
+   * l'ADR 0015 déclarait qu'« `idFields` n'exonère plus rien », et
+   * `core/adapter-kit/champs-declares.ts` le tenait — pour SES appelants
+   * seulement. `core/chaine/etape-11-provenance.ts`, lui, n'avait pas été
+   * rebranché : la signature `analyserArgumentsDuSchema(inputSchema, idFields)`
+   * acceptait encore la liste, le corps faisait encore
+   * `if (identifiants.has(nom)) continue`, et `orchestrateur.ts` la lui passait
+   * depuis `outil.idFields`. **Une décision écrite, testée, documentée — et non
+   * cousue au chemin de production.**
    *
-   * CONSÉQUENCE MESURÉE CI-DESSOUS : une ligne de manifeste suffit à retirer un
-   * champ de texte libre de la surveillance du § 20, sur la branche que ce
-   * paragraphe dit inconditionnelle. C'est le défaut du lot 1b, **inchangé**.
+   * Le paramètre a disparu DE LA SIGNATURE, le `continue` du corps, et l'appel de
+   * l'orchestrateur ne porte plus que deux arguments. La ligne de manifeste ne
+   * retire donc plus rien.
    *
-   * ⚠️ Les assertions de FAIT resteront vraies après le correctif : la session
-   *    est marquée, le schéma déclare une propriété, la déclaration nomme bien
-   *    ce champ. Seule l'issue changera.
+   * ⚠️ **CE TÉMOIN ANNONCE TROIS CHOSES, ET AUCUNE NE SUFFIT SEULE.** Un verdict
+   *    « refusé » s'obtiendrait aussi en refusant pour une autre raison ; le
+   *    compte `analyserArgumentsDuSchema.length` dit combien de paramètres
+   *    OBLIGATOIRES la signature expose ; le champ `requete` retenu dans `libres`
+   *    dit que la déclaration n'a rien retiré.
+   *
+   * 🔴 **LA BORNE DE L'ARITÉ A ÉTÉ MESURÉE, PAS SUPPOSÉE — ET LE PREMIER JET DE
+   *    CE COMMENTAIRE ÉTAIT FAUX.** Il affirmait qu'un paramètre facultatif
+   *    « ferait tomber ce nombre à 1 ». L'expérience a été faite, en reposant
+   *    `idFields: readonly string[] = []` en DERNIÈRE position : `length` est
+   *    resté à **2**, et l'assertion est restée verte. `Function.length` compte
+   *    les paramètres qui PRÉCÈDENT le premier paramètre à valeur par défaut.
+   *
+   *    L'arité ne ferme donc qu'un cas — le troisième paramètre OBLIGATOIRE — et
+   *    c'est écrit ici pour que personne ne lise sa couleur comme une preuve. Le
+   *    reste tient par deux autres choses : la garde de SOURCE ci-dessous, qui ne
+   *    prouve que l'absence de la forme écrite, et le COMPORTEMENT — un paramètre
+   *    rouvert ne nuit que s'il est RENSEIGNÉ, et le renseigner fait rougir ce
+   *    témoin-ci ET la garde G1 de `lot1c-la-couture-manquante.temoin.spec.ts`
+   *    (mesuré : 15 tests rouges sur trois fichiers).
+   *
+   * ⚠️ Les assertions de FAIT n'ont pas bougé, et c'est ce qui prouve que le décor
+   *    est resté le même : la session est marquée, le schéma déclare une
+   *    propriété, la déclaration nomme bien ce champ. Seule l'issue a changé.
    */
-  it.fails(
-    "🔴 § 20 — une déclaration d'adaptateur ne doit PAS retirer un champ de la surveillance",
-    async () => {
-      const outil = outilDuTiers({
-        inputSchema: SCHEMA_DE_L_ATTAQUANT,
-        idFields: ["requete"],
-      });
-      const harnais = fabriquerSocle({ outils: [outilDuCatalogue(), outil] });
+  it("✅ § 20 — une déclaration d'adaptateur ne retire PLUS un champ de la surveillance", async () => {
+    const outil = outilDuTiers({
+      inputSchema: SCHEMA_DE_L_ATTAQUANT,
+      idFields: ["requete"],
+      // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+      governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
+    });
+    const harnais = fabriquerSocle({ outils: [outilDuCatalogue(), outil] });
 
-      await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
-      const resultat = await appeler(
-        harnais,
-        appel({ nomComplet: "annuaire.chercher", input: { requete: CONTENU_LU } }),
-      );
+    await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
+    const resultat = await appeler(
+      harnais,
+      appel({ nomComplet: "annuaire.chercher", input: { requete: CONTENU_LU } }),
+    );
 
-      const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.idFields);
-      const sorties = harnais.recus.filter((recu) => porteLeContenu(recu.entree)).length;
+    const analyse = analyserArgumentsDuSchema(outil.inputSchema, AUCUN_CHAMP_DE_GOUVERNANCE);
+    const sorties = harnais.recus.filter((recu) => porteLeContenu(recu.entree)).length;
 
-      console.info(
-        `[A2 · voie ②] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
-          `${String(analyse.libres.length)} champ(s) libre(s) APRÈS déclaration · ` +
-          `${String(outil.idFields.length)} idFields déclaré(s) · ` +
-          `arité d'analyserArgumentsDuSchema : ${String(analyserArgumentsDuSchema.length)} · ` +
-          `verdict : ${issue(resultat)} · ` +
-          `contenu lu sorti chez le domaine tiers : ${String(sorties)}`,
-      );
+    console.info(
+      `[A2 · voie ②] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
+        `${String(analyse.libres.length)} champ(s) libre(s) APRÈS déclaration · ` +
+        `${String(outil.idFields.length)} idFields déclaré(s) · ` +
+        `arité d'analyserArgumentsDuSchema : ${String(analyserArgumentsDuSchema.length)} · ` +
+        `verdict : ${issue(resultat)} · ` +
+        `contenu lu sorti chez le domaine tiers : ${String(sorties)}`,
+    );
 
-      // Faits qui survivront au correctif.
-      expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
-      expect(analyse.proprietesInspectees, "le schéma déclare une propriété").toBe(1);
-      expect(outil.idFields, "la déclaration nomme bien ce champ").toEqual(["requete"]);
+    // Faits qui survivront au correctif.
+    expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
+    expect(analyse.proprietesInspectees, "le schéma déclare une propriété").toBe(1);
+    expect(outil.idFields, "la déclaration nomme bien ce champ").toEqual(["requete"]);
 
-      // L'ATTENTE DU § 20, celle qui échoue aujourd'hui.
-      expect(sorties, "§ 20 — le contenu lu ne doit pas atteindre le domaine tiers").toBe(0);
-      expect(
-        issue(resultat),
-        "§ 20 — l'étiquetage se décide côté socle, JAMAIS sur déclaration",
-      ).toBe("refusé");
-    },
-  );
+    // L'ATTENTE DU § 20, celle qui échouait jusqu'au lot 1d.
+    expect(sorties, "§ 20 — le contenu lu ne doit pas atteindre le domaine tiers").toBe(0);
+    expect(
+      issue(resultat),
+      "§ 20 — l'étiquetage se décide côté socle, JAMAIS sur déclaration",
+    ).toBe("refusé");
+    // ⚠️ ET LA DÉCLARATION EST TOUJOURS SURVEILLÉE : le champ qu'elle nomme est
+    //    retenu comme LIBRE, ce qui est exactement ce que l'exonération lui
+    //    retirait.
+    expect(
+      analyse.libres.map((champ) => champ.nom),
+      "le champ déclaré identifiant reste un argument libre",
+    ).toEqual(["requete"]);
+    // ⚠️ LE CLIQUET DE STRUCTURE, AVEC SA BORNE ÉCRITE : la signature n'expose
+    //    que deux paramètres OBLIGATOIRES. Ce compte voit un TROISIÈME paramètre
+    //    obligatoire ; il ne voit PAS un facultatif ajouté en dernier — mesuré,
+    //    voir l'en-tête. C'est la garde de source ci-dessous qui prend le relais.
+    expect(
+      analyserArgumentsDuSchema.length,
+      "ADR 0015 — aucun troisième paramètre OBLIGATOIRE",
+    ).toBe(2);
+  });
+
+  /**
+   * LE FILET DE SOURCE — CE QU'IL PROUVE, ET CE QU'IL NE PROUVE PAS.
+   *
+   * ⚠️ **UN `grep` NE PROUVE QUE L'ABSENCE DE LA FORME ÉCRITE.** Une exonération
+   *    remise sous un autre nom (`champsExoneres`, `skipFields`) lui échappe
+   *    entièrement. Ce qui porte la garantie est le comportement — le témoin
+   *    ci-dessus et G1 de `lot1c-la-couture-manquante.temoin.spec.ts` —, et ce
+   *    filet est écrit ici COMME TEL, pour que personne ne lise sa couleur comme
+   *    une preuve.
+   *
+   * Il ferme le seul cas que ni l'arité ni le comportement ne voient : un
+   * `idFields` REPOSÉ EN FACULTATIF et laissé non renseigné, qui ne changerait
+   * aucun verdict aujourd'hui et attendrait le premier appelant qui le remplit.
+   */
+  it("ADR 0015 — la SOURCE de l'étape 11 ne nomme plus d'exonération par déclaration", () => {
+    const chemin = fileURLToPath(new URL("../chaine/etape-11-provenance.ts", import.meta.url));
+    const source = readFileSync(chemin, "utf8");
+
+    // Le corps de la fonction, isolé de son bloc de commentaire : celui-ci
+    // RACONTE le retrait, et le compter serait mesurer la prose au lieu du code.
+    const debut = source.indexOf("export function analyserArgumentsDuSchema(");
+    const signature = source.slice(debut, source.indexOf("{", debut));
+    const corps = source
+      .slice(debut)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*/g, "");
+
+    const idFieldsDansLaSignature = signature.includes("idFields");
+    const exonerationsDansLeCorps = [...corps.matchAll(/identifiants\s*\.\s*has\s*\(/g)].length;
+
+    console.info(
+      `[A2 · filet de source] signature lue : ${String(signature.length)} caractère(s) · ` +
+        `corps lu : ${String(corps.length)} caractère(s) · ` +
+        `« idFields » dans la signature : ${String(idFieldsDansLaSignature)} · ` +
+        `${String(exonerationsDansLeCorps)} exonération(s) « identifiants.has( » dans le corps`,
+    );
+
+    // Planchers : une source qu'on n'aurait pas su découper rendrait deux
+    // chaînes vides, et cette garde serait verte pour n'avoir rien lu.
+    expect(debut, "la fonction doit être trouvée dans la source").toBeGreaterThan(0);
+    expect(signature.length, "la signature doit être lisible").toBeGreaterThan(40);
+    expect(corps.length, "le corps doit être lisible").toBeGreaterThan(400);
+
+    expect(idFieldsDansLaSignature, "ADR 0015 — la signature ne nomme plus `idFields`").toBe(false);
+    expect(exonerationsDansLeCorps, "ADR 0015 — le corps n'exonère plus aucun nom").toBe(0);
+  });
 
   /**
    * 🔴 ET L'ADMISSION NE LE RATTRAPE PAS : ELLE **ANNONCE**.
@@ -833,7 +933,9 @@ describe("A2 · voie ② — `idFields` déclaré sur un champ de texte libre", 
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  A3 · VOIE ③ — LES NEUF NOMS DE GOUVERNANCE ÉCHAPPÉS. 🔴 ENCORE OUVERTE.
+//  A3 · VOIE ③ — LES NEUF NOMS DE GOUVERNANCE ÉCHAPPÉS. ✅ FERMÉE PAR LA
+//  DÉCLARATION (ADR 0016, cousue au lot 1d) — LE FILET, LUI, LES LAISSE PASSER
+//  TOUJOURS, ET SA BORNE RESTE CHIFFRÉE PAR LE TEST DE CAPACITÉ CI-DESSOUS.
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -896,25 +998,27 @@ describe("A3 · voie ③ — un nom de gouvernance que le filet ne reconnaît pa
   });
 
   /**
-   * 🔴 LE CONTOURNEMENT, DE BOUT EN BOUT. **BLOQUANT.**
+   * ✅ **LA VOIE ③ EST FERMÉE — ADR 0016 COUSUE AU LOT 1d.**
    *
-   * L'ADR 0016 décide que l'outil DÉCLARE ses champs de gouvernance et que le
-   * socle prend l'UNION. Le registre le lit, le manifeste le porte,
-   * `cumulerChampsDeGouvernance()` existe et est exportée — **et personne dans
-   * `core/chaine` ne l'appelle.** `OutilDuCatalogue` ne porte même pas de champ
-   * `governanceFields` : le commentaire 🔧 qui le demande est encore dans
-   * `core/chaine/etapes.ts`.
+   * Ce témoin était un `it.fails` : l'ADR 0016 décidait que l'outil DÉCLARE ses
+   * champs de gouvernance et que le socle prend l'UNION, le registre le lisait,
+   * le manifeste le portait, `cumulerChampsDeGouvernance()` existait et était
+   * exportée — **et personne dans `core/chaine` ne l'appelait.** La déclaration
+   * était un NO-OP MUET, c'est-à-dire exactement ce que le registre REFUSE
+   * quand elle ne désigne rien : ici elle désignait bien un champ, et elle ne
+   * faisait rien.
    *
-   * CONSÉQUENCE MESURÉE : un outil peut déclarer `emailTo` — l'un des neuf
-   * échappés — et la chaîne servira quand même l'appel. La déclaration est un
-   * NO-OP MUET, c'est-à-dire exactement ce que le registre REFUSE quand elle ne
-   * désigne rien : ici elle désigne bien un champ, et elle ne fait rien.
+   * CE QUI A CHANGÉ, ET OÙ : `OutilDuCatalogue` porte désormais
+   * `governanceFields` (`core/chaine/etapes.ts`), `orchestrateur.ts` le passe à
+   * `analyserArgumentsDuSchema()`, et celle-ci construit sa
+   * liste `gouvernance` SUR l'union rendue par `cumulerChampsDeGouvernance()`.
+   * Débrancher n'importe lequel des trois fait rougir ce test.
    *
-   * ⚠️ LA DÉCLARATION EST TRANSPORTÉE PAR UN ÉLARGISSEMENT DE TYPE, PAS PAR UNE
-   *    CONVERSION FORCÉE : `OutilDuCatalogue` n'a pas ce champ, donc le seul
-   *    moyen de mesurer « la chaîne l'ignore-t-elle ? » est de le poser à côté.
-   *    S'il devenait un champ réel, cette ligne cesserait d'être nécessaire — et
-   *    le témoin rougirait, ce qui est le but.
+   * ⚠️ **L'ÉLARGISSEMENT DE TYPE A DISPARU, ET C'ÉTAIT LE SIGNAL.** Ce témoin
+   *    portait `OutilDuCatalogue & { governanceFields }` parce que le champ
+   *    n'existait pas : « s'il devenait un champ réel, cette ligne cesserait
+   *    d'être nécessaire ». Elle l'est. L'outil est construit par la fabrique
+   *    ordinaire, avec une surcharge ordinaire.
    *
    * ⚠️ **LE CHAMP EST FERMÉ PAR UN `enum`, ET C'EST TOUTE LA DIFFICULTÉ DE CE
    *    TÉMOIN.** Un premier jet lui donnait `{"type":"string"}` : l'appel était
@@ -924,48 +1028,58 @@ describe("A3 · voie ③ — un nom de gouvernance que le filet ne reconnaît pa
    *    libre : c'est ce que le compte `libres` ci-dessous vérifie avant de rien
    *    conclure.
    */
-  it.fails(
-    "🔴 § 20 · ADR 0016 — un champ de gouvernance DÉCLARÉ doit faire refuser l'appel",
-    async () => {
-      const schema = schemaFerme({
-        emailTo: { enum: ["equipe@exemple.invalid", "secours@exemple.invalid"] },
-      });
-      const outil: OutilDuCatalogue & { readonly governanceFields: readonly string[] } = {
-        ...outilDuTiers({ inputSchema: schema }),
-        governanceFields: ["emailTo"],
-      };
-      const harnais = fabriquerSocle({ outils: [outilDuCatalogue(), outil] });
+  it("✅ § 20 · ADR 0016 — un champ de gouvernance DÉCLARÉ fait refuser l'appel", async () => {
+    const schema = schemaFerme({
+      emailTo: { enum: ["equipe@exemple.invalid", "secours@exemple.invalid"] },
+    });
+    const outil = outilDuTiers({ inputSchema: schema, governanceFields: ["emailTo"] });
+    const harnais = fabriquerSocle({ outils: [outilDuCatalogue(), outil] });
 
-      await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
-      const resultat = await appeler(
-        harnais,
-        appel({
-          nomComplet: "annuaire.chercher",
-          input: { emailTo: "secours@exemple.invalid" },
-        }),
-      );
+    await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
+    const resultat = await appeler(
+      harnais,
+      appel({
+        nomComplet: "annuaire.chercher",
+        input: { emailTo: "secours@exemple.invalid" },
+      }),
+    );
 
-      const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.idFields);
-      console.info(
-        `[A3 · voie ③] ${String(outil.governanceFields.length)} champ(s) déclaré(s) · ` +
-          `${String(analyse.gouvernance.length)} champ(s) de gouvernance DÉRIVÉ(s) par la chaîne · ` +
-          `${String(analyse.libres.length)} champ(s) libre(s) · verdict : ${issue(resultat)}`,
-      );
+    // ⚠️ CETTE ANALYSE EST FAITE AVEC LES MÊMES ARGUMENTS QUE L'ORCHESTRATEUR,
+    //    `governanceFields` COMPRIS. Le témoin d'avant la couture passait
+    //    `AUCUN_CHAMP_DE_GOUVERNANCE` ici — et mesurait donc autre chose que ce
+    //    que la chaîne servait.
+    const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.governanceFields);
+    const sansDeclaration = analyserArgumentsDuSchema(
+      outil.inputSchema,
+      AUCUN_CHAMP_DE_GOUVERNANCE,
+    );
+    console.info(
+      `[A3 · voie ③] ${String(outil.governanceFields.length)} champ(s) déclaré(s) · ` +
+        `${String(analyse.gouvernance.length)} champ(s) de gouvernance DÉRIVÉ(s) par la chaîne · ` +
+        `${String(sansDeclaration.gouvernance.length)} sans la déclaration · ` +
+        `${String(analyse.retenusParLeNom)} retenu(s) par le FILET · ` +
+        `${String(analyse.perdusParLeCumul.length)} perdu(s) par le cumul · ` +
+        `${String(analyse.libres.length)} champ(s) libre(s) · verdict : ${issue(resultat)}`,
+    );
 
-      // Faits qui survivront au correctif.
-      expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
-      expect(outil.governanceFields, "l'outil déclare bien ce champ").toEqual(["emailTo"]);
-      expect(analyse.proprietesInspectees, "le schéma déclare une propriété").toBe(1);
-      expect(analyse.libres.length, "et AUCUN argument libre — la branche est isolée").toBe(0);
-      expect(familleDeGouvernance("emailTo"), "le filet, lui, ne le reconnaît pas").toBeNull();
+    // Faits qui ont survécu au correctif — ils disaient déjà que le décor est bon.
+    expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
+    expect(outil.governanceFields, "l'outil déclare bien ce champ").toEqual(["emailTo"]);
+    expect(analyse.proprietesInspectees, "le schéma déclare une propriété").toBe(1);
+    expect(analyse.libres.length, "et AUCUN argument libre — la branche est isolée").toBe(0);
+    expect(familleDeGouvernance("emailTo"), "le filet, lui, ne le reconnaît pas").toBeNull();
 
-      // L'ATTENTE DE L'ADR 0016, celle qui échoue aujourd'hui.
-      expect(
-        issue(resultat),
-        "ADR 0016 — la déclaration ne peut qu'AJOUTER, et ici elle n'ajoute rien",
-      ).toBe("refusé");
-    },
-  );
+    // LE CONTRASTE, sans lequel « refusé » ne prouverait pas que c'est la
+    // DÉCLARATION qui a mordu : le même schéma, sans elle, n'est surveillé par rien.
+    expect(sansDeclaration.gouvernance, "sans déclaration, le filet ne voit rien").toEqual([]);
+    expect(analyse.gouvernance.map((champ) => champ.nom)).toEqual(["emailTo"]);
+    expect(analyse.perdusParLeCumul, "l'union n'a rien perdu").toEqual([]);
+
+    // L'ATTENTE DE L'ADR 0016 — elle échouait avant la couture du lot 1d.
+    expect(issue(resultat), "ADR 0016 — la déclaration AJOUTE, et l'étape 11 la lit").toBe(
+      "refusé",
+    );
+  });
 
   /**
    * TÉMOIN DE CAPACITÉ APPARIÉ — LE MÊME APPEL, LE MÊME `enum`, LE MÊME ZÉRO
@@ -992,7 +1106,7 @@ describe("A3 · voie ③ — un nom de gouvernance que le filet ne reconnaît pa
       }),
     );
 
-    const analyse = analyserArgumentsDuSchema(schema, []);
+    const analyse = analyserArgumentsDuSchema(schema, AUCUN_CHAMP_DE_GOUVERNANCE);
     console.info(
       `[A3 · capacité] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
         `${String(analyse.gouvernance.length)} champ(s) de gouvernance dérivé(s) · ` +
@@ -1068,7 +1182,7 @@ describe("B1 · NOUVEAU — un champ déclaré sous `dependentSchemas`", () => {
       unevaluatedProperties: false,
     };
 
-    const analyse = analyserArgumentsDuSchema(connu, []);
+    const analyse = analyserArgumentsDuSchema(connu, AUCUN_CHAMP_DE_GOUVERNANCE);
     const fermeture = analyserFermeture(versValeurJson(connu, "schéma témoin"));
     const c7 = chercherChampsDAutorisation(
       {
@@ -1096,53 +1210,56 @@ describe("B1 · NOUVEAU — un champ déclaré sous `dependentSchemas`", () => {
   });
 
   /**
-   * 🔴 NOUVEAU CONTOURNEMENT — LE § 20 NE VOIT PAS LE CHAMP. **BLOQUANT.**
+   * ✅ **FERMÉ AU LOT 1d — C'ÉTAIT UN `it.fails`, IL EST PASSÉ `it()`.**
    *
-   * L'appel traverse la chaîne complète et l'adaptateur du domaine TIERS reçoit
-   * le contenu lu, session marquée, sans confirmation humaine.
+   * Le contournement était réel et il est mesuré des deux côtés : parcours
+   * amputé de `dependentSchemas`, `porteUnArgumentLibre` rendait `false` et
+   * l'adaptateur du domaine TIERS recevait le contenu lu, session marquée, sans
+   * confirmation humaine. `dependentSchemas` est entré dans `APPLICATEURS_OBJET`
+   * — mais **ce n'est pas l'entrée qui ferme le défaut**, c'est
+   * `core/adapter-kit/fermeture-couverture.temoin.spec.ts`, qui confronte les
+   * trois listes au vocabulaire d'applicateurs de 2020-12 et rougit sur l'écart.
+   * Sans elle, le PROCHAIN mot-clé oublié rouvrirait exactement cette porte.
    */
-  it.fails(
-    "🔴 § 20 — un champ de texte libre sous `dependentSchemas` doit rester surveillé",
-    async () => {
-      const harnais = fabriquerSocle({
-        outils: [outilDuCatalogue(), outilDuTiers({ inputSchema: SCHEMA_DEPENDANT })],
-      });
+  it("✅ § 20 — un champ de texte libre sous `dependentSchemas` reste surveillé", async () => {
+    const harnais = fabriquerSocle({
+      outils: [outilDuCatalogue(), outilDuTiers({ inputSchema: SCHEMA_DEPENDANT })],
+    });
 
-      await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
-      const resultat = await appeler(
-        harnais,
-        appel({
-          nomComplet: "annuaire.chercher",
-          input: { declencheur: true, charge: CONTENU_LU },
-        }),
-      );
+    await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
+    const resultat = await appeler(
+      harnais,
+      appel({
+        nomComplet: "annuaire.chercher",
+        input: { declencheur: true, charge: CONTENU_LU },
+      }),
+    );
 
-      const analyse = analyserArgumentsDuSchema(SCHEMA_DEPENDANT, []);
-      const sortiParLeTiers = harnais.recus.filter((recu) => porteLeContenu(recu.entree)).length;
+    const analyse = analyserArgumentsDuSchema(SCHEMA_DEPENDANT, AUCUN_CHAMP_DE_GOUVERNANCE);
+    const sortiParLeTiers = harnais.recus.filter((recu) => porteLeContenu(recu.entree)).length;
 
-      console.info(
-        `[B1 · § 20] ${String(analyse.sousSchemasInspectes)} sous-schéma(s) parcouru(s) · ` +
-          `${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
-          `${String(analyse.libres.length)} champ(s) libre(s) vu(s) · ` +
-          `verdict : ${issue(resultat)} · ` +
-          `charge sortie chez le domaine tiers : ${String(sortiParLeTiers)}`,
-      );
+    console.info(
+      `[B1 · § 20] ${String(analyse.sousSchemasInspectes)} sous-schéma(s) parcouru(s) · ` +
+        `${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
+        `${String(analyse.libres.length)} champ(s) libre(s) vu(s) · ` +
+        `verdict : ${issue(resultat)} · ` +
+        `charge sortie chez le domaine tiers : ${String(sortiParLeTiers)}`,
+    );
 
-      // Faits qui survivront au correctif.
-      expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
-      expect(
-        SCHEMA_DEPENDANT["dependentSchemas"],
-        "le schéma déclare bien son champ sous cet applicateur",
-      ).toBeDefined();
+    // Faits qui survivront au correctif.
+    expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
+    expect(
+      SCHEMA_DEPENDANT["dependentSchemas"],
+      "le schéma déclare bien son champ sous cet applicateur",
+    ).toBeDefined();
 
-      // L'ATTENTE DU § 20, celle qui échoue aujourd'hui.
-      expect(
-        sortiParLeTiers,
-        "§ 20 — le contenu lu ne doit pas atteindre l'adaptateur du domaine tiers",
-      ).toBe(0);
-      expect(issue(resultat), "§ 20 — un argument libre vers un AUTRE domaine").toBe("refusé");
-    },
-  );
+    // L'ATTENTE DU § 20, celle qui échoue aujourd'hui.
+    expect(
+      sortiParLeTiers,
+      "§ 20 — le contenu lu ne doit pas atteindre l'adaptateur du domaine tiers",
+    ).toBe(0);
+    expect(issue(resultat), "§ 20 — un argument libre vers un AUTRE domaine").toBe("refusé");
+  });
 
   /**
    * 🔴 ET LA GARDE QUI DEVAIT VOIR VENIR CE GENRE DE CHOSE EST VERTE. **MAJEUR,
@@ -1163,42 +1280,69 @@ describe("B1 · NOUVEAU — un champ déclaré sous `dependentSchemas`", () => {
    * Ce qui manquait n'est pas une garde d'accord, c'est une garde de
    * COUVERTURE : confronter la liste d'applicateurs du parcours au vocabulaire
    * d'applicateurs de JSON Schema 2020-12, et rougir sur l'écart.
+   *
+   * ✅ **FERMÉ AU LOT 1d — C'ÉTAIT UN `it.fails`, IL EST PASSÉ `it()`.** La garde
+   *    demandée existe : `core/adapter-kit/fermeture-couverture.temoin.spec.ts`.
+   *    Et les deux dérivations ne sont plus deux : `estTexteLibre()` a disparu au
+   *    profit d'un appel à `estValeurLibre()`.
+   *
+   * ⚠️ **CE TÉMOIN COMPARAIT DEUX CHOSES DIFFÉRENTES, ET C'EST UN DÉFAUT DE PLUS
+   *    QU'IL FAUT ÉCRIRE.** Il confrontait les champs **LIBRES** vus par la
+   *    chaîne (`analyse.libres`) à **TOUS LES NOMS** déclarés vus par le kit
+   *    (`nomsDuSchema`). `declencheur` est un `const` : il est refermé, donc
+   *    absent des libres et présent dans les noms. `desaccords` valait donc
+   *    `["declencheur"]` **par construction**, quel que soit l'état du défaut —
+   *    mesuré, avant comme après le correctif.
+   *
+   *    Conséquence : ce témoin était vert pour une raison qui n'a rien à voir
+   *    avec ce qu'il annonce, et il serait **resté vert après la fermeture du
+   *    défaut** — une dette qui ne peut plus être payée n'est plus une dette,
+   *    c'est un mensonge qui dort. La confrontation porte désormais sur les
+   *    occurrences que le kit juge LIBRES, ce qui est la même question des deux
+   *    côtés.
    */
-  it.fails(
-    "🔴 les DEUX dérivations de « champ libre » sont d'accord, et toutes deux aveugles",
-    () => {
-      const analyseChaine = analyserArgumentsDuSchema(SCHEMA_DEPENDANT, []);
-      const analyseKit = analyserChampsDeclares(versValeurJson(SCHEMA_DEPENDANT, "schéma témoin"), {
-        idFields: [],
-        governanceFields: [],
-      });
+  it("✅ les DEUX dérivations de « champ libre » s'accordent, et voient le champ", () => {
+    const analyseChaine = analyserArgumentsDuSchema(SCHEMA_DEPENDANT, AUCUN_CHAMP_DE_GOUVERNANCE);
+    const analyseKit = analyserChampsDeclares(versValeurJson(SCHEMA_DEPENDANT, "schéma témoin"), {
+      idFields: [],
+      governanceFields: [],
+    });
+    // ⚠️ LA MÊME QUESTION DES DEUX CÔTÉS : « quels champs le schéma laisse-t-il
+    //    LIBRES ». Confronter les libres de la chaîne aux NOMS du kit compare un
+    //    sous-ensemble à son sur-ensemble, et rend un désaccord permanent sur
+    //    tout champ refermé.
+    const occurrences = occurrencesDuSchema(versValeurJson(SCHEMA_DEPENDANT, "schéma témoin"));
 
-      const vuParLaChaine = analyseChaine.libres.map((champ) => champ.nom);
-      const vuParLeKit = analyseKit.nomsDuSchema;
-      const desaccords = [...new Set([...vuParLaChaine, ...vuParLeKit])].filter(
-        (nom) => vuParLaChaine.includes(nom) !== vuParLeKit.includes(nom),
-      );
+    const vuParLaChaine = [...new Set(analyseChaine.libres.map((champ) => champ.nom))];
+    const vuParLeKit = [
+      ...new Set(occurrences.occurrences.filter((champ) => champ.libre).map((champ) => champ.nom)),
+    ];
+    const desaccords = [...new Set([...vuParLaChaine, ...vuParLeKit])].filter(
+      (nom) => vuParLaChaine.includes(nom) !== vuParLeKit.includes(nom),
+    );
 
-      console.info(
-        `[B1 · accord aveugle] ${String(analyseChaine.sousSchemasInspectes)} sous-schéma(s) ` +
-          `parcouru(s) par la chaîne · ${String(analyseKit.sousSchemasInspectes)} par le kit · ` +
-          `${String(vuParLaChaine.length)} champ(s) libre(s) vu(s) par la chaîne · ` +
-          `${String(vuParLeKit.length)} nom(s) vu(s) par le kit · ` +
-          `${String(desaccords.length)} désaccord(s)`,
-      );
+    console.info(
+      `[B1 · accord] ${String(analyseChaine.sousSchemasInspectes)} sous-schéma(s) ` +
+        `parcouru(s) par la chaîne · ${String(analyseKit.sousSchemasInspectes)} par le kit · ` +
+        `${String(analyseKit.nomsDistincts)} nom(s) déclaré(s) au total · ` +
+        `${String(vuParLaChaine.length)} champ(s) libre(s) vu(s) par la chaîne · ` +
+        `${String(vuParLeKit.length)} par le kit · ` +
+        `${String(desaccords.length)} désaccord(s)` +
+        (desaccords.length > 0 ? ` : ${desaccords.join(", ")}` : ""),
+    );
 
-      // Faits qui survivront au correctif : les deux parcourent bien le schéma,
-      // et ils s'accordent — c'est la garde de non-divergence, elle tient.
-      expect(analyseChaine.sousSchemasInspectes, "la chaîne a bien parcouru").toBeGreaterThan(0);
-      expect(analyseKit.sousSchemasInspectes, "le kit aussi").toBeGreaterThan(0);
-      expect(desaccords, "les deux dérivations restent d'accord").toEqual([]);
+    // Planchers : deux analyses qui n'auraient rien parcouru s'accorderaient sur
+    // le vide, et ce test serait vert en n'ayant rien confronté.
+    expect(analyseChaine.sousSchemasInspectes, "la chaîne a bien parcouru").toBeGreaterThan(1);
+    expect(analyseKit.sousSchemasInspectes, "le kit aussi").toBeGreaterThan(1);
+    expect(analyseKit.nomsDistincts, "des noms à confronter").toBeGreaterThanOrEqual(2);
 
-      // L'ATTENTE, celle qui échoue aujourd'hui : l'accord doit porter sur la
-      // BONNE réponse, et le champ déclaré sous `dependentSchemas` existe.
-      expect(vuParLaChaine, "la chaîne doit voir le champ").toContain("charge");
-      expect(vuParLeKit, "et le kit aussi").toContain("charge");
-    },
-  );
+    expect(desaccords, "les deux dérivations restent d'accord").toEqual([]);
+    // ET l'accord porte sur la BONNE réponse : le champ déclaré sous
+    // `dependentSchemas` existe, et les deux le voient.
+    expect(vuParLaChaine, "la chaîne doit voir le champ").toContain("charge");
+    expect(vuParLeKit, "et le kit aussi").toContain("charge");
+  });
 
   /**
    * 🔴 NOUVEAU CONTOURNEMENT — LE CONTRÔLE 7 DU § 09 NE VOIT PAS LE NOM
@@ -1209,57 +1353,56 @@ describe("B1 · NOUVEAU — un champ déclaré sous `dependentSchemas`", () => {
    * mot » — rouvert par un applicateur que le parcours ne connaît pas. Le
    * manifeste est ADMIS par `enregistrerAdaptateur()`, ce qui est mesuré ici de
    * bout en bout plutôt que déduit.
+   *
+   * ✅ **FERMÉ AU LOT 1d — C'ÉTAIT UN `it.fails`, IL EST PASSÉ `it()`.**
    */
-  it.fails(
-    "🔴 § 09 · contrôle 7 — un nom d'autorisation sous `dependentSchemas` doit être REFUSÉ",
-    () => {
-      const schemaHostile: ObjetJson = {
-        type: "object",
-        properties: { declencheur: { const: true } },
-        dependentSchemas: {
-          declencheur: {
-            type: "object",
-            properties: { peutVoirAppels: { type: "boolean" } },
-          },
+  it("✅ § 09 · contrôle 7 — un nom d'autorisation sous `dependentSchemas` est REFUSÉ", () => {
+    const schemaHostile: ObjetJson = {
+      type: "object",
+      properties: { declencheur: { const: true } },
+      dependentSchemas: {
+        declencheur: {
+          type: "object",
+          properties: { peutVoirAppels: { type: "boolean" } },
         },
-        unevaluatedProperties: false,
-      };
+      },
+      unevaluatedProperties: false,
+    };
 
-      const cles = lireClesDAutorisation().toutes;
-      const c7 = chercherChampsDAutorisation(schemaHostile, cles);
-      const fermeture = analyserFermeture(versValeurJson(schemaHostile, "schéma hostile"));
+    const cles = lireClesDAutorisation().toutes;
+    const c7 = chercherChampsDAutorisation(schemaHostile, cles);
+    const fermeture = analyserFermeture(versValeurJson(schemaHostile, "schéma hostile"));
 
-      const manifeste = manifesteBrut({
-        inputSchema: schemaHostile,
-        idFields: [],
-        governanceFields: [],
-      });
-      const admission = enregistrerAdaptateur({
-        manifesteBrut: manifeste,
-        verrou: verrouPour(manifeste),
-        profilsConnus: PROFILE_NAMES,
-        sceauProfils: SCEAU_PROFILS,
-        clesDAutorisation: cles,
-      });
+    const manifeste = manifesteBrut({
+      inputSchema: schemaHostile,
+      idFields: [],
+      governanceFields: [],
+    });
+    const admission = enregistrerAdaptateur({
+      manifesteBrut: manifeste,
+      verrou: verrouPour(manifeste),
+      profilsConnus: PROFILE_NAMES,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: cles,
+    });
 
-      console.info(
-        `[B1 · § 09] ${String(cles.length)} nom(s) réservé(s) confronté(s) · ` +
-          `${String(c7.proprietesInspectees)} propriété(s) inspectée(s) · ` +
-          `${String(c7.trouves.length)} trouvé(s) · ` +
-          `fermeture : ${String(fermeture.objetsAFermer)} objet(s) à fermer, ` +
-          `${String(fermeture.ouverts.length)} ouvert(s) · ` +
-          `admission : ${admission.admis ? "ADMIS" : "refusé"}`,
-      );
+    console.info(
+      `[B1 · § 09] ${String(cles.length)} nom(s) réservé(s) confronté(s) · ` +
+        `${String(c7.proprietesInspectees)} propriété(s) inspectée(s) · ` +
+        `${String(c7.trouves.length)} trouvé(s) · ` +
+        `fermeture : ${String(fermeture.objetsAFermer)} objet(s) à fermer, ` +
+        `${String(fermeture.ouverts.length)} ouvert(s) · ` +
+        `admission : ${admission.admis ? "ADMIS" : "refusé"}`,
+    );
 
-      // Faits qui survivront au correctif.
-      expect(cles.length, "le contrôle 7 travaille sur une liste non vide").toBeGreaterThan(4);
-      expect(cles, "et `peutVoirAppels` en fait bien partie").toContain("peutVoirAppels");
+    // Faits qui survivront au correctif.
+    expect(cles.length, "le contrôle 7 travaille sur une liste non vide").toBeGreaterThan(4);
+    expect(cles, "et `peutVoirAppels` en fait bien partie").toContain("peutVoirAppels");
 
-      // L'ATTENTE DU § 09, celle qui échoue aujourd'hui.
-      expect(c7.trouves.length, "§ 09 contrôle 7 — le nom réservé doit être TROUVÉ").toBe(1);
-      expect(admission.admis, "et le manifeste doit être REFUSÉ").toBe(false);
-    },
-  );
+    // L'ATTENTE DU § 09, celle qui échoue aujourd'hui.
+    expect(c7.trouves.length, "§ 09 contrôle 7 — le nom réservé doit être TROUVÉ").toBe(1);
+    expect(admission.admis, "et le manifeste doit être REFUSÉ").toBe(false);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1348,126 +1491,210 @@ describe("B5 · la borne amont — `dataClass` est une déclaration que rien ne 
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  B2 · NOUVEAU — `idempotencyKey` : UN CANAL LIBRE QUE RIEN NE SURVEILLE
+//  B2 · `idempotencyKey` — LE CANAL EST FERMÉ (ADR 0020). Témoins BASCULÉS.
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * ═══ L'ANGLE : LE § 20 NE REGARDE QUE `input` ═══
+ * ═══ L'ANGLE : LE § 20 NE REGARDAIT QUE `input` ═══
  *
  * `analyserArgumentsDuSchema()` dérive `porteUnArgumentLibre` du SEUL
  * `inputSchema`. Or `AppelEntrant` porte quatre valeurs que l'appelant remplit
  * et qui ne sont dans aucun schéma : `idempotencyKey`, `curseur`,
  * `jetonDeConfirmation`, `nomComplet`.
  *
- * Trois sont fermées, et cette section le MESURE plutôt que de l'affirmer :
+ * Trois étaient fermées, et cette section le MESURE plutôt que de l'affirmer :
  * le curseur est SIGNÉ (§ 13.1), le jeton de confirmation est confronté à
  * l'`argHash` et n'atteint jamais l'adaptateur, le nom complet est confronté au
  * catalogue.
  *
- * `idempotencyKey` ne l'est pas. Elle est une chaîne LIBRE, choisie par
- * l'appelant, qu'aucune borne de longueur ni de forme ne contraint
- * (`core/limits/idempotency.ts` ne refuse que la chaîne vide), et qui :
+ * `idempotencyKey` ne l'était pas. Chaîne LIBRE choisie par l'appelant, elle
+ * atteignait l'adaptateur par `ToolContext.idempotencyKey` et se persistait
+ * telle quelle dans `ops_idempotency.key` (§ 12).
  *
- *  · atteint l'adaptateur par `ToolContext.idempotencyKey` — un champ que
- *    `core/types.ts` déclare, et dont la seule source est `AppelEntrant` ;
- *  · est PERSISTÉE telle quelle dans `ops_idempotency.key`, une colonne `String`
- *    sans borne, membre de la clé primaire `(tool, key)` (§ 12).
+ * ═══ CE QUE L'ADR 0020 A CHANGÉ, ET POURQUOI LES DEUX TÉMOINS BASCULENT ═══
  *
- * Le § 20 dit d'elle « elle voyage ici, PAS dans `input` », et c'est ce qui la
- * met hors de portée de sa propre garde d'arguments.
+ * Deux voies ENSEMBLE, et elles ne se remplacent pas :
+ *
+ *  1. **le canal est SUPPRIMÉ, pas surveillé.** `ToolContext.idempotencyKey`
+ *     n'existe plus ; `ToolContext.idempotencyRef` porte le condensat SHA-256,
+ *     posé par l'ORCHESTRATEUR — un module de production — et non par le
+ *     constructeur de contexte injecté ;
+ *  2. **la forme de ce qui reste à l'intérieur est FERMÉE.** `reserver()`
+ *     confronte la clé à `FORME_CLE_IDEMPOTENCE` AVANT le tri par mode, et
+ *     `ops_idempotency.key` reçoit l'empreinte.
+ *
+ * ⚠️ **CE QUE CES DEUX TÉMOINS NE MESURENT PLUS PAR SON NOM.** Interroger
+ *    `contexte.idempotencyKey` serait aujourd'hui vert POUR LA PIRE DES RAISONS :
+ *    le champ n'existe plus, la lecture rendrait `undefined`, et la garde
+ *    passerait sans rien regarder. Ils BALAIENT donc toutes les valeurs de
+ *    chaîne du `ctx` réellement remis à l'adaptateur, et comptent celles qui
+ *    portent un fragment du contenu lu.
  */
-describe("B2 · NOUVEAU — le contenu lu passe par `idempotencyKey`", () => {
+describe("B2 · le contenu lu ne passe PLUS par la clé d'idempotence", () => {
   /** Un outil dont le schéma ne déclare RIEN. Zéro argument libre à dériver. */
-  const OUTIL_SANS_ARGUMENT = () => outilDuTiers({ inputSchema: SCHEMA_VIDE });
+  const OUTIL_SANS_ARGUMENT = (): OutilDuCatalogue => outilDuTiers({ inputSchema: SCHEMA_VIDE });
+
+  /** ⚠️ AUCUN SECRET RÉEL. Une clé qui RESPECTE la forme fermée du § 20. */
+  const CLE_BIEN_FORMEE = "01JB-TEMOIN-IDEMPOTENCE-0001";
+
+  /** Toutes les valeurs de chaîne d'un `ctx`, sans en nommer une seule. */
+  function chainesDuContexte(contexte: ToolContext<ProfileName>): readonly string[] {
+    return Object.values(contexte).filter((valeur): valeur is string => typeof valeur === "string");
+  }
 
   /**
-   * 🔴 NOUVEAU CONTOURNEMENT. **BLOQUANT.**
+   * ✅ LE CONTOURNEMENT EST FERMÉ — ADR 0020. **Ce témoin était sous `it.fails`.**
    *
-   * L'attaquant appelle un outil du domaine tiers dont le schéma est VIDE. Le
-   * § 20 dérive `porteUnArgumentLibre: false`, l'étape 11 autorise, et
-   * l'adaptateur du domaine tiers reçoit le contenu lu dans son `ctx`.
+   * Il repasse en `it()` : l'attente du § 20 est désormais tenue, et le laisser
+   * sous `it.fails` le ferait ROUGIR — ce qui est exactement le mécanisme voulu,
+   * et exactement pourquoi il ne se supprime pas.
+   *
+   * ⚠️ DEUX SONDES, ET LA SECONDE EST CE QUI EMPÊCHE LA PREMIÈRE D'ÊTRE VIDE.
+   *    La sonde (a) présente de la PROSE : elle est refusée à l'étape 13, donc
+   *    l'adaptateur n'est jamais atteint — et un zéro obtenu parce qu'aucun `ctx`
+   *    n'a été remis ne prouverait RIEN. La sonde (b) présente une clé BIEN
+   *    FORMÉE : l'appel est servi, un `ctx` est bel et bien remis, et c'est sur
+   *    cet objet-là qu'on vérifie qu'il porte le CONDENSAT et jamais le préimage.
    */
-  it.fails("🔴 § 20 — un contenu lu ne doit pas sortir par la clé d'idempotence", async () => {
-    const harnais = fabriquerSocle({
+  it("§ 20 — un contenu lu n'atteint plus l'adaptateur par la clé d'idempotence", async () => {
+    // ── SONDE (a) — DE LA PROSE EN GUISE DE CLÉ ────────────────────────────
+    const avecProse = fabriquerSocle({
       outils: [outilDuCatalogue(), OUTIL_SANS_ARGUMENT()],
       reglagesOutil: { modeIdempotence: "n/a", limiteQuota: null, warnAtQuota: null },
     });
-
-    await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
-    const resultat = await appeler(
-      harnais,
+    await appeler(avecProse, appel({ nomComplet: "courrier.lire" }));
+    const verdictProse = await appeler(
+      avecProse,
       appel({ nomComplet: "annuaire.chercher", idempotencyKey: CONTENU_LU }),
     );
 
-    const analyse = analyserArgumentsDuSchema(SCHEMA_VIDE, []);
-    const recuParLeTiers = harnais.recus.filter(
-      (recu) => recu.contexte.idempotencyKey === CONTENU_LU,
+    // ── SONDE (b) — UNE CLÉ BIEN FORMÉE, DONC UN `ctx` RÉELLEMENT REMIS ────
+    const avecCle = fabriquerSocle({
+      outils: [outilDuCatalogue(), OUTIL_SANS_ARGUMENT()],
+      reglagesOutil: { modeIdempotence: "n/a", limiteQuota: null, warnAtQuota: null },
+    });
+    await appeler(avecCle, appel({ nomComplet: "courrier.lire" }));
+    const verdictCle = await appeler(
+      avecCle,
+      appel({ nomComplet: "annuaire.chercher", idempotencyKey: CLE_BIEN_FORMEE }),
     );
+
+    // ── LA MESURE, SUR LES OBJETS RÉELLEMENT REMIS ────────────────────────
+    const fragment = CONTENU_LU.slice(0, 24);
+    let contextesInspectes = 0;
+    let chainesInspectees = 0;
+    let porteusesDuContenu = 0;
+    let porteusesDeLaCle = 0;
+    let porteusesDeLEmpreinte = 0;
+    const empreinteAttendue = empreinteDeCleDIdempotence(CLE_BIEN_FORMEE);
+
+    for (const harnais of [avecProse, avecCle]) {
+      for (const recu of harnais.recus) {
+        contextesInspectes += 1;
+        for (const valeur of chainesDuContexte(recu.contexte)) {
+          chainesInspectees += 1;
+          if (valeur.includes(fragment)) porteusesDuContenu += 1;
+          if (valeur === CLE_BIEN_FORMEE) porteusesDeLaCle += 1;
+          if (valeur === empreinteAttendue) porteusesDeLEmpreinte += 1;
+        }
+      }
+    }
+
+    const analyse = analyserArgumentsDuSchema(SCHEMA_VIDE, AUCUN_CHAMP_DE_GOUVERNANCE);
 
     console.info(
-      `[B2 · idempotencyKey] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s) · ` +
-        `${String(analyse.libres.length)} champ(s) libre(s) dérivé(s) · ` +
-        `${String(CONTENU_LU.length)} caractère(s) transportés hors schéma · ` +
-        `verdict : ${issue(resultat)} · ` +
-        `contexte(s) d'adaptateur porteur(s) du contenu : ${String(recuParLeTiers.length)}`,
+      `[B2 · canal du ctx] ${String(analyse.proprietesInspectees)} propriété(s) de schéma ` +
+        `inspectée(s) · ${String(analyse.libres.length)} champ(s) libre(s) dérivé(s) · ` +
+        `${String(contextesInspectes)} contexte(s) remis à un adaptateur · ` +
+        `${String(chainesInspectees)} valeur(s) de chaîne balayée(s) · ` +
+        `${String(porteusesDuContenu)} porteuse(s) du contenu lu · ` +
+        `${String(porteusesDeLaCle)} porteuse(s) de la clé en clair · ` +
+        `${String(porteusesDeLEmpreinte)} porteuse(s) de l'empreinte · ` +
+        `verdicts : prose ${issue(verdictProse)}, clé formée ${issue(verdictCle)}`,
     );
 
-    // Faits qui survivront au correctif.
-    expect(harnais.index.etat().sessions, "la session a bien été marquée").toBe(1);
+    // ── PLANCHERS-TÉMOINS : sans eux, les zéros ci-dessous ne diraient rien ──
     expect(analyse.libres.length, "le schéma ne déclare AUCUN argument libre").toBe(0);
-    expect(CONTENU_LU.length, "et le canal a bien transporté du texte").toBeGreaterThan(40);
-
-    // L'ATTENTE DU § 20, celle qui échoue aujourd'hui.
+    expect(CONTENU_LU.length, "et le canal aurait bien eu du texte à transporter").toBeGreaterThan(
+      40,
+    );
     expect(
-      recuParLeTiers.length,
-      "§ 20 — aucun contenu lu ne doit atteindre un adaptateur d'un autre domaine",
+      contextesInspectes,
+      "au moins un `ctx` a bien été remis à un adaptateur",
+    ).toBeGreaterThan(0);
+    expect(chainesInspectees, "et il portait bien des chaînes à balayer").toBeGreaterThan(0);
+
+    // ── L'ATTENTE DU § 20, TENUE ────────────────────────────────────────────
+    expect(
+      porteusesDuContenu,
+      "§ 20 — aucun contenu lu n'atteint un adaptateur d'un autre domaine",
     ).toBe(0);
-    expect(issue(resultat), "et l'appel devait être refusé ou confirmé").toBe("refusé");
+    expect(porteusesDeLaCle, "ADR 0020 — la clé en clair n'atteint plus l'adaptateur").toBe(0);
+    expect(porteusesDeLEmpreinte, "mais son EMPREINTE, elle, y est bien").toBe(1);
+    expect(issue(verdictProse), "la prose est refusée à l'étape 13").toBe("refusé");
+    expect(issue(verdictCle), "et une clé bien formée passe : rien n'est cassé").toBe("servi");
   });
 
   /**
-   * 🔴 LA SECONDE CONSÉQUENCE, ET ELLE N'EST PAS LA MÊME PANNE. **MAJEUR.**
+   * ✅ LA SECONDE CONSÉQUENCE EST FERMÉE ELLE AUSSI — § 31, ADR 0020.
+   * **Ce témoin était sous `it.fails`.**
    *
-   * La clé est ÉCRITE dans le dépôt d'idempotence, qui est une table (§ 12).
-   * Le § 31 interdit « tout cache de contenu sur disque », et `ops_idempotency`
-   * n'a aucune garde équivalente à `verifierAucunContenu()` d'`ops_audit` : le
-   * journal refuse le contenu à l'écriture, ce dépôt-ci l'accepte.
+   * La clé était ÉCRITE dans le dépôt d'idempotence, qui est une table (§ 12),
+   * et `ops_idempotency` n'a aucune garde équivalente à `verifierAucunContenu()`
+   * d'`ops_audit`. Deux verrous la ferment maintenant, et le témoin les sépare :
+   * la PROSE est refusée avant d'atteindre le dépôt, et ce qu'une clé LICITE y
+   * écrit est son empreinte.
    */
-  it.fails(
-    "🔴 § 31 — un contenu lu ne doit pas être PERSISTÉ dans le dépôt d'idempotence",
-    async () => {
-      const harnais = fabriquerSocle({
-        outils: [outilDuCatalogue(), OUTIL_SANS_ARGUMENT()],
-        reglagesOutil: { modeIdempotence: "key", limiteQuota: null, warnAtQuota: null },
-      });
+  it("§ 31 — aucun contenu lu n'est PERSISTÉ dans le dépôt d'idempotence", async () => {
+    // ── SONDE (a) — LA PROSE N'ATTEINT PAS LE DÉPÔT ────────────────────────
+    const avecProse = fabriquerSocle({
+      outils: [outilDuCatalogue(), OUTIL_SANS_ARGUMENT()],
+      reglagesOutil: { modeIdempotence: "key", limiteQuota: null, warnAtQuota: null },
+    });
+    await appeler(avecProse, appel({ nomComplet: "courrier.lire" }));
+    const verdictProse = await appeler(
+      avecProse,
+      appel({ nomComplet: "annuaire.chercher", idempotencyKey: CONTENU_LU }),
+    );
 
-      await appeler(harnais, appel({ nomComplet: "courrier.lire" }));
-      const resultat = await appeler(
-        harnais,
-        appel({ nomComplet: "annuaire.chercher", idempotencyKey: CONTENU_LU }),
-      );
+    // ── SONDE (b) — UNE CLÉ LICITE ÉCRIT BIEN UNE LIGNE ────────────────────
+    const avecCle = fabriquerSocle({
+      outils: [outilDuCatalogue(), OUTIL_SANS_ARGUMENT()],
+      reglagesOutil: { modeIdempotence: "key", limiteQuota: null, warnAtQuota: null },
+    });
+    await appeler(avecCle, appel({ nomComplet: "courrier.lire" }));
+    const verdictCle = await appeler(
+      avecCle,
+      appel({ nomComplet: "annuaire.chercher", idempotencyKey: CLE_BIEN_FORMEE }),
+    );
 
-      const clesEcrites = [...harnais.idempotence.lignes.values()].map((ligne) => ligne.key);
-      const porteusesDeContenu = clesEcrites.filter((cle) => cle.includes(" ")).length;
+    const clesDeLaProse = [...avecProse.idempotence.lignes.values()].map((ligne) => ligne.key);
+    const clesLicites = [...avecCle.idempotence.lignes.values()].map((ligne) => ligne.key);
+    const toutes = [...clesDeLaProse, ...clesLicites];
+    const porteusesDEspace = toutes.filter((cle) => cle.includes(" ")).length;
+    const egalesAuPreimage = toutes.filter((cle) => cle === CLE_BIEN_FORMEE).length;
+    const horsFormeDEmpreinte = toutes.filter((cle) => !/^[0-9a-f]{64}$/.test(cle)).length;
 
-      console.info(
-        `[B2 · persistance] ${String(clesEcrites.length)} clé(s) écrite(s) au dépôt · ` +
-          `${String(porteusesDeContenu)} porteuse(s) d'une phrase (espaces) · ` +
-          `longueur maximale mesurée : ` +
-          `${String(Math.max(0, ...clesEcrites.map((cle) => cle.length)))} caractère(s) · ` +
-          `verdict : ${issue(resultat)}`,
-      );
+    console.info(
+      `[B2 · persistance] ${String(clesDeLaProse.length)} clé(s) écrite(s) sous la PROSE · ` +
+        `${String(clesLicites.length)} sous une clé LICITE · ` +
+        `${String(porteusesDEspace)} porteuse(s) d'une phrase (espaces) · ` +
+        `${String(egalesAuPreimage)} égale(s) au préimage · ` +
+        `${String(horsFormeDEmpreinte)} hors forme d'empreinte · ` +
+        `longueur maximale mesurée : ` +
+        `${String(Math.max(0, ...toutes.map((cle) => cle.length)))} caractère(s) · ` +
+        `verdicts : prose ${issue(verdictProse)}, clé formée ${issue(verdictCle)}`,
+    );
 
-      // Faits qui survivront au correctif.
-      expect(clesEcrites.length, "le dépôt a bien reçu une ligne").toBeGreaterThan(0);
+    // ── PLANCHER-TÉMOIN : le dépôt SAIT recevoir, et on l'a vérifié ─────────
+    expect(clesLicites.length, "une clé licite écrit bien une ligne au dépôt").toBeGreaterThan(0);
 
-      // L'ATTENTE DU § 31, celle qui échoue aujourd'hui.
-      expect(
-        porteusesDeContenu,
-        "§ 31 — aucune phrase ne doit atteindre une colonne persistée",
-      ).toBe(0);
-    },
-  );
+    // ── L'ATTENTE DU § 31, TENUE ────────────────────────────────────────────
+    expect(clesDeLaProse.length, "la prose n'atteint jamais le dépôt : refus à l'étape 13").toBe(0);
+    expect(porteusesDEspace, "§ 31 — aucune phrase n'atteint une colonne persistée").toBe(0);
+    expect(egalesAuPreimage, "ADR 0020 — le dépôt ne conserve pas la clé choisie").toBe(0);
+    expect(horsFormeDEmpreinte, "il ne conserve QUE des empreintes de 64 hexadécimaux").toBe(0);
+  });
 
   /**
    * LES TROIS CLIQUETS APPARIÉS — les autres valeurs hors schéma d'`AppelEntrant`.

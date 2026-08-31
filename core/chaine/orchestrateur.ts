@@ -141,6 +141,14 @@ import {
 import {
   appliquerLimites,
   cloturerLimites,
+  // ── LES DEUX COUTURES DU LOT 1d, ET ELLES SONT ICI ────────────────────────
+  //  · `empreinteDeCleDIdempotence` — ADR 0020 : c'est CE fichier, et lui seul,
+  //    qui pose `ctx.idempotencyRef`. Le constructeur de contexte ne le fabrique
+  //    plus, et le type le lui interdit.
+  //  · `issueDeReservation` — ADR 0021 : c'est le `finally` de l'étape 14 qui
+  //    l'appelle, en lui remettant le CLIQUET lu, jamais le genre de la fin.
+  empreinteDeCleDIdempotence,
+  issueDeReservation,
   type CalculArgHash,
   type DepotIdempotence,
   type DepotQuota,
@@ -843,7 +851,10 @@ export interface PorteeDIntention {
   /** Rend la ligne écrite, ou `null` quand le mécanisme n'est pas armé. */
   avantEffet(intention: {
     readonly principal: string;
-    readonly sessionId: string;
+    // ADR 0014 — une intention est un APPEL en vol : elle a une session de
+    // pilotage, la même que la ligne d'appel qui la clôt. C'est la clôture de
+    // PURGE (`cloture.ts`) qui n'en a pas, et elle ne passe pas par ici.
+    readonly sessionId: SessionId;
     readonly tool: string;
     readonly argHash: string;
     readonly maintenant: Date;
@@ -1043,7 +1054,32 @@ export type ConstruireContexteOutil = (
   appel: AppelEntrant,
   profil: ProfileName,
   niveau: PolicyLevel,
-) => ToolContext<ProfileName>;
+) => ContexteSansEmpreinte;
+
+/**
+ * CE QU'UN CONSTRUCTEUR DE CONTEXTE A LE DROIT DE FABRIQUER — **ADR 0020.**
+ *
+ * ═══ POURQUOI CE `Omit` EST LA COUTURE, ET NON UNE COQUETTERIE DE TYPE ═══
+ *
+ * L'ADR 0020 dit que `ctx.idempotencyRef` porte l'EMPREINTE de la clé, jamais la
+ * clé. Écrite dans le constructeur de contexte, cette règle n'aurait été cousue
+ * NULLE PART : {@link ConstruireContexteOutil} est une DÉPENDANCE INJECTÉE. Ses
+ * seules implémentations sont, à ce jour, des harnais de gardes — et une règle
+ * dont toutes les implémentations vivent dans des fichiers de test est
+ * exactement le défaut que le lot 1c a nommé : une décision écrite, testée,
+ * documentée, et non cousue au chemin de production.
+ *
+ * Le champ est donc RETIRÉ de ce que l'injecté fabrique. L'orchestrateur — un
+ * module de production, le seul qui ait vu passer `appel.idempotencyKey` — le
+ * pose lui-même, en appelant `empreinteDeCleDIdempotence`. Un constructeur de
+ * contexte qui voudrait y remettre la clé brute **ne compile pas**.
+ *
+ * C'est le motif exact de l'ADR 0014 sur `sessionId` : ce que le socle FRAPPE ne
+ * s'accepte pas de l'extérieur. Ici, l'« extérieur » est la racine de
+ * composition — et elle n'existe pas encore, ce qui est précisément le moment où
+ * la règle ne coûte rien.
+ */
+export type ContexteSansEmpreinte = Omit<ToolContext<ProfileName>, "idempotencyRef">;
 
 /**
  * L'EN-TÊTE DE JOURNAL, FIGÉ AVANT LA CHAÎNE.
@@ -1072,11 +1108,16 @@ export type ConstruireEntete = (
  * seule, qui rend l'invariant de sortie mécanique — le corps ne PEUT PAS rendre
  * une valeur à l'appelant, il rend une terminaison au journal.
  *
- * ⚠️ IL REÇOIT UN OBJET, ET C'EST DÉLIBÉRÉ (ADR 0017). Chacun de ses membres est
- *    un point de MUTATION de la ligne qui sera écrite — l'empreinte validée, le
- *    cliquet d'effet extérieur — et il y en aura un troisième. Un objet plutôt
- *    que des paramètres positionnels, pour que l'ajout du troisième n'oblige
- *    personne à relire un ordre d'arguments.
+ * ⚠️ IL REÇOIT UN OBJET, ET C'EST DÉLIBÉRÉ (ADR 0017). L'empreinte validée, le
+ *    cliquet d'effet extérieur — et il devait y en avoir un troisième. **Il est
+ *    arrivé au lot 1d** : `effetExterieurSurvenu`, la LECTURE du cliquet
+ *    (ADR 0021). L'objet plutôt que des paramètres positionnels a tenu sa
+ *    promesse — l'ajout n'a obligé personne à relire un ordre d'arguments.
+ *
+ * ⚠️ ET LA PHRASE QUI DISAIT « chacun de ses membres est un point de MUTATION de
+ *    la ligne » A ÉTÉ RÉÉCRITE, ICI COMME CHEZ SON PROPRIÉTAIRE. Le lecteur ne
+ *    mute rien, et ne le peut pas. Ce qui reste vrai, et qui est la vraie règle :
+ *    pour chaque membre qui MUTE, il n'existe qu'UN endroit où la valeur change.
  */
 export type CorpsDeChaine = (affineurs: AffineursDAppel) => Promise<Terminaison<ChargeServie>>;
 
@@ -1260,7 +1301,10 @@ export function empreintesParDefaut(execution: ExecutionEtablie): readonly strin
  */
 interface EnteteVivant {
   principal: string;
-  sessionId: string;
+  // ADR 0014 — la MÊME monnaie qu'`EnteteAppel` et que `IdentiteAppelante` : cet
+  // en-tête est recopié tel quel dans la ligne d'`ops_audit`, et une `string` ici
+  // aurait laissé le resserrement s'arrêter juste avant le journal.
+  sessionId: SessionId;
   tool: string;
   toolVersion: string;
   adapterVersion: string;
@@ -1414,7 +1458,14 @@ export async function orchestrerAppel(
     return { genre: "refus", etape: verdict.etape, code: verdict.code };
   };
 
-  const corps: CorpsDeChaine = async ({ affinerArgHash, signalerEffetExterieur }) => {
+  const corps: CorpsDeChaine = async ({
+    affinerArgHash,
+    signalerEffetExterieur,
+    // ADR 0021 — le TROISIÈME membre, celui que l'ADR 0017 annonçait. Il LIT le
+    // cliquet ; le `finally` de l'étape 14 en dérive l'issue d'idempotence. Il
+    // ne peut ni le lever ni le baisser.
+    effetExterieurSurvenu,
+  }) => {
     // ═══ ÉTAPE 0 — LE COFFRE (§ 23, ADR 0005) ═══════════════════════════════
     //
     // AVANT TOUT. Coffre fermé, aucun appel d'outil n'est servi.
@@ -1707,7 +1758,24 @@ export async function orchestrerAppel(
         // ⚠️ LES DEUX BOOLÉENS SE DÉRIVENT DU SCHÉMA, JAMAIS DE LA VALEUR. Le
         //    § 20 a retiré la règle « verbatim » : le socle raisonne sur la
         //    PROVENANCE, pas sur la forme du texte.
-        const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.idFields);
+        //
+        // 🔗 **C'EST ICI QUE LA DÉCLARATION DE L'ADR 0016 ATTEINT UNE DÉCISION.**
+        //    `outil.governanceFields` vient d'`ops_tool` par l'étape 6 ; sans cet
+        //    argument, la déclaration voyagerait du manifeste jusqu'au
+        //    catalogue puis s'arrêterait là — écrite, admise, journalisée, et
+        //    perdue avant la seule branche du § 20 qu'aucune confirmation ne
+        //    rattrape. C'était le défaut mesuré au lot 1c ; le retirer le rouvre,
+        //    et le compilateur le refuse (le paramètre n'a pas de valeur par
+        //    défaut, à dessein).
+        //
+        // 🔗 **ET `outil.idFields` N'Y ENTRE PLUS — ADR 0015, COUSU AU LOT 1d.**
+        //    Ce même appel passait la liste des identifiants DÉCLARÉS par
+        //    l'adaptateur, et l'étape 11 en retirait chaque champ nommé de la
+        //    surveillance : une ligne de manifeste — donc un dépôt tiers —
+        //    éteignait la garde d'exfiltration. Le paramètre a disparu de la
+        //    signature, et non pas seulement de cet appel : le rendre facultatif
+        //    aurait laissé un appelant le renseigner sans qu'une garde bouge.
+        const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.governanceFields);
         const v11 = dependances.etapeProvenance({
           sessionId: identite.sessionId,
           adapterId: outil.adapterId,
@@ -1825,12 +1893,62 @@ export async function orchestrerAppel(
     }
     const niveauCalcule: NiveauApplique = niveau;
 
-    const contexte = dependances.construireContexteOutil(
+    // ═══ LE `ctx` DU § 09 — ET L'EMPREINTE EST POSÉE ICI, PAR LE SOCLE ═══════
+    //
+    // ⚠️ **ADR 0020 — CETTE LIGNE EST LA COUTURE, ET ELLE N'EST PAS DÉLÉGUABLE.**
+    //    `construireContexteOutil` est une dépendance INJECTÉE : lui confier
+    //    l'empreinte reviendrait à confier la règle à des implémentations qui,
+    //    toutes, vivent aujourd'hui dans des fichiers de gardes. La règle serait
+    //    écrite, testée, documentée — et cousue nulle part. C'est le mode de
+    //    défaillance que le lot 1c a nommé, et il ne se répare pas par un
+    //    commentaire.
+    //
+    //    Le TYPE le rend impossible : `ConstruireContexteOutil` rend un
+    //    {@link ContexteSansEmpreinte}, et c'est cette construction-ci — un
+    //    module de PRODUCTION — qui pose le champ, en appelant l'unique fonction
+    //    qui sait le fabriquer.
+    //
+    // ⚠️ **ET LE `ctx` EST RECONSTRUIT CHAMP PAR CHAMP, PAS ÉTALÉ. MESURÉ.**
+    //    Un `{ ...construireContexteOutil(…), idempotencyRef }` compile, et il
+    //    laisse passer À L'EXÉCUTION toute propriété surnuméraire que le
+    //    constructeur injecté aurait posée — un `idempotencyKey` oublié, par
+    //    exemple. `Omit` est une opération de TYPE ; elle n'efface aucune clé
+    //    d'objet. Quatre harnais du dépôt portaient précisément cette ligne, et
+    //    le compilateur n'en a signalé qu'un seul : la vérification de propriétés
+    //    excédentaires ne mord pas de façon fiable au travers d'un type mappé.
+    //    Une garde qui dépend de cette subtilité n'est pas une garde.
+    //
+    //    Reconstruire ferme les deux sens à la fois : ce que l'adaptateur reçoit
+    //    est EXACTEMENT les neuf champs déclarés — ni un de plus au runtime, ni un
+    //    de moins à la compilation. Ce n'est pas une liste recopiée mais une
+    //    TOTALITÉ : ajouter un champ à `ToolContext` sans le poser ici est une
+    //    erreur de compilation, ce qui oblige l'orchestrateur à DÉCIDER d'où le
+    //    champ vient — exactement la question que l'inventaire des canaux du § 20
+    //    (`STATUT_DES_CANAUX_DE_CONTEXTE`) pose au même moment.
+    //
+    // ⚠️ CE QUI PASSE, ET CE QUI NE PASSE PAS. `appel.idempotencyKey` est la
+    //    chaîne LIBRE choisie par l'appelant ; `ctx.idempotencyRef` en est le
+    //    condensat SHA-256. Un adaptateur qui relaie vers une API tierce y trouve
+    //    le jeton stable dont il a besoin — la déduplication ne s'arrête pas à la
+    //    frontière du socle — et aucun extrait d'une lecture marquée ne survit au
+    //    passage. Le canal du § 20 est SUPPRIMÉ, pas surveillé.
+    const contexteDeclare = dependances.construireContexteOutil(
       identite,
       appel,
       profil,
       niveauCalcule.niveau,
     );
+    const contexte: ToolContext<ProfileName> = {
+      principal: contexteDeclare.principal,
+      sessionId: contexteDeclare.sessionId,
+      scopes: contexteDeclare.scopes,
+      policyLevel: contexteDeclare.policyLevel,
+      profile: contexteDeclare.profile,
+      idempotencyRef: empreinteDeCleDIdempotence(appel.idempotencyKey),
+      requestId: contexteDeclare.requestId,
+      deadline: contexteDeclare.deadline,
+      habilitations: contexteDeclare.habilitations,
+    };
 
     // ── LA LIGNE D'INTENTION — juste AVANT l'effet extérieur ────────────────
     ligneDIntention = await dependances.intention.avantEffet({
@@ -1841,7 +1959,30 @@ export async function orchestrerAppel(
       maintenant,
     });
 
-    let issueDeLEffet: "done" | "failed" | "interrompu" = "interrompu";
+    // ═══ DEUX ISSUES, ET C'EST LEUR CONFUSION QUI ÉTAIT LE DÉFAUT — ADR 0021 ══
+    //
+    // Une SEULE variable à trois valeurs servait DEUX questions, et le point
+    // d'usage l'écrasait en deux (`issueDeLEffet === "done" ? "done" : "failed"`).
+    // « interrompu » et « failed » devenaient le même mot à l'endroit exact où la
+    // distinction comptait — et `failed` est le seul statut que `reserver()`
+    // REPREND. Un envoi parti dont le traitement d'aval levait laissait donc une
+    // clé rejouable : **un courrier parti pouvait repartir.**
+    //
+    //  · L'INTENTION garde ses trois valeurs — « interrompu » y est le signal
+    //    recherché (ADR 0022), et rien ne l'écrase.
+    //  · L'IDEMPOTENCE se DÉRIVE, plus bas, par `issueDeReservation()`.
+    let issueDeLIntention: "done" | "failed" | "interrompu" = "interrompu";
+
+    /**
+     * L'étape 14 a-t-elle RENDU — succès ou refus — plutôt que levé ?
+     *
+     * ⚠️ C'EST UN FAIT, PAS UNE ISSUE. Il est posé une seule fois, JUSTE APRÈS
+     *    le retour d'`etapeExecution`, et aucune branche ultérieure ne le
+     *    reconsidère : tout ce qui suit se passe dans un monde où le handler a
+     *    rendu la main. C'est ce qui empêche qu'il se remette à décrire le genre
+     *    de la terminaison de l'APPEL au lieu de celui de l'ÉTAPE 14.
+     */
+    let terminaisonRendue = false;
     try {
       const v14 = await dependances.etapeExecution({
         outil,
@@ -1875,15 +2016,27 @@ export async function orchestrerAppel(
         compaction: outil.compaction,
       });
 
+      // ═══ L'ÉTAPE 14 A RENDU — ADR 0021, ET LE FAIT SE POSE ICI ═════════════
+      //
+      // ⚠️ AVANT TOUTE BRANCHE, ET C'EST TOUT L'ENJEU. Ce qui suit — refus
+      //    `result_too_large`, marquage de provenance, construction du succès —
+      //    se passe dans un monde où le handler a rendu la main. Poser le fait
+      //    dans chacune de ces branches aurait été autant d'occasions de
+      //    l'oublier : c'est le motif du cliquet de l'ADR 0017, appliqué au fait
+      //    voisin.
+      terminaisonRendue = true;
+
       if (v14.issue === "refuse") {
         // ⚠️ L'EFFET A DÉJÀ EU LIEU. Le refus porte sur ce qui SORT, pas sur ce
-        //    qui s'est passé : l'idempotence est close en `done`, sans quoi un
-        //    rejeu produirait un SECOND effet.
-        issueDeLEffet = "done";
+        //    qui s'est passé. L'idempotence se ferme en `done` — non plus par
+        //    cette affectation-ci, mais par `issueDeReservation()` dans le
+        //    `finally`, qui lit le CLIQUET et ce `terminaisonRendue`. La règle
+        //    n'a pas changé ; elle a cessé d'être écrite sur une seule branche.
+        issueDeLIntention = "done";
         return refuserDepuis(v14);
       }
 
-      issueDeLEffet = "done";
+      issueDeLIntention = "done";
       franchir(v14.etape);
 
       // ── LE MARQUAGE DE PROVENANCE — APRÈS l'étape 14, sur le RÉSULTAT ─────
@@ -1906,7 +2059,12 @@ export async function orchestrerAppel(
         partialSources: v14.etabli.partialSources,
       } satisfies Succes<ChargeServie>;
     } catch (erreur: unknown) {
-      issueDeLEffet = "failed";
+      // ⚠️ **PLUS AUCUNE ISSUE D'IDEMPOTENCE N'EST AFFECTÉE ICI — ADR 0021.**
+      //    C'est cette ligne, jumelée au ternaire du `finally`, qui rendait un
+      //    envoi PARTI rejouable : `failed` est le seul statut que `reserver()`
+      //    reprend. Ce qui reste est l'issue d'INTENTION, qui n'est pas la même
+      //    question et n'a jamais commandé de rejeu.
+      issueDeLIntention = "failed";
       throw erreur;
     } finally {
       // ═══════════════════════════════════════════════════════════════════════
@@ -1938,7 +2096,7 @@ export async function orchestrerAppel(
       //    derrière une panne de journalisation d'intention. C'est exactement ce
       //    qu'on refuse ailleurs, et c'est pourquoi elle n'est pas relancée.
       try {
-        await dependances.intention.apresEffet(ligneDIntention, issueDeLEffet);
+        await dependances.intention.apresEffet(ligneDIntention, issueDeLIntention);
       } catch {
         // Absorbée à dessein. La ligne d'intention reste ouverte : c'est le
         // signal, et il survit à ce bloc.
@@ -1954,10 +2112,37 @@ export async function orchestrerAppel(
       //    verrouillée jusqu'au TTL sans que rien ne le dise, ce qui est pire.
       //    À reconsidérer le jour où la ligne d'INTENTION est armée : elle
       //    porterait alors, seule, cette distinction.
+      // ═══ L'ISSUE D'IDEMPOTENCE SE DÉRIVE — ADR 0021, ET LE TERNAIRE A DISPARU
+      //
+      // ⚠️ CE QUI SE TROUVAIT ICI : `issue: issueDeLEffet === "done" ? "done" :
+      //    "failed"`. Une variable à trois valeurs, écrasée en deux au point
+      //    d'usage — donc une décision qu'on ne prenait pas. « interrompu » y
+      //    devenait « failed », et `failed` est le seul statut que `reserver()`
+      //    reprend : un envoi PARTI dont la compaction, le masquage, le marquage
+      //    de provenance ou cette clôture-ci levait redevenait rejouable.
+      //
+      // ⚠️ CE QUI DÉCIDE MAINTENANT : le CLIQUET de l'ADR 0017, **LU**. Il vaut
+      //    `true` dès que l'adaptateur a rendu sur un effet extérieur — le socle
+      //    SAIT déjà, à cet instant précis, que quelque chose est sorti ; il ne
+      //    le lisait pas. Le lecteur ne peut ni lever ni baisser le cliquet : il
+      //    est sans argument et rend un booléen.
+      //
+      // ⚠️ ET LE JOURNAL PEUT DIVERGER DE L'IDEMPOTENCE SUR UN MÊME APPEL —
+      //    `externalEffect: false` avec une clé fermée en `done`, quand
+      //    l'adaptateur lève APRÈS avoir envoyé. Ce n'est pas une contradiction :
+      //    le premier dit ce que le socle A VU, le second ce qu'il REFUSE DE
+      //    PARIER. Le § 24 doit lire les deux, et un tableau de bord qui n'en lit
+      //    qu'un reste faux.
       await cloturerLimites({
         depotIdempotence: dependances.depotIdempotence,
         resultat: limites,
-        issue: issueDeLEffet === "done" ? "done" : "failed",
+        issue: issueDeReservation({
+          effetExterieurSurvenu: effetExterieurSurvenu(),
+          terminaisonRendue,
+          // L'`effect` ÉPINGLÉ de `ops_tool` (§ 20, règle d'épinglage), jamais
+          // celui qu'un manifeste vient d'annoncer.
+          effetDeclare: outil.effect,
+        }),
         resultRef: null,
         maintenant: dependances.maintenant(),
       });

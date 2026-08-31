@@ -12,6 +12,9 @@ import {
   type JsonValeur,
 } from "./canonique.js";
 import { SCELLEUR_TEMOIN, contenuTemoin } from "./fixtures.js";
+// ADR 0014 — la session d'un témoin vient de la fabrique NOMMÉE de
+// `core/identite/`, jamais d'un littéral : le type marqué ne l'accepte plus.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 import type { ContenuLigne } from "./vocabulaire.js";
 
 /**
@@ -113,7 +116,7 @@ describe("core/audit — la sérialisation canonique", () => {
 const VARIANTES: Record<ChampCouvert, Partial<ContenuLigne>> = {
   at: { at: new Date(Date.UTC(2030, 0, 1)) },
   principal: { principal: "autre-principal" },
-  sessionId: { sessionId: "autre-session" },
+  sessionId: { sessionId: sessionIdDeTemoin() },
   tool: { tool: "ops.autre.outil" },
   toolVersion: { toolVersion: "2.0.0" },
   adapterVersion: { adapterVersion: "2.0.0" },

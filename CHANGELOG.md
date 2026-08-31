@@ -5,6 +5,156 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 1d — brancher les décisions, fermer le canal `idempotencyKey` et le rejeu après panne — 2026-08-31
+
+Le lot 1c s'est terminé sur un mode de défaillance que personne n'avait
+anticipé, et qu'un fichier d'épreuve porte dans son nom
+(`lot1c-la-couture-manquante.temoin.spec.ts`) : **une décision écrite, testée,
+documentée — et non cousue au chemin de production.** Quatre ADR sur cinq
+étaient dans cet état. Leurs fonctions existaient, étaient exportées, étaient
+gardées — et **aucun module de production ne les appelait**. Les tests passaient
+parce qu'ils éprouvaient la FONCTION, jamais son BRANCHEMENT.
+
+Ce lot coud. Et il pose le mécanisme qui empêche que cela recommence.
+
+### Les quatre décisions du lot
+
+| ADR      | Décision                                                                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0019** | Toute décision d'architecture **nomme le symbole qui la porte**, et une garde confronte ce registre au graphe d'appels réel.                  |
+| **0020** | La **clé d'idempotence n'atteint plus l'adaptateur** ; le `ctx` n'en porte que l'empreinte, et le nom reste interdit dans un schéma d'entrée. |
+| **0021** | L'**issue d'idempotence se dérive du cliquet** d'effet extérieur, jamais du seul genre de la terminaison.                                     |
+| **0022** | La **ligne d'intention a une FORME et un COMPTEUR**, et les deux atterrissent ensemble.                                                       |
+
+### Ce que la recette a écrit, et pourquoi
+
+**La pièce qui manquait était la garde de l'ADR 0019 elle-même.** L'ADR pose
+trois pièces « indissociables » — un registre typé, une garde qui le confronte au
+graphe d'appels (G1), une garde de couverture qui lit `docs/adr/` (G2). **Seule
+la première avait été écrite.** Le registre — 33 entrées, 18 ADR — était une
+DONNÉE que rien ne relisait, et l'entrée qui le décrit lui-même déléguait sa
+mesure à `core/coutures/registre.spec.ts`, c'est-à-dire à un fichier absent.
+**L'ADR écrite pour empêcher qu'une décision reste non cousue était elle-même
+non cousue** : le défaut du lot 1c reproduit à l'intérieur de son propre remède.
+
+Trois fichiers y répondent :
+
+- `core/coutures/verifier.ts` — le corps, **fonction PURE d'un ensemble de
+  fichiers injecté**. Il ne lit ni le disque, ni le registre, ni
+  `tsconfig.build.json` : tout lui est passé en argument, ce qui rend le témoin
+  possible sans mutiler le dépôt ;
+- `core/coutures/registre.spec.ts` — **G1 et G2 sur le dépôt réel**, avec les
+  quatre planchers que l'ADR prescrit ;
+- `core/coutures/couture.temoin.spec.ts` — **G3, quatorze témoins fabriqués**,
+  dont **huit exigent un rouge**.
+
+**Et elle a rougi tout de suite, sur un désaccord réel.** L'entrée ADR 0018
+déclarait `deciderDemarrageMonoInstance` en état `à-coudre` — « exactement zéro
+appelant », motif « 🔴 la fonction n'existe pas encore » — alors que la fonction
+était définie et appelée par `core/instance/demarrage.ts`, **dans le même arbre
+de travail**. C'est le second sens de rougissement, celui que l'ADR 0019 nomme
+« celui qu'on oublie d'écrire », survenu dans le lot même qui l'a écrit, et rien
+ne l'avait vu parce que la garde n'existait pas.
+
+### La mesure du lot
+
+**18 symboles ont au moins un appelant de production, sur 27 confrontés** ; les
+9 autres sont en `à-coudre`, c'est-à-dire **zéro appelant EXIGÉ et mesuré** —
+leur appelant est `core/transport/`, qui n'existe pas. **11 des 18 ADR portent au
+moins une décision appelée par un module de production.** Le registre compte 33
+entrées : 18 `cousue`, 9 `à-coudre`, 2 `à-nommer`, 4 `hors-code`. **0 désaccord**,
+sur **90 modules de production balayés**.
+
+### Les autres corrections de la recette
+
+- **`tsconfig.build.json` gagne ses deux exclusions** (décision 3 de l'ADR 0019).
+  `core/epreuve/` et tout `fixtures.ts` étaient **émis par `pnpm build`** et
+  comptaient donc comme modules de production : un symbole dont l'unique appelant
+  aurait été une fabrique de témoins serait passé pour cousu. Mesuré : `dist`
+  passe de 92 à 90 fichiers `.js`, et **aucun module de production n'en importe
+  un seul**.
+- **`core/audit/fixtures.ts` retrouve une vraie session.** Le repli
+  `SESSION_HORS_APPEL`, posé faute de pouvoir importer la fabrique depuis un
+  fichier livré, est levé — le kit n'est plus livré. ⚠️ **Et il ne se levait pas
+  comme l'écart le proposait :** `sessionIdDeTemoin()` rend deux sessions
+  différentes à deux appels, par décision écrite ; l'appeler dans le corps de
+  `contenuTemoin` a rendu le kit NON DÉTERMINISTE et fait rougir
+  `core/audit/canonique.spec.ts` sur-le-champ. Les deux sessions sont donc
+  frappées **une fois au chargement**, et alternées comme avant l'ADR 0014.
+- **Le contrôle 4 d'`ops/mono-instance.ts` cesse d'être une seconde dérivation.**
+  Il recalculait le statut de healthcheck par un ternaire, pendant que
+  `statutHealthcheckPourVerrou()` disait la même chose. Une garde de SOURCE le
+  tient désormais, avec son témoin fabriqué — **1 appel, 0 recalcul** —, et la
+  mesure « 4 états du verrou confrontés, 0 désaccord » dit pourquoi aucune garde
+  de comportement ne pouvait voir ce défaut.
+- **Le rapport du contrôle 7 annonce ses TROIS comptes** (ADR 0020) :
+  `9 · 1 · 1 · 11 au total`. Il en annonçait deux, et `9 + 1 ≠ 11` — le onzième
+  nom EST le troisième ensemble, celui qui empêche le retrait d'`idempotencyKey`
+  de rouvrir ce nom dans un schéma d'entrée en silence.
+- **Le témoin qui mesurait ce rapport a été resserré**, parce qu'il était devenu
+  vrai pour la mauvaise raison : il cherchait `cles.<champ>.length` dans TOUT le
+  fichier, et le correctif y avait posé un plancher portant la même forme.
+  Mesuré en débranchant — le compte retiré du MESSAGE, il restait vert et
+  annonçait « 3 annoncés ». Il ne lit plus que le `console.info` du rapport.
+- **`docs/adr/README.md`** dit ce qu'il en est de la plage **0006-0009** : elle
+  n'a jamais été attribuée — vérifié sur l'historique complet, aucune
+  suppression, aucune mention nulle part. La garde G2 compte désormais les trous
+  de numérotation, que la dérivation par le contenu du dossier rend invisibles.
+- **Le README passe de dix à onze écarts** relevés dans le cahier des charges :
+  `ops_audit.sessionId` porte **deux populations de lignes**, et la valeur
+  réservée dit « cette ligne n'a pas de session », jamais « cette ligne n'est pas
+  un appel ».
+
+### Les `it.fails` qui ont basculé
+
+Cinq attentes ouvertes ont ROUGI en atterrissant — ce qu'un `it.fails` est écrit
+pour produire — et sont passées en `it()` : les deux gardes de l'ADR 0019
+existent · toute mesure déléguée nomme un fichier qui existe · aucune entrée du
+registre ne contredit le graphe d'appels · aucune fabrique de témoins n'est
+émise par `pnpm build` · le rapport du contrôle 7 annonce ses trois comptes. Le
+cliquet des désaccords connus s'est **vidé**. **Aucun test n'a été supprimé ni
+affaibli** ; un `it()` a vu son FAIT mesuré mis à jour, motif écrit à côté.
+
+### Les gates, mesurées
+
+`pnpm typecheck` **vert** · `pnpm lint` **vert** · `pnpm format:check` **vert sur
+tout le dépôt** · `pnpm test` **1 138 verts, 12 `it.fails`, 1 `.todo`, 0 rouge**
+(184 fichiers TypeScript, 91 de gardes, **0 sans compte annoncé**) · `pnpm build`
+**vert**, 90 modules émis.
+
+### Ce qui reste ouvert — et le premier est un BLOQUANT
+
+- 🔴 **`ops_audit.tool` et `ops_audit.principal` ne sont bornés par RIEN**, et une
+  terminaison peut ne laisser **aucune ligne**. Les deux champs sont posés
+  verbatim dans l'en-tête vivant depuis `AppelEntrant.nomComplet` et
+  `IdentiteAppelante` ; la garde de forme du § 31 refuse alors la ligne, et
+  l'écriture lève HORS du `try` de `journaliser`. Rien ne SORT — la porte est
+  fermée —, c'est la TRACE qui est perdue, et avec elle l'invariant du § 11 et la
+  métrique de refus du § 24. Mesuré par l'épreuve : **4 formes soumises,
+  4 levées, 0 ligne écrite**, avec son témoin de capacité apparié (2 cas bien
+  formés → 2 lignes). **Non corrigé ici : le choix de la valeur de repli et la
+  question de savoir si un `principal` malformé doit refuser l'appel ou seulement
+  borner sa trace sont des arbitrages de cahier des charges**, et les combler par
+  une supposition serait le geste que ce lot existe pour proscrire.
+- **L'inventaire des canaux du § 20 est clos sur la destination, pas sur la
+  source** : `AppelEntrant` (5 champs) et `IdentiteAppelante` (6, couverts par
+  simple homonymie) ne sont classés par aucun inventaire tenu par le compilateur.
+- **Le code d'erreur de l'étape 13 est écrasé par celui de son ancrage** : quatre
+  causes d'idempotence de natures opposées sortent en `conflict`, là où
+  `invalid_input` dirait « corrige ton argument » plutôt que « relis et rejoue ».
+- **La moitié Postgres de l'ADR 0018 n'est pas écrite**, et aucun point d'entrée
+  de conteneur n'appelle `demarrerLeSocleMonoInstance` : un socle déployé
+  aujourd'hui ne prendrait toujours aucun verrou.
+- **`verifierEnumerationProfils` (ADR 0004) n'a toujours aucun appelant** — le
+  jumeau oublié de `verifierFormeDuSceau` : le sceau des profils est confronté
+  dans sa FORME et jamais dans son CONTENU.
+- **`ops_tool.governanceFields` n'existe pas dans `prisma/schema.prisma`** : la
+  déclaration de l'ADR 0016 voyage du manifeste à l'étape 11 **par le type**, et
+  la couture est complète sur tout le chemin qui EXISTE — mais elle ne survivra
+  pas au premier catalogue réel si la colonne n'atterrit pas avec lui.
+
+---
+
 ## Lot 1c — cinq décisions d'architecture, et la moitié de leur couture — 2026-08-31
 
 L'épreuve adverse du lot 1b avait montré que **la garde la plus importante du

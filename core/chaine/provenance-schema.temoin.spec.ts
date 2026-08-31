@@ -8,7 +8,7 @@
  * SCHÉMA « cet outil peut-il porter un argument libre ? ». L'orchestrateur la
  * branche directement — `orchestrateur.ts` :
  *
- *     const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.idFields);
+ *     const analyse = analyserArgumentsDuSchema(outil.inputSchema, outil.governanceFields);
  *     const v11 = dependances.etapeProvenance({ …, porteUnArgumentLibre: analyse.porteUnArgumentLibre, … });
  *
  * Donc : `porteUnArgumentLibre === false` ⇒ l'étape 11 ne refuse rien et
@@ -84,6 +84,7 @@
 import { describe, expect, it } from "vitest";
 
 import { analyserFermeture } from "../adapter-kit/fermeture.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 import {
   FAMILLES_GOUVERNANCE,
   analyserArgumentsDuSchema,
@@ -115,7 +116,7 @@ function croyance(schema: Record<string, unknown>): {
   readonly admisParLeRegistre: boolean;
   readonly proprietesInspectees: number;
 } {
-  const analyse = analyserArgumentsDuSchema(schema, []);
+  const analyse = analyserArgumentsDuSchema(schema, AUCUN_CHAMP_DE_GOUVERNANCE);
   return {
     porteUnArgumentLibre: analyse.porteUnArgumentLibre,
     admisParLeRegistre: analyserFermeture(schema as never).ferme,
@@ -165,7 +166,10 @@ describe("étape 11 — la dérivation du § 20 voit la forme NUE", () => {
     // ⚠️ CE TÉMOIN EST LE PLANCHER DE TOUS LES AUTRES. Sans lui, un `it.fails`
     //    vert ne distinguerait pas « la dérivation ne voit pas cette forme-ci »
     //    de « la dérivation ne voit plus rien du tout ».
-    const nu = analyserArgumentsDuSchema(outilAvecChamp({ type: "string" }), []);
+    const nu = analyserArgumentsDuSchema(
+      outilAvecChamp({ type: "string" }),
+      AUCUN_CHAMP_DE_GOUVERNANCE,
+    );
 
     console.info(
       `[capacité étape 11] 1 schéma nu mesuré · ${String(nu.proprietesInspectees)} propriété(s) ` +
@@ -184,7 +188,7 @@ describe("étape 11 — la dérivation du § 20 voit la forme NUE", () => {
   it("reste fail-closed sur un schéma illisible, et le DIT", () => {
     const cyclique: Record<string, unknown> = { type: "object" };
     cyclique["properties"] = { soi: cyclique };
-    const analyse = analyserArgumentsDuSchema(cyclique, []);
+    const analyse = analyserArgumentsDuSchema(cyclique, AUCUN_CHAMP_DE_GOUVERNANCE);
 
     console.info(
       `[fail-closed étape 11] illisible=${String(analyse.schemaIllisible)} · ` +

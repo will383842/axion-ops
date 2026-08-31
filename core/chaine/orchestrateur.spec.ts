@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+
 import { APPEL_STEPS, type AppelStep, type Habilitations, type OpsScope } from "../types.js";
 import { Journal, JournalMemoire, type LigneAudit } from "../audit/index.js";
 import { HorlogeFigee, SCELLEUR_TEMOIN } from "../audit/fixtures.js";
 import { correspondance } from "../epreuve/outils.js";
+// ADR 0020 — `ops_idempotency.key` porte l'EMPREINTE de la clé, jamais la clé.
+import { empreinteDeCleDIdempotence } from "../limits/index.js";
 import type {
   DemandeIncrement,
   DepotIdempotence,
@@ -140,6 +144,8 @@ function outilTemoin(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogu
     compaction: { free: [], tier2: [], aggregateBy: null },
     maxBytes: 4096,
     idFields: [],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
   };
   return { ...base, ...surcharge };
 }
@@ -407,7 +413,9 @@ function fabriquerHarnais(reglages: Reglages = {}): Harnais {
         scopes: identiteRecue.scopes,
         policyLevel: niveau,
         profile: profil,
-        idempotencyKey: appel.idempotencyKey,
+        // ADR 0020 — le `ctx` ne porte PLUS la clé. C'est l'orchestrateur, en
+        // production, qui pose `idempotencyRef` (l'empreinte) ; un constructeur
+        // de contexte ne le peut plus, et le type le lui interdit.
         requestId: identiteRecue.requestId,
         deadline: identiteRecue.deadline,
         habilitations: identiteRecue.habilitations,
@@ -537,6 +545,68 @@ describe("§ 11 — un appel traverse la chaîne et journalise", () => {
     expect(harnais.index.taille()).toBeGreaterThanOrEqual(1);
     expect(harnais.index.domainesMarquants(SESSION_TEMOIN)).toContain("temoin");
   });
+
+  /**
+   * LA COUTURE DE L'ADR 0016, MESURÉE SUR LE VERDICT DE LA CHAÎNE ENTIÈRE.
+   *
+   * ⚠️ **POURQUOI CE TEST VIT ICI ET PAS DANS LE TÉMOIN DE L'ÉTAPE 11.**
+   *    `gouvernance-declaree.temoin.spec.ts` prouve que la RÈGLE est juste, et
+   *    que le source de ce fichier-ci nomme `outil.governanceFields`. Ni l'un ni
+   *    l'autre ne prouve qu'un APPEL RÉEL est refusé : c'est `orchestrerAppel()`
+   *    qui relie l'outil du catalogue à l'étape 11, et c'est ce lien-là que
+   *    l'épreuve du lot 1c a trouvé manquant. Retirer l'argument fait rougir ici,
+   *    sur le `stepDenied` d'une ligne d'audit — pas sur une lecture de source.
+   *
+   * ⚠️ **LE SCHÉMA EST FERMÉ PAR UN `enum`, ET C'EST TOUTE LA DIFFICULTÉ.** Avec
+   *    un `{"type":"string"}`, l'appel serait refusé de toute façon, par la
+   *    branche « argument libre » — et ce test serait vert sans rien mesurer de
+   *    la déclaration. Le contraste ci-dessous le vérifie : SANS la déclaration,
+   *    le même appel PASSE.
+   */
+  it("ADR 0016 — un `governanceFields` déclaré fait refuser à l'étape 11, et le contraste le prouve", async () => {
+    const schemaFermeSurUnEnum = {
+      type: "object",
+      properties: { emailTo: { enum: ["equipe@exemple.invalid", "secours@exemple.invalid"] } },
+      additionalProperties: false,
+    } as const;
+
+    /** Le même décor deux fois : seule la DÉCLARATION change. */
+    const soumettre = async (
+      governanceFields: readonly string[],
+    ): Promise<{ readonly decision: string; readonly stepDenied: number | null }> => {
+      const harnais = fabriquerHarnais({
+        outils: [outilTemoin({ inputSchema: schemaFermeSurUnEnum, governanceFields })],
+      });
+      // La session a lu du `personal` chez un AUTRE domaine, avant cet appel.
+      harnais.index.marquer(SESSION_TEMOIN, "ailleurs", ["empreinte-temoin"]);
+      await orchestrerAppel(
+        harnais.identite,
+        appelTemoin({ input: { emailTo: "secours@exemple.invalid" } }),
+        harnais.deps,
+      );
+      const ligne = derniereLigne(harnais.store);
+      return { decision: ligne.decision, stepDenied: ligne.stepDenied };
+    };
+
+    const sans = await soumettre([]);
+    const avec = await soumettre(["emailTo"]);
+
+    console.log(
+      `[couture ADR 0016] SANS déclaration : ${sans.decision} (étape ${String(sans.stepDenied)}) · ` +
+        `AVEC déclaration : ${avec.decision} (étape ${String(avec.stepDenied)}) · ` +
+        "1 champ déclaré, fermé par un `enum`, sur session marquée par un autre domaine",
+    );
+
+    // LE CONTRASTE : sans déclaration, rien ne mord — ni le filet au nom (qui ne
+    // reconnaît pas `emailTo`), ni la branche « argument libre » (le champ est
+    // fermé). C'est ce qui rend le refus d'après ATTRIBUABLE à la déclaration.
+    expect(sans.decision, "sans déclaration, l'appel passe").toBe("autorisé");
+    expect(sans.stepDenied).toBeNull();
+
+    // LA COUTURE : déclarée, la même entrée est refusée À L'ÉTAPE 11.
+    expect(avec.decision, "ADR 0016 — la déclaration atteint la décision").toBe("refusé");
+    expect(avec.stepDenied, "et c'est bien la provenance qui refuse").toBe(11);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -643,7 +713,10 @@ const SCENARIOS: readonly ScenarioRefus[] = [
       });
       harnais.idempotence.poser({
         tool: "temoin.lire",
-        key: "cle-1",
+        // ADR 0020 — `ops_idempotency.key` porte l'EMPREINTE. Une ligne posée
+        // sous la chaîne d'origine ne serait JAMAIS retrouvée, et l'étape 13
+        // réserverait tranquillement au lieu de refuser.
+        key: empreinteDeCleDIdempotence("cle-1"),
         status: "in_flight",
         // Une empreinte de la bonne FORME, mais qui n'est celle d'aucun argument
         // de cet appel : c'est exactement le cas que le § 12 refuse.
@@ -759,7 +832,9 @@ describe("§ 11 — toute terminaison écrit une ligne portant LE NUMÉRO de l'�
       orchestrerAppel(harnais.identite, appelTemoin({ idempotencyKey: "cle-2" }), harnais.deps),
     ).rejects.toThrowError(/adaptateur témoin/u);
 
-    const ligne = harnais.idempotence.lignes.get("temoin.lire::cle-2");
+    const ligne = harnais.idempotence.lignes.get(
+      `temoin.lire::${empreinteDeCleDIdempotence("cle-2")}`,
+    );
     console.log(`[idempotence] statut après panne : ${String(ligne?.status)}`);
     // Laissée `in_flight`, la clé bloquerait tout rejeu jusqu'au TTL.
     expect(ligne?.status).toBe("failed");
@@ -1300,7 +1375,8 @@ describe("§ 13 — un rejeu n'est pas une exécution", () => {
     const argHash = await correspondance.calculer("temoin.lire", {});
     harnais.idempotence.poser({
       tool: "temoin.lire",
-      key: "cle-rejeu",
+      // ADR 0020 — l'EMPREINTE, jamais la clé.
+      key: empreinteDeCleDIdempotence("cle-rejeu"),
       status: "done",
       argHash,
       resultRef: "ref-1",

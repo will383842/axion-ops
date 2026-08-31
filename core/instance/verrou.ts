@@ -1,9 +1,13 @@
 /**
  * `core/instance/verrou.ts` — LE SOCLE EST MONO-INSTANCE, ET UNE GARDE LE TIENT.
  *
- * ⚠️ CE FICHIER NE PORTE QUE DES DÉCLARATIONS. Le lot 1c l'a posé ; l'adaptation
- *    Postgres, le double en mémoire et les gardes sont écrits par le
- *    constructeur ④. Voir **ADR 0018**.
+ * ⚠️ CE QUE CE FICHIER PORTE, ET CE QU'IL NE PORTE PAS. Le lot 1c l'a posé en
+ *    DÉCLARATIONS SEULES ; le lot 1d y a cousu la moitié « EMPÊCHER » de l'ADR
+ *    0018 — l'identité frappée, l'arbitre PUR du démarrage et la dérivation du
+ *    statut de healthcheck. Le double en mémoire du port vit dans
+ *    `core/instance/memoire.ts`, la séquence de démarrage dans
+ *    `core/instance/demarrage.ts`, et **l'adaptation Postgres reste à écrire** :
+ *    elle attend `core/transport/`, qui n'existe pas. Voir **ADR 0018**.
  *
  * ═══ LE DÉFAUT QUE CE FICHIER FERME ═══
  *
@@ -50,6 +54,8 @@
  * rien d'autre. L'index de provenance reste strictement en mémoire, et le
  * § 31 reste tenu.
  */
+
+import { randomBytes } from "node:crypto";
 
 import type { EtatIndexProvenance } from "../chaine/etape-11-provenance.js";
 
@@ -246,4 +252,116 @@ export interface SanteMonoInstance {
   readonly provenance: Pick<EtatIndexProvenance, "extraits" | "sessions" | "indetermine">;
   /** {@link STATUT_HEALTHCHECK_VERROU_TENU} ou {@link STATUT_HEALTHCHECK_VERROU_ABSENT}. */
   readonly statut: number;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  L'IDENTITÉ, FRAPPÉE
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * FRAPPE UNE IDENTITÉ D'INSTANCE — 16 octets d'aléa, rendus en hexadécimal.
+ *
+ * ⚠️ AUCUNE ENTRÉE DU SYSTÈME N'Y ENTRE, ET C'EST LA RÈGLE DE DÉPÔT PUBLIC. Ni
+ *    `pid`, ni nom d'hôte, ni identifiant de conteneur : la seule question que
+ *    cet identifiant sert à trancher est « est-ce toujours MOI ? », et l'aléa y
+ *    répond aussi bien qu'un identifiant système — sans rien publier.
+ *
+ * ⚠️ `demarreeA` EST INJECTABLE, comme l'`Horloge` de `core/audit`. Une garde
+ *    qui lirait l'heure réelle échoue un jour de bascule, et personne ne sait
+ *    pourquoi.
+ */
+export function frapperInstance(demarreeA: Date = new Date()): InstanceDuSocle {
+  return { instanceId: randomBytes(OCTETS_INSTANCE_ID).toString("hex"), demarreeA };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  L'ARBITRE DU DÉMARRAGE — LA MOITIÉ « EMPÊCHER » DE L'ADR 0018
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * CE QUE CHAQUE ÉTAT FAIT DIRE AU SOCLE. UNE TABLE, PAS UNE SUITE DE `if`.
+ *
+ * ⚠️ LE TYPE `Record<EtatDuVerrou, string>` EST LA GARDE, ET ELLE TIENT À LA
+ *    COMPILATION. Un cinquième état ajouté à {@link ETATS_DU_VERROU} rend
+ *    `tsc --noEmit` rouge ici, avant qu'aucun test ne tourne : c'est la seule
+ *    forme de garde qu'on ne peut pas oublier d'exécuter.
+ *
+ * ⚠️ LE MESSAGE NOMME LE GESTE, JAMAIS UN IDENTIFIANT D'INFRASTRUCTURE (§ 25,
+ *    « le message nomme la commande » ; § 29, dépôt public). Aucun nom d'hôte,
+ *    aucune adresse, aucun nom de service ne doit entrer ici : ces messages
+ *    sortent par le healthcheck et par les journaux d'exploitation.
+ */
+const MESSAGE_DE_DEMARRAGE: Record<EtatDuVerrou, string> = {
+  tenu:
+    "Verrou d'instance TENU : ce socle est seul à servir. Nominal — et c'est la condition " +
+    "sous laquelle la garde d'exfiltration du § 20 s'applique à tous les appels, puisque " +
+    "l'index de provenance est local au processus.",
+  refusé:
+    "Verrou d'instance REFUSÉ : une autre instance le tenait déjà. LE SOCLE NE DÉMARRE PAS. " +
+    "Arrêter l'instance en place, ou ramener le déploiement à UNE seule réplique — un " +
+    "déploiement en recouvrement fait précisément échouer ce démarrage-ci, et c'est le " +
+    "comportement voulu. Ne jamais contourner en désactivant le verrou : à deux instances, " +
+    "la garde du § 20 ne s'applique qu'à celle qui sert l'appel, et aucun compte ne le dit. " +
+    "LE § 20 EST À ROUVRIR AVANT d'ajouter un réplica, pas après.",
+  perdu:
+    "Verrou d'instance PERDU : il a été tenu, il ne l'est plus, et une autre instance a pu " +
+    "le reprendre. LE SOCLE NE DÉMARRE PAS, et un socle déjà démarré doit être REDÉMARRÉ — " +
+    "c'est le geste qui répare cet état-là, et lui seul.",
+  indisponible:
+    "Magasin de verrous INJOIGNABLE : le socle ne peut pas savoir s'il est seul, donc il " +
+    "n'affirme rien et NE DÉMARRE PAS. Réparer le magasin ; redémarrer n'y changerait rien. " +
+    "Un régime « démarre mais n'accepte aucun appel » n'existe pas : le journal vit dans la " +
+    "même base et le § 11 en fait un invariant fail-closed — un socle qui ne peut pas " +
+    "journaliser n'a rien à servir.",
+};
+
+/**
+ * CE QUE L'ÉTAT DU VERROU DÉCIDE AU DÉMARRAGE. **PURE.**
+ *
+ * Même forme et même motif que `decisionDeDemarrage` de
+ * `core/vault/demarrage.ts` : la décision se couvre sur les QUATRE états sans
+ * monter un socle ni une base, et l'entrée du conteneur n'a rien à recalculer —
+ * elle applique. Une décision prise à deux endroits est une décision qui
+ * divergera.
+ *
+ * ⚠️ `demarre` EST DÉRIVÉ D'{@link ETATS_SANS_EXCLUSIVITE}, JAMAIS ÉCRIT À LA
+ *    MAIN. C'est ce qui fait tomber un état NOUVEAU du côté fail-closed le jour
+ *    où il est ajouté, sans qu'aucune liste ne soit retouchée : un socle qui ne
+ *    sait pas s'il est seul ne peut pas non plus journaliser.
+ *
+ * ⚠️ `statutHealthcheck` VAUT `null` SUR LES TROIS REFUS, et ce n'est pas un
+ *    oubli : le processus ne vit pas, il n'y a aucun healthcheck à rendre. Le
+ *    503 de l'ADR 0018 est le statut du verrou PERDU EN COURS DE VIE — il se lit
+ *    par {@link statutHealthcheckPourVerrou}, appelé à chaque lecture, et non
+ *    ici.
+ */
+export function deciderDemarrageMonoInstance(etat: EtatDuVerrou): DecisionDeDemarrageMonoInstance {
+  const demarre = !ETATS_SANS_EXCLUSIVITE.includes(etat);
+  return {
+    etat,
+    demarre,
+    statutHealthcheck: demarre ? STATUT_HEALTHCHECK_VERROU_TENU : null,
+    message: MESSAGE_DE_DEMARRAGE[etat],
+  };
+}
+
+/**
+ * LE STATUT DU HEALTHCHECK EN CONTINU, DÉRIVÉ DE L'ÉTAT RELU.
+ *
+ * ⚠️ UN SEUL ENDROIT DÉRIVE CETTE TABLE. `ops/mono-instance.ts` la recalcule
+ *    aujourd'hui dans son contrôle 4 (`sante.verrou === "tenu" ? … : …`) : deux
+ *    dérivations du même fait, qui se contrediront le jour où l'une des deux
+ *    changera. Écart porté au rapport du lot ; ce fichier-ci est la source.
+ */
+export function statutHealthcheckPourVerrou(etat: EtatDuVerrou): number {
+  return etat === "tenu" ? STATUT_HEALTHCHECK_VERROU_TENU : STATUT_HEALTHCHECK_VERROU_ABSENT;
+}
+
+/**
+ * La décision pour CHACUN des quatre états. DÉRIVÉ d'{@link ETATS_DU_VERROU} :
+ * ajouter un état allonge cette liste sans qu'aucune énumération ne soit à
+ * retoucher — et fait rougir les gardes qui comptent, ce qui est le but.
+ */
+export function decisionsPourTousLesEtatsDuVerrou(): readonly DecisionDeDemarrageMonoInstance[] {
+  return ETATS_DU_VERROU.map(deciderDemarrageMonoInstance);
 }

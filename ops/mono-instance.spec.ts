@@ -1,10 +1,15 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import type { EtatDuVerrou } from "../core/instance/verrou.js";
 import {
+  ETATS_DU_VERROU,
   FORME_INSTANCE_ID,
   STATUT_HEALTHCHECK_VERROU_ABSENT,
   STATUT_HEALTHCHECK_VERROU_TENU,
+  statutHealthcheckPourVerrou,
 } from "../core/instance/verrou.js";
 import {
   BORNE_DOBSERVATION,
@@ -340,5 +345,101 @@ describe("ops/mono-instance — le réglage de déploiement", () => {
     console.info(`[garde répliques] ${String(mesures)} réglage(s) confronté(s) sur ${cas.length}`);
     expect(mesures).toBe(cas.length);
     expect(REPLIQUES_ADMISES).toBe(1);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  LE CONTRÔLE 4 N'A QU'UNE SEULE DÉRIVATION — mesuré, pas relu
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * **DEUX DÉRIVATIONS D'UN MÊME FAIT FINISSENT PAR SE CONTREDIRE.**
+ *
+ * Le contrôle 4 confronte le statut qu'un socle observé annonce à l'état de
+ * verrou qu'il déclare. Jusqu'à la recette du lot 1d, il RECALCULAIT le statut
+ * attendu par un ternaire sur les deux constantes, pendant que
+ * `core/instance/verrou.ts` portait `statutHealthcheckPourVerrou()`, qui dit la
+ * même chose. Les deux tables étaient identiques ce jour-là — elles le sont
+ * toujours le jour où on les écrit. Elles cessent de l'être le jour où l'une des
+ * deux change, et des deux, **c'est le CONTRÔLE qui ne suit pas** : personne ne
+ * relit un observateur en ajoutant un état de verrou.
+ *
+ * ⚠️ **UNE GARDE DE COMPORTEMENT NE VOIT PAS CE DÉFAUT**, et c'est pour ça que
+ *    celle-ci lit le SOURCE. Tant que les deux dérivations s'accordent, tous les
+ *    tests de comportement de ce fichier restent verts quelle qu'en soit
+ *    l'écriture — la garde qui les distingue est celle qui mesure le nombre de
+ *    dérivations, pas leurs verdicts.
+ */
+describe("le contrôle 4 dérive le statut par la fonction du socle, et par elle seule", () => {
+  const SOURCE = readFileSync(fileURLToPath(new URL("mono-instance.ts", import.meta.url)), "utf8");
+
+  it("appelle `statutHealthcheckPourVerrou` et ne recalcule le statut nulle part", () => {
+    // Le corps, commentaires retirés : un ternaire CITÉ dans une explication
+    // n'est pas une seconde dérivation, et le compter en ferait une.
+    const corps = SOURCE.replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n")
+      .map((ligne) => ligne.replace(/^\s*\/\/.*$/, " "))
+      .join("\n");
+    const appels = corps.match(/statutHealthcheckPourVerrou\s*\(/g) ?? [];
+    // La SECONDE dérivation, telle qu'elle était écrite : un ternaire dont les
+    // deux branches sont les deux constantes de statut.
+    const recalculs =
+      corps.match(
+        /\?[^;]*STATUT_HEALTHCHECK_VERROU_\w+[^;]*:[^;]*STATUT_HEALTHCHECK_VERROU_\w+/g,
+      ) ?? [];
+
+    console.info(
+      `[garde dérivation unique] ${String(SOURCE.length)} octet(s) lus · ` +
+        `${String(appels.length)} appel(s) à statutHealthcheckPourVerrou · ` +
+        `${String(recalculs.length)} recalcul(s) du statut par ternaire`,
+    );
+
+    // Plancher : le source a bien été lu. À zéro octet, les deux comptes
+    // seraient nuls et cette garde serait verte en ne regardant rien.
+    expect(SOURCE.length).toBeGreaterThan(1000);
+    expect(appels.length).toBeGreaterThanOrEqual(1);
+    expect(recalculs).toEqual([]);
+  });
+
+  it("SAIT DIRE NON — sur un source FABRIQUÉ qui porte la seconde dérivation", () => {
+    const fabrique = [
+      "const statutAttendu =",
+      '  sante.verrou === "tenu" ? STATUT_HEALTHCHECK_VERROU_TENU : STATUT_HEALTHCHECK_VERROU_ABSENT;',
+    ].join("\n");
+    const recalculs =
+      fabrique.match(
+        /\?[^;]*STATUT_HEALTHCHECK_VERROU_\w+[^;]*:[^;]*STATUT_HEALTHCHECK_VERROU_\w+/g,
+      ) ?? [];
+
+    console.info(
+      `[garde dérivation unique · témoin] ${String(fabrique.length)} octet(s) fabriqué(s) · ` +
+        `${String(recalculs.length)} recalcul(s) détecté(s)`,
+    );
+
+    // Sans ce témoin, « 0 recalcul » ne se distinguerait pas d'une expression
+    // qui ne reconnaît plus rien — le vert le plus coûteux qui soit.
+    expect(recalculs).toHaveLength(1);
+  });
+
+  it("les deux dérivations s'accordent AUJOURD'HUI sur tous les états du verrou", () => {
+    // ⚠️ CETTE MESURE EST LA RAISON POUR LAQUELLE LE REMPLACEMENT NE CHANGE
+    //    AUCUN COMPORTEMENT — et donc la raison pour laquelle aucune garde de
+    //    comportement ne pouvait le voir. Elle est écrite pour que l'accord soit
+    //    daté : le jour où un état s'ajoute à `ETATS_DU_VERROU`, la seconde
+    //    dérivation aurait divergé, et ce compte l'aurait dit.
+    const desaccords = ETATS_DU_VERROU.filter((etat) => {
+      const parLeTernaire =
+        etat === "tenu" ? STATUT_HEALTHCHECK_VERROU_TENU : STATUT_HEALTHCHECK_VERROU_ABSENT;
+      return statutHealthcheckPourVerrou(etat) !== parLeTernaire;
+    });
+
+    console.info(
+      `[garde dérivation unique · accord] ${String(ETATS_DU_VERROU.length)} état(s) du verrou ` +
+        `confronté(s) · ${String(desaccords.length)} désaccord(s) : ` +
+        `${desaccords.join(", ") || "aucun"}`,
+    );
+
+    expect(ETATS_DU_VERROU.length).toBeGreaterThanOrEqual(4);
+    expect(desaccords).toEqual([]);
   });
 });

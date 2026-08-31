@@ -46,6 +46,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+
 import type { Habilitations, OpsScope } from "../types.js";
 import {
   DECISIONS,
@@ -67,6 +69,10 @@ import {
 } from "../audit/fixtures.js";
 import { ETATS_DU_VERROU } from "../instance/index.js";
 import { correspondance } from "./outils.js";
+// ADR 0020 — `ops_idempotency.key` porte l'EMPREINTE de la clé, jamais la clé.
+// Une garde qui interrogerait le dépôt par la chaîne d'origine ne trouverait
+// RIEN, et lirait ce vide comme « la clé n'a pas été prise ».
+import { empreinteDeCleDIdempotence } from "../limits/index.js";
 import type {
   DemandeIncrement,
   DepotIdempotence,
@@ -142,6 +148,8 @@ function outilTemoin(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogu
     compaction: { free: [], tier2: [], aggregateBy: null },
     maxBytes: 4096,
     idFields: [],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
   };
   return { ...base, ...surcharge };
 }
@@ -404,7 +412,9 @@ function fabriquerHarnais(reglages: Reglages = {}): Harnais {
         scopes: identiteRecue.scopes,
         policyLevel: niveau,
         profile: profil,
-        idempotencyKey: appel.idempotencyKey,
+        // ADR 0020 — le `ctx` ne porte PLUS la clé. C'est l'orchestrateur, en
+        // production, qui pose `idempotencyRef` (l'empreinte) ; un constructeur
+        // de contexte ne le peut plus, et le type le lui interdit.
         requestId: identiteRecue.requestId,
         deadline: identiteRecue.deadline,
         habilitations: identiteRecue.habilitations,
@@ -707,7 +717,7 @@ class IntentionQuiEcrit implements PorteeDIntention {
 
   async avantEffet(intention: {
     readonly principal: string;
-    readonly sessionId: string;
+    readonly sessionId: SessionId;
     readonly tool: string;
     readonly argHash: string;
     readonly maintenant: Date;
@@ -921,7 +931,10 @@ describe("§ 11 — une intention SANS issue est-elle détectable, et COMPTÉE ?
       harnais,
       appelTemoin({ nomComplet: "temoin.envoyer", idempotencyKey: "cle-intention-avant" }),
     );
-    const idem = await harnais.idempotence.lire("temoin.envoyer", "cle-intention-avant");
+    const idem = await harnais.idempotence.lire(
+      "temoin.envoyer",
+      empreinteDeCleDIdempotence("cle-intention-avant"),
+    );
     const ecrites = harnais.store.toutes();
 
     console.log(
@@ -948,30 +961,32 @@ describe("§ 11 — une intention SANS issue est-elle détectable, et COMPTÉE ?
 
 describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le doubler ?", () => {
   /**
-   * 🔴 LE DÉFAUT LE PLUS GRAVE QUE CETTE ÉPREUVE AIT TROUVÉ.
+   * ✅ **LE DÉFAUT LE PLUS GRAVE DE CETTE ÉPREUVE EST FERMÉ — ADR 0021.**
    *
-   * L'orchestrateur applique DÉJÀ la bonne règle, et il l'écrit — sur la branche
-   * du refus d'étape 14 : « ⚠️ L'EFFET A DÉJÀ EU LIEU. Le refus porte sur ce qui
-   * SORT, pas sur ce qui s'est passé : l'idempotence est close en `done`, sans
-   * quoi un rejeu produirait un SECOND effet. »
+   * Ce qu'il disait, et il avait raison : l'orchestrateur appliquait DÉJÀ la
+   * bonne règle sur la branche du refus d'étape 14 — « l'effet a déjà eu lieu,
+   * l'idempotence est close en `done`, sans quoi un rejeu produirait un SECOND
+   * effet ». La branche voisine, celle de l'EXCEPTION, ne l'appliquait pas :
+   * `issueDeLEffet` y passait à `"failed"`, et `failed` est le seul statut que
+   * `reserver()` REPREND. Un envoi PARTI dont le traitement d'aval levait
+   * laissait donc une clé rejouable, et le rejeu renvoyait.
    *
-   * La branche voisine — celle de l'EXCEPTION — ne l'applique pas. `issueDeLEffet`
-   * y passe à `"failed"`, et `failed` est le seul statut que `reserver()` REPREND
-   * (`reprendreSiEchouee`). Un envoi PARTI dont le traitement d'aval lève laisse
-   * donc une clé rejouable, et le rejeu renvoie.
-   *
-   * ⚠️ LA PANNE N'EST PAS FABRIQUÉE : c'est l'ADAPTATEUR lui-même qui la cause.
-   *    Il ENVOIE, puis rend une charge hors contrat — `sourceIncomplete` en
-   *    chaîne, ce que rend n'importe quelle API JSON qui écrit `"false"` — et
+   * ⚠️ **LA PANNE N'EST TOUJOURS PAS FABRIQUÉE**, et c'est ce qui donne son prix
+   *    à ce témoin : c'est l'ADAPTATEUR lui-même qui la cause. Il ENVOIE, puis
+   *    rend une charge hors contrat — `sourceIncomplete` en chaîne, ce que rend
+   *    n'importe quelle API JSON qui écrit `"false"` — et
    *    `verifierChargeDeLAdaptateur` lève APRÈS `executer()`. Aucune panne
    *    d'infrastructure n'est requise, et le geste est répétable.
    *
-   * ⚠️ ET LE SOCLE SAIT DÉJÀ. `externalEffect` vaut `true` sur la ligne de la
-   *    première tentative : le cliquet de l'ADR 0017 a été tiré. L'information
-   *    manquante n'en est pas une — elle est là, à l'instant exact où la clôture
-   *    choisit `done` ou `failed`, et la clôture ne la lit pas.
+   * ⚠️ **CE QUI A CHANGÉ, ET CE QUI N'A PAS CHANGÉ.** Le socle SAVAIT déjà :
+   *    `externalEffect` valait `true` sur la ligne de la première tentative — le
+   *    cliquet de l'ADR 0017 avait été tiré. L'information manquante n'en était
+   *    pas une ; la clôture ne la LISAIT pas. L'ADR 0021 lui donne un lecteur
+   *    (`AffineursDAppel.effetExterieurSurvenu`) et remplace le ternaire du
+   *    `finally` par `issueDeReservation()`. Le journal, lui, dit toujours la
+   *    même chose : ce que le socle a VU.
    */
-  it("🔴 un envoi PARTI suivi d'une charge hors contrat laisse la clé REJOUABLE", async () => {
+  it("✅ un envoi PARTI suivi d'une charge hors contrat laisse la clé FERMÉE", async () => {
     const harnais = fabriquerHarnais({
       outils: [outilEnvoi()],
       niveau: NIVEAU_LIBRE,
@@ -992,7 +1007,7 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
     const premiere = await issueDe(harnais, appel);
     const idemApresLaPremiere = await harnais.idempotence.lire(
       "temoin.envoyer",
-      "cle-panne-apres-envoi",
+      empreinteDeCleDIdempotence("cle-panne-apres-envoi"),
     );
     const ligne = harnais.store.toutes()[0];
 
@@ -1007,21 +1022,27 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
         `idempotence après la 1ʳᵉ : ${String(idemApresLaPremiere?.status)}`,
     );
 
-    // LES FAITS, tous vrais après le correctif comme avant.
+    // LES FAITS, inchangés par le correctif.
     expect(ligne, "la première tentative a bien écrit sa ligne").toBeDefined();
     expect(ligne?.effect).toBe("send");
     expect(ligne?.externalEffect, "le socle SAIT que l'envoi est parti").toBe(true);
     expect(premiere.genre, "la première tentative échoue pour l'appelant").toBe("levée");
-    // LE DÉFAUT, MESURÉ : la clé est close `failed`, donc reprenable.
-    expect(idemApresLaPremiere?.status).toBe("failed");
-    expect(harnais.effets(), "l'envoi est parti DEUX fois sous la même clé").toBe(2);
+
+    // ⚖️ CE QUI A CHANGÉ, ET C'EST LA DÉCISION DE L'ADR 0021.
+    expect(idemApresLaPremiere?.status, "la clé est FERMÉE, donc non reprenable").toBe("done");
+    expect(harnais.effets(), "§ 09 : une clé, un effet").toBe(1);
   });
 
   /**
-   * 🔴 L'ATTENTE DU § 09, SOUS `it.fails` — celle que le socle tient déjà d'un
-   * seul côté.
+   * ✅ **L'ATTENTE DU § 09, BASCULÉE DE `it.fails` EN `it()`.**
+   *
+   * Elle était portée sous `it.fails` par l'épreuve du lot 1c : verte parce
+   * qu'elle échouait. Le défaut fermé, elle ROUGISSAIT — ce qui est exactement
+   * le mécanisme voulu — et elle repasse donc en `it()`. Elle n'est pas
+   * supprimée : c'est LA propriété d'une clé d'idempotence, et elle doit
+   * continuer à être mesurée quand personne ne regardera plus l'ADR.
    */
-  it.fails("🔴 une clé d'idempotence ne doit JAMAIS faire partir deux envois", async () => {
+  it("✅ une clé d'idempotence ne fait JAMAIS partir deux envois", async () => {
     const harnais = fabriquerHarnais({
       outils: [outilEnvoi()],
       niveau: NIVEAU_LIBRE,
@@ -1043,24 +1064,29 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
         `effets extérieurs : ${String(harnais.effets())}`,
     );
 
-    // Le FAIT : au moins un envoi est bien parti. Vrai dans les deux régimes.
+    // Le FAIT : au moins un envoi est bien parti — sans quoi le zéro suivant
+    // serait vert pour la pire des raisons.
     expect(harnais.effets()).toBeGreaterThanOrEqual(1);
-    // ⚖️ L'ATTENTE : c'est LA propriété d'une clé d'idempotence. Le socle la
-    //    tient sur le refus d'étape 14 ; il doit la tenir sur l'exception, où
-    //    `externalEffect` dit déjà que l'effet est parti.
+    // ⚖️ L'ATTENTE, désormais TENUE : le socle la tenait sur le refus d'étape 14,
+    //    il la tient maintenant aussi sur l'exception.
     expect(harnais.effets(), "§ 09 : une clé, un effet").toBe(1);
   });
 
   /**
-   * 🔴 LA MÊME PORTE, PAR UN AUTRE CHEMIN — l'index de provenance du § 20.
+   * ✅ **LA MÊME PORTE PAR UN AUTRE CHEMIN, FERMÉE PAR LE MÊME VERROU.**
    *
    * `marquerResultat` est appelé APRÈS l'étape 14, DANS le `try`. Un index qui
    * lève — saturation hostile, magasin partagé le jour où il en existera un —
-   * produit exactement la même chose : envoi parti, clé `failed`, rejeu qui
-   * renvoie. Deux chemins pour un seul défaut : ce n'est pas un accident du
-   * premier, c'est la branche `catch` qui ne lit pas le cliquet.
+   * produisait exactement la même chose : envoi parti, clé `failed`, rejeu qui
+   * renvoie. Deux chemins pour un seul défaut : ce n'était pas un accident du
+   * premier, c'était la branche `catch` qui ne lisait pas le cliquet.
+   *
+   * ⚠️ CE TÉMOIN N'EST PAS UN DOUBLON DU PRÉCÉDENT, ET C'EST TOUT SON INTÉRÊT :
+   *    il prouve que le correctif porte sur la CAUSE — la dérivation de l'issue —
+   *    et non sur le symptôme du premier chemin. Une rustine posée dans
+   *    `etape-14-execution.ts` aurait laissé celui-ci ouvert.
    */
-  it("🔴 un index de provenance qui LÈVE après l'envoi rouvre la même porte", async () => {
+  it("✅ un index de provenance qui LÈVE après l'envoi ne rouvre PAS la porte", async () => {
     class IndexQuiLeve implements IndexProvenance {
       public marquages = 0;
 
@@ -1089,7 +1115,10 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
     const appel = appelTemoin({ nomComplet: "temoin.envoyer", idempotencyKey: "cle-index" });
 
     await issueDe(harnais, appel);
-    const idem = await harnais.idempotence.lire("temoin.envoyer", "cle-index");
+    const idem = await harnais.idempotence.lire(
+      "temoin.envoyer",
+      empreinteDeCleDIdempotence("cle-index"),
+    );
     await issueDe(harnais, appel);
 
     console.log(
@@ -1099,26 +1128,95 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
     );
 
     expect(index.marquages, "l'index a bien été sollicité APRÈS l'envoi").toBeGreaterThan(0);
-    expect(idem?.status).toBe("failed");
-    expect(harnais.effets(), "le même défaut, par un second chemin").toBe(2);
+    expect(idem?.status, "la clé est FERMÉE : le cliquet était levé").toBe("done");
+    expect(harnais.effets(), "le second chemin est fermé par le même verrou").toBe(1);
   });
 
   /**
    * ✅ LE CONTRE-TÉMOIN QUI ISOLE LA RÈGLE — sans lui, les trois précédents
-   * seraient verts pour un socle qui rejouerait TOUJOURS, ce qui serait un tout
-   * autre défaut.
+   * seraient verts pour un socle qui FERMERAIT TOUJOURS, ce qui serait un tout
+   * autre défaut : un amont transitoirement injoignable verrouillerait la clé
+   * jusqu'au TTL, et l'ADR 0021 refuse nommément ce fail-closed-là.
    *
-   * Ici l'ADAPTATEUR LUI-MÊME lève, AVANT d'avoir rien envoyé : le cliquet n'est
-   * pas tiré, `externalEffect` reste faux, la clé est close `failed` — et c'est
-   * JUSTE. Le rejeu doit alors réexécuter, et il n'y aura eu qu'UN seul effet en
-   * tout. C'est exactement à quoi `failed` sert.
+   * ⚠️ **CE TÉMOIN A DÛ CHANGER D'OUTIL, ET LE MOTIF EST UNE DÉCISION ÉCRITE.**
+   *    Il éprouvait un `send` dont l'adaptateur levait AVANT d'envoyer, et
+   *    attendait une reprise. Ce n'est plus le comportement : sur un effet
+   *    EXTÉRIEUR, l'ADR 0021 se replie en `done` même quand l'adaptateur lève,
+   *    parce que le socle ne peut pas savoir s'il a envoyé avant de lever —
+   *    l'ADR 0017 l'écrit dans sa « conséquence acceptée n° 1 ». La reprise vit
+   *    donc là où elle est sûre : `read` et `write-draft`, où rien ne sort.
+   *
+   *    Le second témoin ci-dessous MESURE l'écart plutôt que de le taire.
    */
-  it("SAIT DIRE OUI — quand rien n'est sorti, le rejeu réexécute, et un seul effet part", async () => {
+  it("SAIT DIRE OUI — sur un effet NON extérieur, le rejeu réexécute", async () => {
     let tentatives = 0;
     const depot = new DepotIdemAtomique();
     const store = new JournalMemoire();
 
-    /** Le premier appel de l'adaptateur tombe AVANT l'envoi ; le second passe. */
+    /** Le premier appel de l'adaptateur tombe ; le second passe. */
+    const harnais = fabriquerHarnais({
+      store,
+      depotIdempotence: depot,
+      // ⚠️ UN BROUILLON, PAS UN ENVOI. `estEffetExterieur("write-draft")` est
+      //    faux : rien ne sort, la reprise est le comportement utile, et le § 20
+      //    confie le brouillon à la relecture humaine.
+      outils: [outilTemoin({ name: "temoin.brouillon", effect: "write-draft" })],
+      niveau: NIVEAU_LIBRE,
+      reglagesOutil: { modeIdempotence: "key", limiteQuota: null, warnAtQuota: null },
+      charge: (): ChargeAdaptateur => {
+        tentatives += 1;
+        if (tentatives === 1) throw new Error("adaptateur d'épreuve : amont injoignable");
+        return CHARGE_ORDINAIRE;
+      },
+    });
+    const appel = appelTemoin({
+      nomComplet: "temoin.brouillon",
+      idempotencyKey: "cle-avant-envoi",
+    });
+
+    await issueDe(harnais, appel);
+    const idem = await depot.lire(
+      "temoin.brouillon",
+      empreinteDeCleDIdempotence("cle-avant-envoi"),
+    );
+    const premiereLigne = store.toutes()[0];
+    await issueDe(harnais, appel);
+
+    console.log(
+      `[contre-témoin · panne sur un brouillon] ${String(tentatives)} tentative(s) ` +
+        `d'adaptateur — externalEffect de la 1ʳᵉ ligne : ` +
+        `${String(premiereLigne?.externalEffect)}, ` +
+        `idempotence après la 1ʳᵉ : ${String(idem?.status)}, ` +
+        `lignes : ${String(store.toutes().length)}`,
+    );
+
+    expect(tentatives, "les deux tentatives ont bien atteint l'adaptateur").toBe(2);
+    // C'EST LE POINT : ici, `failed` est la BONNE valeur, et le cliquet le dit.
+    expect(premiereLigne?.externalEffect, "rien n'était sorti").toBe(false);
+    expect(idem?.status).toBe("failed");
+    expect(store.toutes().length, "deux terminaisons, deux lignes").toBe(2);
+  });
+
+  /**
+   * ⚠️ **L'ÉCART ASSUMÉ DE L'ADR 0021, MESURÉ PLUTÔT QUE TU.**
+   *
+   * Sur un outil `send`, une exception levée AVANT que rien ne parte consomme
+   * tout de même la clé : le socle ne dispose d'aucun fait qui distingue « levé
+   * avant d'envoyer » de « levé après avoir envoyé ». Le remède serait un second
+   * cliquet « l'adaptateur a été atteint » ; l'ADR 0021 le refuse — il ajouterait
+   * à `AffineursDAppel` un membre qui ne mute AUCUNE colonne de la ligne, et
+   * rouvrirait la fenêtre de l'empreinte chaînée pour une colonne de plus.
+   *
+   * **Le prix : un appel légitime doit employer une clé neuve.** C'est le sens
+   * sûr, et le message de refus du § 15 le dit déjà. Ce témoin existe pour que
+   * l'écart soit un CHIFFRE dans une sortie de garde, et non une phrase dans un
+   * document que personne ne relira.
+   */
+  it("⚠️ écart assumé — sur un `send`, une panne AVANT l'envoi consomme quand même la clé", async () => {
+    let tentatives = 0;
+    const depot = new DepotIdemAtomique();
+    const store = new JournalMemoire();
+
     const harnais = fabriquerHarnais({
       store,
       depotIdempotence: depot,
@@ -1131,25 +1229,32 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
         return CHARGE_ORDINAIRE;
       },
     });
-    const appel = appelTemoin({ nomComplet: "temoin.envoyer", idempotencyKey: "cle-avant-envoi" });
+    const appel = appelTemoin({
+      nomComplet: "temoin.envoyer",
+      idempotencyKey: "cle-panne-avant-envoi-sur-send",
+    });
 
     await issueDe(harnais, appel);
-    const idem = await depot.lire("temoin.envoyer", "cle-avant-envoi");
+    const idem = await depot.lire(
+      "temoin.envoyer",
+      empreinteDeCleDIdempotence("cle-panne-avant-envoi-sur-send"),
+    );
     const premiereLigne = store.toutes()[0];
     await issueDe(harnais, appel);
 
     console.log(
-      `[contre-témoin · panne AVANT l'envoi] ${String(tentatives)} tentative(s) d'adaptateur — ` +
-        `externalEffect de la 1ʳᵉ ligne : ${String(premiereLigne?.externalEffect)}, ` +
-        `idempotence après la 1ʳᵉ : ${String(idem?.status)}, ` +
-        `lignes : ${String(store.toutes().length)}`,
+      `[écart assumé · fail-closed sur un send] ${String(tentatives)} tentative(s) ` +
+        `d'adaptateur pour 2 appels — externalEffect de la 1ʳᵉ ligne : ` +
+        `${String(premiereLigne?.externalEffect)}, ` +
+        `idempotence après la 1ʳᵉ : ${String(idem?.status)} — ` +
+        `la clé est consommée alors que RIEN n'est parti`,
     );
 
-    expect(tentatives, "les deux tentatives ont bien atteint l'adaptateur").toBe(2);
-    // C'EST LE POINT : ici, `failed` est la BONNE valeur, et le cliquet le dit.
-    expect(premiereLigne?.externalEffect, "rien n'était sorti").toBe(false);
-    expect(idem?.status).toBe("failed");
-    expect(store.toutes().length, "deux terminaisons, deux lignes").toBe(2);
+    // Le FAIT que le journal atteste, et il reste honnête : rien n'est sorti.
+    expect(premiereLigne?.externalEffect, "le socle n'a rien VU sortir").toBe(false);
+    // L'ÉCART : la POLITIQUE de reprise, elle, se replie du côté sûr.
+    expect(idem?.status, "et la clé se ferme quand même — fail-closed").toBe("done");
+    expect(tentatives, "le second appel ne réexécute pas : clé neuve exigée").toBe(1);
   });
 });
 
@@ -1159,31 +1264,31 @@ describe("§ 09/§ 13 — une panne APRÈS l'envoi laisse-t-elle le rejeu le dou
 
 describe("§ 12 — la section critique du journal, éprouvée plutôt que déclarée", () => {
   /**
-   * 🔴 `JournalMemoire` DÉCLARE UNE SECTION CRITIQUE QU'IL N'A PAS.
+   * ✅ **DÉFAUT FERMÉ AU LOT 1d.** `JournalMemoire` TIENT DÉSORMAIS LA SECTION
+   *    CRITIQUE QU'IL DÉCLARE.
    *
-   * Son en-tête l'écrit mot pour mot : « Il tient la section critique du port par
-   * une file d'attente à un seul jeton : `dernierSelfHash` puis `ajouter` ne
-   * peuvent pas s'entrelacer. C'est la PROPRIÉTÉ que l'implémentation Prisma
-   * devra reproduire. »
+   * Son en-tête l'écrivait déjà mot pour mot au lot 1c — « il tient la section
+   * critique du port par une file d'attente à un seul jeton » — et il n'y avait
+   * ni file, ni jeton, ni verrou. Deux `journaliser` concurrents lisaient le
+   * MÊME `prevHash` et écrivaient tous deux : la chaîne FOURCHAIT, et le
+   * contrôle d'unicité de `selfHash` ne les arrêtait pas — deux lignes de
+   * contenus différents ont deux empreintes différentes.
    *
-   * Il n'y a ni file, ni jeton, ni verrou dans le fichier. Deux `journaliser`
-   * concurrents lisent le MÊME `prevHash` et écrivent tous deux : la chaîne
-   * FOURCHE. Le contrôle d'unicité de `selfHash` ne les arrête pas — deux lignes
-   * de contenus différents ont deux empreintes différentes.
+   * ⚠️ POURQUOI CELA COMPTAIT MÊME SI LE STORE RÉEL TIENDRA LE CONTRAT. Ce
+   *    double est le seul instrument dont disposent les fichiers de gardes du
+   *    socle. Une propriété que le double NE TIENT PAS est une propriété que
+   *    RIEN n'éprouve — et son en-tête affirmait le contraire, ce qui est la
+   *    façon la plus sûre de ne jamais l'écrire.
    *
-   * ⚠️ POURQUOI CELA COMPTE MÊME SI LE STORE RÉEL TIENDRA LE CONTRAT. Ce double
-   *    est le seul instrument dont disposent les 72 fichiers de gardes du socle.
-   *    Une propriété que le double NE TIENT PAS est une propriété que RIEN
-   *    n'éprouve — et son en-tête affirme le contraire, ce qui est la façon la
-   *    plus sûre de ne jamais l'écrire.
-   *
-   * ⚠️ ET LA FOURCHE EST DÉFINITIVE. Elle ne se répare pas : les deux lignes sont
-   *    écrites, chacune intègre pour elle-même, et le journal porte dès lors une
-   *    anomalie `saut-non-ancré` que ni purge ni clôture n'effacera. C'est
-   *    `verifierChaine` qui la voit — et c'est tout ce qui empêche ce défaut
-   *    d'être un mensonge silencieux.
+   * ⚠️ **CE TÉMOIN-CI NE PROUVE RIEN SEUL, ET LE RÉGIME NÉGATIF VIT AILLEURS.**
+   *    `core/audit/memoire.spec.ts` fabrique la fourche à la demande sur
+   *    `JournalMemoireSansSectionCritique` — le comportement d'AVANT, conservé
+   *    exprès pour que la garde puisse prouver qu'elle sait dire NON. Sans ce
+   *    jumeau, « la chaîne reste valide » serait vert pour trois raisons
+   *    indiscernables : la file tient, le vérificateur est cassé, ou rien n'a
+   *    jamais été mis en concurrence.
    */
-  it("🔴 deux écritures concurrentes FOURCHENT la chaîne — mesuré, et rendu visible", async () => {
+  it("✅ deux écritures concurrentes NE FOURCHENT PLUS — et la file a MORDU", async () => {
     const store = await construireJournal(3);
     const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
@@ -1208,28 +1313,33 @@ describe("§ 12 — la section critique du journal, éprouvée plutôt que décl
         `${String(chainons.size)} chaînon(s) distinct(s), ` +
         `${String(chainonsPartages)} chaînon(s) réclamé(s) par PLUSIEURS lignes — ` +
         `${String(rapport.lignesVerifiees)} vérifiée(s), valide=${String(rapport.valide)}, ` +
+        `${String(store.ecrituresMisesEnAttente)} écriture(s) mise(s) en attente par la file, ` +
         `genres : ${rapport.anomalies.map((a) => a.genre).join(", ") || "aucun"}`,
     );
 
-    // LES FAITS. Les deux écritures ont bien abouti : rien n'a été perdu, c'est
-    // le chaînage qui a été doublé.
+    // LES FAITS. Les deux écritures ont abouti : rien n'a été perdu, et c'est
+    // le chaînage qui n'est plus doublé.
     expect(toutes.length).toBe(5);
     expect(rapport.lignesVerifiees, "le compte est annoncé").toBe(5);
-    // LE DÉFAUT, MESURÉ : deux lignes prétendent succéder à la même.
-    expect(chainonsPartages, "deux lignes réclament le même chaînon").toBe(1);
-    // CE QUI SAUVE LA MISE : le vérificateur le VOIT. La fourche est visible,
-    // elle n'est pas silencieuse — et c'est la seule bonne nouvelle ici.
-    expect(rapport.valide).toBe(false);
-    expect(rapport.anomalies.map((a) => a.genre)).toContain("saut-non-ancré");
+    // ⚠️ LA CONCURRENCE A EU LIEU. Sans cette mesure, les deux attentes
+    //    ci-dessous seraient vertes le jour où les écritures cesseraient de se
+    //    croiser — c'est-à-dire sans que rien ne soit gardé.
+    expect(store.ecrituresMisesEnAttente, "un appelant a dû attendre").toBeGreaterThan(0);
+    // LE DÉFAUT, FERMÉ : plus aucune ligne ne réclame le chaînon d'une autre.
+    expect(chainonsPartages, "aucun chaînon réclamé deux fois").toBe(0);
+    expect(rapport.valide).toBe(true);
+    expect(rapport.anomalies.map((a) => a.genre)).not.toContain("saut-non-ancré");
   });
 
   /**
-   * 🔴 L'ATTENTE, ÉCRITE PAR LE FICHIER LUI-MÊME, sous `it.fails`.
+   * ✅ **L'ATTENTE ÉCRITE PAR LE FICHIER LUI-MÊME — TENUE DEPUIS LE LOT 1d.**
    *
-   * « `dernierSelfHash` puis `ajouter` ne peuvent pas s'entrelacer. » Si c'était
-   * vrai, deux écritures concurrentes produiraient une chaîne VALIDE.
+   * « `dernierSelfHash` puis `ajouter` ne peuvent pas s'entrelacer. » C'était
+   * faux ; ce test portait donc l'attente sous `it.fails`, vert parce qu'il
+   * échouait. Le défaut étant fermé, il BASCULE en `it()` : c'est un progrès,
+   * et la dette nommée qu'il portait est soldée.
    */
-  it.fails("🔴 `JournalMemoire` doit tenir la section critique qu'il déclare tenir", async () => {
+  it("✅ `JournalMemoire` tient la section critique qu'il déclare tenir", async () => {
     const store = await construireJournal(3);
     const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
@@ -1252,14 +1362,18 @@ describe("§ 12 — la section critique du journal, éprouvée plutôt que décl
   });
 
   /**
-   * 🔴 LA MÊME FOURCHE, PAR LA CHAÎNE COMPLÈTE — et c'est ainsi qu'elle se
-   * produira en vrai : un appel = une écriture, deux appels concurrents = deux
-   * écritures concurrentes.
+   * ✅ **LA MÊME PAIRE, PAR LA CHAÎNE COMPLÈTE** — et c'est ainsi que le défaut
+   * se serait produit en vrai : un appel = une écriture, deux appels concurrents
+   * = deux écritures concurrentes.
    *
-   * Ce témoin le montre sur `orchestrerAppel`, sans toucher au journal à la
-   * main : deux lectures parallèles suffisent à rendre le journal invérifiable.
+   * Ce témoin le mesure sur `orchestrerAppel`, sans toucher au journal à la
+   * main. C'est LA garde de couture du côté journal : la section critique n'est
+   * pas éprouvée sur le store isolé, mais sur le chemin de production qui
+   * enchaîne réellement `dernierSelfHash` puis `ajouter` — `Journal.journaliser`,
+   * appelé par l'invariant de sortie du § 11. Débrancher la file ferait rougir
+   * CE test-ci, et pas seulement un test d'unité.
    */
-  it("🔴 deux APPELS concurrents suffisent à rendre le journal invérifiable", async () => {
+  it("✅ deux APPELS concurrents laissent un journal VÉRIFIABLE", async () => {
     const harnais = fabriquerHarnais();
 
     await Promise.all([
@@ -1273,13 +1387,16 @@ describe("§ 12 — la section critique du journal, éprouvée plutôt que décl
       `[garde fourche · chaîne complète] 2 appel(s) concurrents mesurés — ` +
         `${String(rapport.lignesVerifiees)} ligne(s) vérifiée(s), ` +
         `valide=${String(rapport.valide)}, ` +
+        `${String(harnais.store.ecrituresMisesEnAttente)} écriture(s) mise(s) en attente, ` +
         `genres : ${rapport.anomalies.map((a) => a.genre).join(", ") || "aucun"}`,
     );
 
     expect(rapport.lignesVerifiees, "deux terminaisons, deux lignes").toBe(2);
-    // LE FAIT : le journal d'un socle qui sert deux appels à la fois ne se
-    // vérifie plus. Aucune infrastructure n'est en cause.
-    expect(rapport.valide).toBe(false);
+    // La concurrence a bien eu lieu : sans cette mesure, la validité ci-dessous
+    // ne dirait pas si la file a mordu ou si rien ne s'est croisé.
+    expect(harnais.store.ecrituresMisesEnAttente).toBeGreaterThan(0);
+    // LE FAIT : le journal d'un socle qui sert deux appels à la fois se vérifie.
+    expect(rapport.valide).toBe(true);
   });
 
   /**
@@ -1313,7 +1430,7 @@ const CHEMIN_VERROU = fileURLToPath(new URL("../instance/verrou.ts", import.meta
 
 describe("ADR 0018 — un second processus est-il EMPÊCHÉ, ou seulement constaté ?", () => {
   /**
-   * 🔴 LA MOITIÉ « EMPÊCHER » N'EXISTE PAS ENCORE.
+   * ✅ **LA MOITIÉ « EMPÊCHER » EXISTE DEPUIS LE LOT 1d.**
    *
    * L'ADR 0018 pose deux gardes, et dit qu'elles ne se remplacent pas : le VERROU
    * (dedans, au démarrage puis en continu) et l'OBSERVATEUR (dehors,
@@ -1321,18 +1438,24 @@ describe("ADR 0018 — un second processus est-il EMPÊCHÉ, ou seulement consta
    * borne — « il DÉTECTE une seconde instance, il ne prouve jamais qu'il n'y en a
    * pas ».
    *
-   * Le verrou, lui, n'est que des types : `VerrouDInstance` n'a aucune
-   * implémentation, pas même un double en mémoire, et `verrou.ts` NOMME une
-   * fonction `deciderDemarrageMonoInstance` qui n'existe nulle part. Les quatre
-   * états du verrou sont donc déclarés et AUCUN n'est tranché : rien, dans le
-   * dépôt, ne fait qu'un second processus refuse de démarrer.
+   * Le verrou, lui, n'était QUE des types au lot 1c : `VerrouDInstance` n'avait
+   * aucune implémentation, pas même un double en mémoire, et `verrou.ts` NOMMAIT
+   * une fonction `deciderDemarrageMonoInstance` qui n'existait nulle part. Les
+   * quatre états étaient déclarés et AUCUN n'était tranché.
    *
-   * ⚠️ CE TÉMOIN NE MESURE PAS UN OUBLI : `verrou.ts` le DIT lui-même (« ce
-   *    fichier ne porte que des déclarations »). Il le CHIFFRE, pour que l'écart
-   *    entre ce que l'ADR annonce et ce que le dépôt tient soit un nombre plutôt
-   *    qu'une lecture.
+   * ⚠️ **CE TÉMOIN CHIFFRE, IL NE COLORE PAS.** Il compte ce que `verrou.ts`
+   *    exporte réellement, et l'écart entre l'annonce de l'ADR et ce que le dépôt
+   *    tient reste un NOMBRE. Le compte a changé le jour où l'arbitre a atterri —
+   *    c'est ce qu'on voulait —, et la liste des noms est affirmée plutôt que la
+   *    seule longueur : trois fonctions dont ce ne serait pas les bonnes
+   *    passeraient un compte, jamais une liste.
+   *
+   * ⚠️ **LE COMPTE SEUL NE PROUVE PAS LA COUTURE.** Une fonction exportée peut
+   *    n'être appelée par personne — c'est le défaut même du lot 1c.
+   *    `core/instance/couture-adr-0018.temoin.spec.ts` mesure le BRANCHEMENT, et
+   *    fabrique le débranchement pour prouver qu'il sait le voir.
    */
-  it("🔴 chiffre ce que la moitié « verrou » de l'ADR 0018 tient réellement", () => {
+  it("✅ chiffre ce que la moitié « verrou » de l'ADR 0018 tient réellement", () => {
     const source = readFileSync(CHEMIN_VERROU, "utf8");
 
     // DÉRIVÉ du fichier, jamais recopié : on compte les fonctions qu'il exporte.
@@ -1355,26 +1478,32 @@ describe("ADR 0018 — un second processus est-il EMPÊCHÉ, ou seulement consta
     // est verte pour la pire des raisons.
     expect(source.length).toBeGreaterThan(1000);
     expect(etatsDeclares, "les quatre états du § 20 sont bien déclarés").toBe(4);
-    // LE FAIT MESURÉ : la prose nomme un arbitre que le dépôt n'a pas.
     expect(nommeeParLaProse, "la prose la nomme").toBe(true);
-    expect(
-      fonctionsExportees,
-      "et aucune fonction n'est exportée pour trancher les quatre états",
-    ).toEqual([]);
+    // LE FAIT MESURÉ : l'arbitre que la prose nomme est désormais exporté, et
+    // il n'est pas seul — la frappe de l'identité et la dérivation du statut de
+    // healthcheck vivent au même endroit, par choix (ADR 0018).
+    expect([...fonctionsExportees].sort(), "les fonctions réellement exportées").toEqual([
+      "deciderDemarrageMonoInstance",
+      "decisionsPourTousLesEtatsDuVerrou",
+      "frapperInstance",
+      "statutHealthcheckPourVerrou",
+    ]);
   });
 
   /**
-   * 🔴 L'ATTENTE DE L'ADR 0018, SOUS `it.fails`.
+   * ✅ **L'ATTENTE DE L'ADR 0018 — TENUE DEPUIS LE LOT 1d.**
    *
    * « AU DÉMARRAGE — un verrou EXCLUSIF est pris avant de servir quoi que ce
    * soit. S'il est déjà tenu, le conteneur NE DÉMARRE PAS. » Une décision qui
-   * n'est prise par aucune fonction n'est prise par personne : il faut un arbitre
-   * PUR, éprouvable sur les quatre états sans monter de base, comme
+   * n'est prise par aucune fonction n'est prise par personne : il fallait un
+   * arbitre PUR, éprouvable sur les quatre états sans monter de base, comme
    * `core/vault/demarrage.ts` en a un pour le coffre.
    *
-   * ⚠️ CE TÉMOIN ROUGIRA le jour où l'arbitre existera. C'est ce qu'on veut.
+   * ⚠️ CE TÉMOIN ÉTAIT UN `it.fails`, ET IL A BASCULÉ EN `it()`. C'était sa
+   *    vocation : « il ROUGIRA le jour où l'arbitre existera ». La dette nommée
+   *    qu'il portait est soldée.
    */
-  it.fails("🔴 les quatre états du verrou doivent être tranchés par une fonction du dépôt", () => {
+  it("✅ les quatre états du verrou sont tranchés par une fonction du dépôt", () => {
     const source = readFileSync(CHEMIN_VERROU, "utf8");
     const fonctionsExportees = [...source.matchAll(/^export function ([A-Za-z0-9_]+)/gmu)].length;
 

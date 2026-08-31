@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 import { APPEL_STEPS, DATA_CLASSES, POLICY_LEVELS } from "../types.js";
 import type { DataClass, PolicyLevel } from "../types.js";
 import { ETAPE_PROVENANCE } from "./etapes.js";
 import type { ContexteProvenance, IndexProvenance } from "./etapes.js";
+// ADR 0014 — les sessions de témoin passent par la fabrique NOMMÉE de
+// `core/identite/`, jamais par une conversion forcée écrite au cas par cas :
+// c'est ce qui laisse la garde G3 distinguer une anomalie d'un décor de test.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
+import type { SessionId } from "../identite/session.js";
 import {
   DOMAINE_INDETERMINE,
   FAMILLES_GOUVERNANCE,
@@ -42,7 +48,17 @@ import {
 
 const DOMAINE_LECTURE = "zoho-mail";
 const DOMAINE_TIERS = "crm-pro";
-const SESSION = "session-de-pilotage-1";
+const SESSION: SessionId = sessionIdDeTemoin();
+
+/**
+ * Trois sessions DISTINCTES pour la garde de saturation. Elles sont gardées dans
+ * des constantes plutôt que refabriquées à chaque emploi : `sessionIdDeTemoin()`
+ * frappe de l'aléa, exactement comme le socle, et deux appels ne rendent jamais
+ * la même valeur — c'est le point de l'ADR 0014.
+ */
+const SESSION_A: SessionId = sessionIdDeTemoin();
+const SESSION_B: SessionId = sessionIdDeTemoin();
+const SESSION_C: SessionId = sessionIdDeTemoin();
 
 /** Une horloge injectée : aucune garde de ce fichier ne lit l'heure système. */
 function horlogeFigee(debut = "2026-08-31T10:00:00.000Z"): {
@@ -61,7 +77,7 @@ function horlogeFigee(debut = "2026-08-31T10:00:00.000Z"): {
 function contexte(parts: {
   readonly index: IndexProvenance;
   readonly adapterId?: string;
-  readonly sessionId?: string;
+  readonly sessionId?: SessionId;
   readonly libre?: boolean;
   readonly gouvernance?: boolean;
   readonly niveau?: PolicyLevel;
@@ -351,12 +367,12 @@ describe("§ 20 — l'index est borné en durée ET en taille, et sa saturation 
       maintenant: horloge.maintenant,
     });
 
-    index.marquer("session-a", DOMAINE_LECTURE, [empreinteExtrait("a")]);
+    index.marquer(SESSION_A, DOMAINE_LECTURE, [empreinteExtrait("a")]);
     horloge.avancerDe(1_000);
-    index.marquer("session-b", DOMAINE_LECTURE, [empreinteExtrait("b")]);
+    index.marquer(SESSION_B, DOMAINE_LECTURE, [empreinteExtrait("b")]);
     horloge.avancerDe(1_000);
-    // La troisième déborde : `session-a` est évincée.
-    index.marquer("session-c", DOMAINE_LECTURE, [empreinteExtrait("c")]);
+    // La troisième déborde : `SESSION_A` est évincée.
+    index.marquer(SESSION_C, DOMAINE_LECTURE, [empreinteExtrait("c")]);
 
     const etat = index.etat();
     console.info(
@@ -371,10 +387,10 @@ describe("§ 20 — l'index est borné en durée ET en taille, et sa saturation 
 
     // ⚠️ LE POINT DE LA GARDE : une session dont la marque a été perdue — ou une
     //    session dont on ne sait plus rien — n'est PAS traitée comme propre.
-    const domaines = index.domainesMarquants("session-a");
+    const domaines = index.domainesMarquants(SESSION_A);
     expect(domaines).toContain(DOMAINE_INDETERMINE);
 
-    const verdict = etape11Provenance(contexte({ index, sessionId: "session-a", libre: true }));
+    const verdict = etape11Provenance(contexte({ index, sessionId: SESSION_A, libre: true }));
     expect(verdict.issue).toBe("refuse");
 
     // ⚠️ ET L'INDÉTERMINATION EST BORNÉE : une dégradation définitive devient un
@@ -388,8 +404,8 @@ describe("§ 20 — l'index est borné en durée ET en taille, et sa saturation 
         `${String(apres.extraits)} extrait(s)`,
     );
     expect(apres.indetermine).toBe(false);
-    expect(index.domainesMarquants("session-a")).toEqual([]);
-    expect(etape11Provenance(contexte({ index, sessionId: "session-a" })).issue).toBe("autorise");
+    expect(index.domainesMarquants(SESSION_A)).toEqual([]);
+    expect(etape11Provenance(contexte({ index, sessionId: SESSION_A })).issue).toBe("autorise");
   });
 
   it("saturé en EMPREINTES : la marque de domaine SURVIT, et les refus se comptent", () => {
@@ -552,7 +568,7 @@ describe("étape 11 — la dérivation porte sur le SCHÉMA, jamais sur la valeu
         statut: { type: "string", enum: ["ouvert", "clos"] },
         messageId: { type: "string" },
       }),
-      ["messageId"],
+      AUCUN_CHAMP_DE_GOUVERNANCE,
     );
 
     console.info(
@@ -566,21 +582,39 @@ describe("étape 11 — la dérivation porte sur le SCHÉMA, jamais sur la valeu
     // `porteUnArgumentLibre` faux pour n'avoir rien regardé.
     expect(analyse.proprietesInspectees).toBe(4);
     expect(analyse.sousSchemasInspectes).toBeGreaterThanOrEqual(1);
-    expect(analyse.libres.map((champ) => champ.nom)).toEqual(["query"]);
+    // ✅ **ADR 0015 — `messageId` EST DÉSORMAIS RETENU, ET C'EST LA DÉCISION.**
+    //    Ce schéma le déclarait `idFields`, et l'étape 11 l'en exonérait : ce seul
+    //    mot, écrit dans un manifeste — donc dans un dépôt tiers — éteignait la garde
+    //    d'exfiltration du § 20. La fonction ne lit plus la déclaration : un
+    //    `{"type":"string"}` nu est un texte libre, qu'un adaptateur l'appelle `query`
+    //    ou `messageId`.
+    //
+    //    Le remède est chez l'adaptateur, en une ligne de Zod — `z.string().uuid()`,
+    //    ou un `pattern` ancré — et c'est un progrès en soi : un identifiant sans
+    //    forme déclarée est aussi un identifiant que le schéma d'entrée ne valide pas.
+    expect(analyse.libres.map((champ) => champ.nom)).toEqual(["query", "messageId"]);
     expect(analyse.porteUnArgumentLibre).toBe(true);
     expect(analyse.schemaIllisible).toBe(false);
   });
 
-  it("ne retient ni un identifiant déclaré, ni une énumération, ni un `format`", () => {
+  it("ne retient QUE ce que le SCHÉMA referme — une déclaration n'y peut plus rien", () => {
+    // ✅ **ADR 0015 — CE TEST A CHANGÉ D'OBJET, PAS DE CAMP.** Il s'appelait « ne
+    //    retient ni un identifiant DÉCLARÉ, ni une énumération, ni un `format` » et
+    //    mêlait deux choses : quatre fermetures que le SCHÉMA porte, et une
+    //    cinquième que l'ADAPTATEUR se contentait d'affirmer. La cinquième a
+    //    disparu ; les quatre autres sont intactes, et ce sont elles seules que ce
+    //    test mesure désormais. `messageId` est donc écrit ici REFERMÉ PAR SON
+    //    SCHÉMA, c'est-à-dire dans la forme que l'ADR 0015 demande aux adaptateurs
+    //    réels du § 27 et du § 28.
     const analyse = analyserArgumentsDuSchema(
       schema({
-        messageId: { type: "string" },
+        messageId: { type: "string", format: "uuid" },
         statut: { type: "string", enum: ["ouvert", "clos"] },
         jour: { type: "string", format: "date" },
         reference: { type: "string", pattern: "^[A-Z]{3}-\\d{4}$" },
         page: { type: "integer" },
       }),
-      ["messageId"],
+      AUCUN_CHAMP_DE_GOUVERNANCE,
     );
 
     console.info(
@@ -593,16 +627,45 @@ describe("étape 11 — la dérivation porte sur le SCHÉMA, jamais sur la valeu
     expect(analyse.porteUnArgumentLibre).toBe(false);
   });
 
+  it("ADR 0015 — le MÊME schéma, `messageId` laissé NU, redevient surveillé", () => {
+    // ⚠️ **LE CLIQUET DU TEST PRÉCÉDENT, ET IL NE SE DÉDUIT PAS DE LUI.** Sans
+    //    lui, « zéro champ libre » serait indiscernable de « la dérivation ne
+    //    regarde plus rien ». Un seul mot change entre les deux schémas — le
+    //    `format: "uuid"` — et c'est bien le SCHÉMA, et lui seul, qui referme.
+    //    Ce couple rougirait le jour où l'exonération par déclaration
+    //    reviendrait, sous ce nom ou sous un autre.
+    const analyse = analyserArgumentsDuSchema(
+      schema({
+        messageId: { type: "string" },
+        statut: { type: "string", enum: ["ouvert", "clos"] },
+        page: { type: "integer" },
+      }),
+      AUCUN_CHAMP_DE_GOUVERNANCE,
+    );
+
+    console.info(
+      `[cliquet ADR 0015] ${String(analyse.proprietesInspectees)} propriété(s) inspectée(s), ` +
+        `${String(analyse.libres.length)} libre(s) : ` +
+        analyse.libres.map((champ) => champ.nom).join(", "),
+    );
+
+    expect(analyse.proprietesInspectees).toBe(3);
+    expect(analyse.libres.map((champ) => champ.nom)).toEqual(["messageId"]);
+    expect(analyse.porteUnArgumentLibre).toBe(true);
+  });
+
   it("descend dans les sous-objets — une racine fermée ne suffit pas", () => {
     // Un champ libre logé dans `options.notes` est aussi exfiltrant qu'à la
     // racine. Le parcours est celui de `core/adapter-kit/fermeture.ts`, importé
     // et non réécrit : un applicateur ajouté là-bas est vu ici le jour même.
     const analyse = analyserArgumentsDuSchema(
       schema({
-        messageId: { type: "string" },
+        // Refermé PAR SON SCHÉMA (ADR 0015) : nu, il entrerait lui aussi dans
+        // `libres` et brouillerait ce que ce test mesure — LA DESCENTE.
+        messageId: { type: "string", format: "uuid" },
         options: schema({ notes: { type: "string" } }),
       }),
-      ["messageId"],
+      AUCUN_CHAMP_DE_GOUVERNANCE,
     );
 
     console.info(
@@ -619,7 +682,7 @@ describe("étape 11 — la dérivation porte sur le SCHÉMA, jamais sur la valeu
   it("retient un TABLEAU de textes libres — la porte à côté", () => {
     const analyse = analyserArgumentsDuSchema(
       schema({ tags: { type: "array", items: { type: "string" } } }),
-      [],
+      AUCUN_CHAMP_DE_GOUVERNANCE,
     );
     expect(analyse.libres.map((champ) => champ.nom)).toEqual(["tags"]);
   });
@@ -630,7 +693,7 @@ describe("étape 11 — la dérivation porte sur le SCHÉMA, jamais sur la valeu
     const cyclique: Record<string, unknown> = { type: "object" };
     cyclique["properties"] = cyclique;
 
-    const analyse = analyserArgumentsDuSchema(cyclique, []);
+    const analyse = analyserArgumentsDuSchema(cyclique, AUCUN_CHAMP_DE_GOUVERNANCE);
 
     console.info(
       `[garde schéma illisible] illisible = ${String(analyse.schemaIllisible)}, ` +
@@ -649,7 +712,7 @@ describe("étape 11 — la dérivation porte sur le SCHÉMA, jamais sur la valeu
     // dire n'existe pas non plus. Ce qu'il faut éviter, c'est qu'un schéma
     // absent ou anodin fabrique un `false` qui ouvre la porte : le compte
     // annoncé (`proprietesInspectees`) est ce qui le distingue.
-    const analyse = analyserArgumentsDuSchema({ type: "object" }, []);
+    const analyse = analyserArgumentsDuSchema({ type: "object" }, AUCUN_CHAMP_DE_GOUVERNANCE);
     expect(analyse.proprietesInspectees).toBe(0);
     expect(analyse.porteUnArgumentLibre).toBe(false);
     // ⚠️ C'est ici que se lit la borne : `false` avec ZÉRO propriété inspectée
@@ -730,7 +793,7 @@ describe("§ 20 — les cinq familles d'arguments de gouvernance sont NOMMÉES",
         query: { type: "string" },
         recipients: { type: "array", items: { type: "string" } },
       }),
-      [],
+      AUCUN_CHAMP_DE_GOUVERNANCE,
     );
 
     console.info(

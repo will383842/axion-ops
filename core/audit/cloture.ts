@@ -37,7 +37,12 @@ import type { AppelStep, Effect } from "../types.js";
 // en ferait une seconde vérité, et c'est la seconde qui ne suivrait pas.
 import { estEffetExterieur } from "../policy/effet.js";
 import type { ContenuLigne, LigneAudit } from "./vocabulaire.js";
-import { FORME_EMPREINTE, OUTIL_CLOTURE, PRINCIPAL_SYSTEME } from "./vocabulaire.js";
+import {
+  FORME_EMPREINTE,
+  OUTIL_CLOTURE,
+  PRINCIPAL_SYSTEME,
+  SESSION_HORS_APPEL,
+} from "./vocabulaire.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  La charge
@@ -251,9 +256,16 @@ export function construireCloture(charge: ChargeCloture, argHash: string, at: Da
   return {
     at,
     principal: PRINCIPAL_SYSTEME,
-    // La session de pilotage d'une purge est la purge elle-même, identifiée par
-    // la tranche qu'elle retire : deux purges ne peuvent pas la partager.
-    sessionId: `purge-${charge.seqDepuis.toString()}-${charge.seqJusqua.toString()}`,
+    // ADR 0014 — UNE PURGE N'A PAS DE SESSION DE PILOTAGE, et la colonne est non
+    // nulle : c'est la valeur réservée {@link SESSION_HORS_APPEL} qui répond.
+    //
+    // ⚠️ CE CHAMP PORTAIT `purge-<seqDepuis>-<seqJusqua>`, ET LE PERDRE EST UN
+    //    PROGRÈS. Les deux bornes vivent DÉJÀ dans `partialSources`, sous la forme
+    //    versionnée qu'`encoderCharge()` écrit et que `decoderCharge()` relit —
+    //    et c'est cette forme-là, pas la colonne « session », que `verifierChaine()`
+    //    interroge pour ancrer un saut. Deux écritures d'un même fait, dont une
+    //    seule est relue : le jour où le format bouge, c'est l'autre qui ment.
+    sessionId: SESSION_HORS_APPEL,
     tool: OUTIL_CLOTURE,
     toolVersion: VERSION_CLOTURE,
     adapterVersion: VERSION_CLOTURE,

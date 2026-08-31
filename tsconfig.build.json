@@ -5,5 +5,19 @@
   "compilerOptions": {
     "noEmit": false
   },
-  "exclude": ["node_modules", "dist", "**/*.spec.ts", "*.config.ts"]
+  // ⚠️ CET `exclude` N'EST PAS QU'UN RÉGLAGE DE BUILD : c'est le CRITÈRE dont
+  //    `core/coutures/registre.spec.ts` (ADR 0019) et `core/chaine/identite.spec.ts`
+  //    (ADR 0014) dérivent « ce fichier est-il de PRODUCTION ? ». Une fabrique de
+  //    témoins émise par le build compterait alors pour un module de production, et
+  //    un symbole dont l'unique appelant serait une fixture passerait pour COUSU.
+  //    `core/epreuve/` et les `fixtures.ts` sont donc exclus ici — ce qui est de
+  //    toute façon la vérité : aucun module de production n'en importe un seul.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.spec.ts",
+    "*.config.ts",
+    "core/epreuve",
+    "**/fixtures.ts"
+  ]
 }

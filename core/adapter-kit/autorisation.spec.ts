@@ -82,13 +82,25 @@ describe("la dérivation des noms interdits", () => {
     console.info(
       `[garde noms interdits] ${String(cles.toolContext.length)} depuis ToolContext · ` +
         `${String(cles.habilitations.length)} depuis Habilitations · ` +
+        `${String(cles.reservesHorsContexte.length)} réservé(s) HORS contexte · ` +
         `${String(cles.toutes.length)} au total, lus dans ${cles.origine}`,
     );
+
+    // ⚠️ LE TROISIÈME COMPTE EST CELUI QUI NE POUVAIT PAS MANQUER, ET IL
+    //    MANQUAIT. L'ADR 0020 exige que ce rapport annonce LES TROIS ensembles ;
+    //    il en annonçait deux — « 9 · 1 · 11 au total », une addition qui ne se
+    //    reconstitue pas. Le onzième nom EST le troisième ensemble, celui qui
+    //    empêche le retrait d'`idempotencyKey` de `ToolContext` de ROUVRIR ce nom
+    //    dans un schéma d'entrée en silence. S'il tombait à zéro, le total
+    //    passerait de 11 à 10, et un lecteur qui ne voit que « 9 · 1 · total »
+    //    n'a aucune raison de trouver ce total anormal. La règle du dépôt est de
+    //    lire le COMPTE, pas la couleur — encore faut-il que le compte soit écrit.
 
     // Compte mesuré. Une dérivation qui rendrait 0 ou 1 nom rendrait le
     // contrôle 7 vacueux ; le plancher est ici la seule chose qui l'empêche.
     expect(cles.toolContext.length).toBeGreaterThanOrEqual(5);
     expect(cles.habilitations.length).toBeGreaterThanOrEqual(1);
+    expect(cles.reservesHorsContexte.length).toBeGreaterThanOrEqual(1);
     expect(cles.toutes.length).toBeGreaterThanOrEqual(6);
 
     // Les trois noms que le CDC nomme explicitement doivent y être. Ils ne sont

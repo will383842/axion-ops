@@ -19,6 +19,10 @@ export {
   OCTETS_INSTANCE_ID,
   STATUT_HEALTHCHECK_VERROU_ABSENT,
   STATUT_HEALTHCHECK_VERROU_TENU,
+  deciderDemarrageMonoInstance,
+  decisionsPourTousLesEtatsDuVerrou,
+  frapperInstance,
+  statutHealthcheckPourVerrou,
 } from "./verrou.js";
 
 export type {
@@ -29,3 +33,25 @@ export type {
   SanteMonoInstance,
   VerrouDInstance,
 } from "./verrou.js";
+
+/**
+ * LA COUTURE — le module qui APPELLE l'arbitre. Sans lui, la décision de l'ADR
+ * 0018 resterait une fonction que personne n'invoque, c'est-à-dire une
+ * intention : c'est le mode de défaillance que l'épreuve du lot 1c a mesuré sur
+ * quatre ADR sur cinq.
+ */
+export {
+  REPLI_MAGASIN_INJOIGNABLE,
+  demarrerLeSocleMonoInstance,
+  relireLaSanteMonoInstance,
+} from "./demarrage.js";
+export type { DemarrageMonoInstance, LectureDeProvenance } from "./demarrage.js";
+
+/**
+ * Le double en mémoire du port, et le témoin qui fait rougir la garde G1 de
+ * l'ADR 0018. Ils vivent dans un fichier ORDINAIRE, comme `core/audit/memoire.ts`
+ * et `core/limits/memoire.ts` : un double exporté depuis un `.spec.ts` ne
+ * franchirait pas la frontière du paquet.
+ */
+export { MagasinDeVerrousEnMemoire, VerrouEnMemoire, VerrouReentrantTemoin } from "./memoire.js";
+export type { OptionsVerrouEnMemoire } from "./memoire.js";

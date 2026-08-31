@@ -30,6 +30,8 @@
 
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+
 import { jsonCanonique, octetsUtf8 } from "../profiles/index.js";
 import type {
   ChargeAdaptateur,
@@ -75,6 +77,8 @@ function outilDouble(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogu
     compaction: { free: ["extrait"], tier2: ["detailHref"], aggregateBy: "canal" },
     maxBytes: 100_000,
     idFields: ["id"],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     ...surcharge,
   };
 }

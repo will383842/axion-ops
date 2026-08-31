@@ -110,10 +110,81 @@ function commeObjet(valeur: ValeurJson | undefined): ObjetJson | null {
  * contrôle de fermeture ET au contrôle 7, sans qu'aucun des deux ne soit à
  * retoucher. Les recopier séparément ferait qu'un mot-clé ajouté d'un seul côté
  * ouvrirait une porte que l'autre côté croirait fermée.
+ *
+ * ═══ ⚠️ CE QU'UN MOT-CLÉ ABSENT DE CES TROIS LISTES COÛTE, MESURÉ ═══
+ *
+ * `dependentSchemas` manquait. C'est un applicateur ORDINAIRE de 2020-12 — celui
+ * que produit tout générateur exprimant « si `paiement` est présent, alors
+ * `montant` et `iban` sont requis » — et il DÉCLARE des `properties`. Absent du
+ * parcours, il produisait un défaut à DEUX faces, et c'est l'appariement des
+ * deux qui le rendait dangereux :
+ *
+ *  · le § 09 déclarait le schéma FERMÉ, parce qu'aucun objet à fermer n'était
+ *    vu là où le parcours ne descendait pas ;
+ *  · le § 20 ne voyait AUCUN des champs qui y vivent — un `corps` de courrier en
+ *    texte libre déclaré sous `dependentSchemas` n'entrait pas dans `libres`,
+ *    donc `porteUnArgumentLibre` restait faux, donc la branche 4 de l'étape 11
+ *    ne demandait aucune confirmation.
+ *
+ * Un adaptateur n'avait donc qu'à déplacer sa propriété de trois lignes pour
+ * sortir de la garde d'exfiltration, en gardant un schéma que l'admission
+ * déclare fermé. **Le CDC ne nomme aucun de ces mots-clés : ce qui les nomme est
+ * le vocabulaire de JSON Schema 2020-12, et c'est à LUI qu'il faut confronter
+ * ces trois listes** — sans quoi le prochain mot-clé oublié reproduira le même
+ * défaut, et personne ne le verra.
+ *
+ * ⚠️ C'EST POURQUOI ELLES SONT EXPORTÉES. Non pour être lues par un autre module
+ *    de production — aucun ne les lit — mais pour que
+ *    `fermeture-couverture.temoin.spec.ts` puisse les CONFRONTER au vocabulaire
+ *    d'applicateurs de 2020-12 et rougir sur l'écart. Une garde qui recopierait
+ *    ces trois listes dans son propre corps mesurerait sa copie.
+ *
+ * ⚠️ LA FORME COMPTE AUTANT QUE LE NOM, et c'est ce qui sépare les trois listes.
+ *    Un mot-clé rangé dans la mauvaise ne serait pas « à peu près parcouru » : il
+ *    serait parcouru DE TRAVERS. `dependentSchemas` placé parmi les directs ferait
+ *    descendre dans la TABLE elle-même, prise pour un schéma ; ses vraies
+ *    branches ne seraient jamais visitées, et le parcours rendrait un
+ *    sous-schéma de plus — donc un compte rassurant. La garde de couverture
+ *    confronte donc le nom ET sa forme.
  */
-const APPLICATEURS_OBJET = ["properties", "$defs", "definitions", "patternProperties"] as const;
-const APPLICATEURS_LISTE = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
-const APPLICATEURS_DIRECTS = ["items", "not", "if", "then", "else", "contains"] as const;
+
+/** Mot-clé dont la valeur est une TABLE `nom → sous-schéma`. */
+export const APPLICATEURS_OBJET = [
+  "properties",
+  "$defs",
+  "definitions",
+  "patternProperties",
+  // 2020-12, vocabulaire « applicator ». Il DÉCLARE des `properties` : c'est le
+  // trou de couverture décrit ci-dessus, et le motif de la garde qui l'a fermé.
+  "dependentSchemas",
+] as const;
+
+/** Mot-clé dont la valeur est une LISTE de sous-schémas. */
+export const APPLICATEURS_LISTE = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
+
+/** Mot-clé dont la valeur est UN sous-schéma. */
+export const APPLICATEURS_DIRECTS = [
+  "items",
+  "not",
+  "if",
+  "then",
+  "else",
+  "contains",
+  // ⚠️ LES QUATRE SUIVANTS VALENT LE PLUS SOUVENT `false`, ET `commeObjet()` REND
+  //    ALORS `null` : le parcours ne descend pas, et rien ne change. Ils ne
+  //    comptent que dans leur forme de SCHÉMA — `additionalProperties: { … }`,
+  //    que `z.record(…)` produit couramment — où le sous-schéma peut à son tour
+  //    déclarer des propriétés, et où ne pas descendre est la même cécité que
+  //    pour `dependentSchemas`.
+  "additionalProperties",
+  "unevaluatedProperties",
+  "unevaluatedItems",
+  // `propertyNames` contraint les NOMS et non les valeurs. Il est parcouru quand
+  // même : le sens fail-closed de ce module est de visiter tout emplacement où
+  // un sous-schéma peut vivre, et de juger ensuite — jamais de décider à
+  // l'avance qu'un emplacement ne mérite pas d'être lu.
+  "propertyNames",
+] as const;
 
 /** Un sous-schéma atteint par le parcours, avec le chemin qui y mène. */
 interface SousSchema {

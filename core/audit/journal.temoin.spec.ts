@@ -17,6 +17,9 @@ import { avecJournal, ErreurJournalIndisponible, Journal } from "./journal.js";
 import type { EnteteAppel } from "./journal.js";
 import { ErreurContenuJournal } from "./contenu.js";
 import { SCELLEUR_TEMOIN, HorlogeFigee } from "./fixtures.js";
+// ADR 0014 — la session d'un témoin vient de la fabrique NOMMÉE de
+// `core/identite/`, jamais d'un littéral : le type marqué ne l'accepte plus.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 import { JournalMemoire } from "./memoire.js";
 import type { JournalStore } from "./ports.js";
 import type { LigneAAjouter, LigneEcrite, Terminaison } from "./vocabulaire.js";
@@ -24,7 +27,7 @@ import { APPEL_STEPS } from "../types.js";
 
 const ENTETE: EnteteAppel = {
   principal: "temoin",
-  sessionId: "session-1",
+  sessionId: sessionIdDeTemoin(),
   tool: "ops.temoin.lire",
   toolVersion: "1.0.0",
   adapterVersion: "1.0.0",

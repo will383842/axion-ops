@@ -46,8 +46,8 @@
 import type { EtatDuVerrou, SanteMonoInstance } from "../core/instance/verrou.js";
 import {
   FORME_INSTANCE_ID,
-  STATUT_HEALTHCHECK_VERROU_ABSENT,
   STATUT_HEALTHCHECK_VERROU_TENU,
+  statutHealthcheckPourVerrou,
 } from "../core/instance/verrou.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -242,8 +242,12 @@ export function observerMonoInstance(
     }
 
     // ── Contrôle 4 — la cohérence statut / verrou, DÉRIVÉE ──
-    const statutAttendu =
-      sante.verrou === "tenu" ? STATUT_HEALTHCHECK_VERROU_TENU : STATUT_HEALTHCHECK_VERROU_ABSENT;
+    // ⚠️ DÉRIVÉE PAR LA FONCTION DU SOCLE, JAMAIS RECALCULÉE ICI. Ce contrôle
+    //    portait un ternaire sur les deux constantes : une SECONDE dérivation du
+    //    même fait, identique à la première le jour où on l'a écrite, et qui
+    //    aurait cessé de l'être au premier état de verrou ajouté à
+    //    `ETATS_DU_VERROU`. Des deux, c'est toujours le CONTRÔLE qui ne suit pas.
+    const statutAttendu = statutHealthcheckPourVerrou(sante.verrou);
     if (sante.statut !== statutAttendu) {
       anomalies.push(
         `lecture n° ${rangLisible} : le verrou est « ${sante.verrou} » et le healthcheck rend ` +

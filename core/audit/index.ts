@@ -110,6 +110,11 @@ export type {
   AffineursDAppel,
   AppelJournalise,
   EnteteAppel,
+  // ADR 0021 — la LECTURE du cliquet, troisième membre d'`AffineursDAppel`.
+  // Nommée pour la même raison que le signal ci-dessous : un `() => boolean`
+  // anonyme au point d'appel ne dit ni ce qu'il lit, ni qu'il ne peut rien
+  // écrire.
+  LecteurEffetExterieur,
   // ADR 0017 — le CLIQUET. Exporté parce que l'orchestrateur en est l'unique
   // appelant, et qu'un type nommé au point d'appel vaut mieux qu'une fonction
   // anonyme dont personne ne peut dire, six mois plus tard, si elle accepte un
@@ -117,7 +122,14 @@ export type {
   SignalEffetExterieur,
 } from "./journal.js";
 
-export { JournalMemoire } from "./memoire.js";
+// ⚠️ `JournalMemoireSansSectionCritique` EST UN TÉMOIN, PAS UN DOUBLE DE PLUS.
+//    Il garde le comportement d'AVANT le lot 1d — deux écritures concurrentes
+//    peuvent y réclamer le même chaînon — et il n'existe que pour qu'une garde
+//    puisse fabriquer la FOURCHE et prouver que le vérificateur sait la voir.
+//    AUCUN module de production ne doit l'instancier. Il est ré-exporté ici pour
+//    qu'une garde d'un autre dossier n'ait pas à importer `./memoire.js` en dur
+//    là où tout le reste passe par cet index.
+export { JournalMemoire, JournalMemoireSansSectionCritique } from "./memoire.js";
 
 export { HORLOGE_SYSTEME } from "./ports.js";
 export type { ArgHasher, Horloge, JournalStore, ScelleurJournal } from "./ports.js";
@@ -150,6 +162,11 @@ export {
   OUTIL_CLOTURE,
   OUTIL_INCONNU,
   PRINCIPAL_SYSTEME,
+  // ADR 0014 — la valeur réservée des lignes d'`ops_audit` qui ne sont PAS des
+  // appels (la clôture de purge aujourd'hui). Elle est ré-exportée comme les
+  // autres valeurs réservées du journal : quatre inventions différentes chez
+  // quatre appelants rendraient la métrique du § 24 illisible.
+  SESSION_HORS_APPEL,
   VERSION_INCONNUE,
 } from "./vocabulaire.js";
 export type {
@@ -161,6 +178,7 @@ export type {
   LigneEcrite,
   Outcome,
   Refus,
+  SessionHorsAppel,
   Succes,
   Terminaison,
 } from "./vocabulaire.js";

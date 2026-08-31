@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+
 import { OUTCOMES } from "../audit/index.js";
 import { octetsUtf8, jsonCanonique } from "../profiles/index.js";
 import { ETAPE_EXECUTION, PALIERS_COMPACTION } from "./etapes.js";
@@ -80,6 +82,8 @@ function outilDouble(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogu
     compaction: COMPACTION_TYPE,
     maxBytes: 10_000,
     idFields: ["id"],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     ...surcharge,
   };
 }

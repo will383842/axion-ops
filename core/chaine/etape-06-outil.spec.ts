@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+
 import { APPEL_STEPS, ERROR_CODES } from "../types.js";
 import { ETAPE_CATALOGUE } from "./etapes.js";
 import type {
@@ -189,6 +191,8 @@ function outil(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogue {
     compaction: { free: ["preview"], tier2: ["headers"], aggregateBy: null },
     maxBytes: 32_768,
     idFields: ["messageId"],
+    // ADR 0016 — la valeur neutre PORTE UN NOM : « cet outil n'en déclare aucun ».
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     ...surcharge,
   };
 }

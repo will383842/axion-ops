@@ -54,7 +54,15 @@ export interface ParametresLimites<T> {
   /** § 09 — déclaré par l'outil dans son manifeste. */
   readonly modeIdempotence: ModeIdempotence;
   readonly principal: string;
-  /** § 20 — vient de `ctx`, JAMAIS d'`input`. */
+  /**
+   * § 20 — LA CLÉ BRUTE, venue de l'EN-TÊTE de l'appel, JAMAIS d'`input`.
+   *
+   * ⚠️ **ELLE NE VIENT PLUS DE `ctx` — ADR 0020.** `ToolContext` ne porte plus la
+   *    clé mais son empreinte (`idempotencyRef`) : cet étage-ci est, avec
+   *    l'orchestrateur qui le nourrit, l'un des deux derniers endroits du socle
+   *    où la chaîne d'origine existe. `reserver()` en confronte la FORME, puis
+   *    n'écrit que l'empreinte dans `ops_idempotency`.
+   */
   readonly idempotencyKey: string | null;
   /** La charge utile BRUTE, non encore validée. */
   readonly input: unknown;

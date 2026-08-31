@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { APPEL_STEPS } from "../types.js";
 import { sha256Hex } from "./canonique.js";
 import { HorlogeFigee, SCELLEUR_TEMOIN } from "./fixtures.js";
+// ADR 0014 — la session d'un témoin vient de la fabrique NOMMÉE de
+// `core/identite/`, jamais d'un littéral : le type marqué ne l'accepte plus.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 import type { AffineursDAppel, EnteteAppel } from "./journal.js";
 import { Journal, avecJournal } from "./journal.js";
 import { JournalMemoire } from "./memoire.js";
@@ -38,7 +41,7 @@ import { EFFET_EXTERIEUR_NON_SURVENU, OUTCOMES } from "./vocabulaire.js";
 
 const ENTETE: EnteteAppel = {
   principal: "temoin-appelant",
-  sessionId: "session-temoin",
+  sessionId: sessionIdDeTemoin(),
   tool: "ops.temoin.envoyer",
   toolVersion: "1.0.0",
   adapterVersion: "1.0.0",
@@ -349,6 +352,10 @@ describe("core/audit — G3 : le cliquet ne redescend sur AUCUN chemin de sortie
           signalerEffetExterieur: () => {
             /* neutralisé : c'est tout le témoin */
           },
+          // ADR 0021 — le troisième membre. Le cliquet étant neutralisé ici, sa
+          // LECTURE ne peut rendre que « rien n'est sorti » : c'est le seul
+          // témoin cohérent, et un `true` mentirait au corps.
+          effetExterieurSurvenu: () => false,
         });
 
       if (chemin.leve) {

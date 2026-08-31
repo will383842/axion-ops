@@ -11,6 +11,7 @@ import {
   cumulerChampsDeGouvernance,
 } from "../adapter-kit/champs-declares.js";
 import type { ValeurJson } from "../adapter-kit/json.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 import {
   IndexProvenanceMemoire,
   analyserArgumentsDuSchema,
@@ -19,6 +20,10 @@ import {
   marquerResultat,
 } from "../chaine/etape-11-provenance.js";
 import type { ContexteProvenance } from "../chaine/etapes.js";
+// ADR 0014 — la session de témoin vient de la fabrique NOMMÉE de `core/identite/` :
+// le type marqué de `SessionId` ne se laisse plus écrire en littéral.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
+import type { SessionId } from "../identite/session.js";
 
 /**
  * TÉMOINS ADVERSAIRES DU LOT 1c — **LA COUTURE QUI N'A PAS ÉTÉ FAITE.**
@@ -69,7 +74,7 @@ import type { ContexteProvenance } from "../chaine/etapes.js";
 
 const DOMAINE_LU = "boite-courrier";
 const DOMAINE_TIERS = "annuaire-externe";
-const SESSION = "session-de-l-adversaire-1c";
+const SESSION: SessionId = sessionIdDeTemoin();
 
 /** Un index marqué comme il l'est en production : par le RÉSULTAT d'un appel. */
 function indexMarque(): IndexProvenanceMemoire {
@@ -114,13 +119,36 @@ function schemaFerme(proprietes: Record<string, ValeurJson>): ValeurJson {
  * ⚠️ MESURER `analyserArgumentsDuSchema()` SEULE NE SUFFIRAIT PAS. Un booléen
  *    faux n'est un trou que s'il change le VERDICT ; c'est le verdict qu'on
  *    mesure ici.
+ *
+ * ⚠️ **`governanceFields` EST UN PARAMÈTRE, ET IL LE DEVAIT.** Avant la couture
+ *    du lot 1d, ce harnais n'en avait aucun : le témoin de l'ADR 0016 ci-dessous
+ *    s'appelait « un champ de gouvernance DÉCLARÉ… » et ne déclarait rien du
+ *    tout. Il aurait échoué pour toujours, y compris une fois la couture faite —
+ *    c'est-à-dire qu'il serait resté un `it.fails` VERT sur un défaut fermé, et
+ *    la dette aurait cessé d'être lisible. Un harnais qui n'a pas le paramètre
+ *    ne peut pas mesurer la règle.
  */
 function verdictBoutEnBout(
   inputSchema: ValeurJson,
-  idFields: readonly string[],
+  /**
+   * ⚠️ **CE PARAMÈTRE EST DÉSORMAIS INERTE, ET C'EST TOUT LE SUJET DE G1.**
+   *    Il porte ce que le MANIFESTE déclare — c'est encore une donnée réelle
+   *    (§ 12 : `idFields` nomme les champs porteurs d'identifiants pour la purge
+   *    du § 31, et l'admission le lit). Il n'entre simplement plus dans la
+   *    dérivation de l'étape 11, parce que `analyserArgumentsDuSchema()` ne
+   *    l'accepte plus : ADR 0015.
+   *
+   *    Le GARDER ici plutôt que l'effacer est délibéré. G1 mesure « ce que la
+   *    SEULE déclaration change au verdict » : il lui faut donc encore pouvoir
+   *    DÉCLARER. Un harnais qui ne saurait plus le faire rendrait `[]` pour la
+   *    pire des raisons — n'avoir rien déclaré — et la garde serait verte sans
+   *    rien avoir éprouvé.
+   */
+  _idFieldsDuManifeste: readonly string[],
+  governanceFields: readonly string[],
   surcharge: Partial<ContexteProvenance> = {},
 ): { readonly franchi: boolean; readonly proprietesInspectees: number } {
-  const analyse = analyserArgumentsDuSchema(inputSchema, idFields);
+  const analyse = analyserArgumentsDuSchema(inputSchema, governanceFields);
   // Un schéma qu'on n'aurait pas su lire rendrait « libre » pour la pire des
   // raisons, et le témoin conclurait à un contournement là où il n'y a qu'une
   // panne de lecture.
@@ -145,6 +173,7 @@ describe("PLANCHER — l'étape 11 sait mordre sur ce décor", () => {
     const { franchi, proprietesInspectees } = verdictBoutEnBout(
       schemaFerme({ message: { type: "string" } }),
       [],
+      AUCUN_CHAMP_DE_GOUVERNANCE,
     );
     console.log(
       `[plancher étape 11] ${String(proprietesInspectees)} propriété(s) inspectée(s) · ` +
@@ -173,15 +202,15 @@ const CHAMPS_LIBRES_ORDINAIRES: readonly { readonly nom: string; readonly schema
   { nom: "rappel", schema: { type: "string", format: "uri" } },
 ];
 
-describe("G1 · ADR 0015 — la déclaration `idFields` éteint encore la garde du § 20", () => {
+describe("G1 · ADR 0015 — la déclaration `idFields` n'éteint plus la garde du § 20", () => {
   it("mesure, champ par champ, ce que la SEULE déclaration change au VERDICT", () => {
     const eteints: string[] = [];
     let refusesSansDeclaration = 0;
 
     for (const champ of CHAMPS_LIBRES_ORDINAIRES) {
       const schema = schemaFerme({ [champ.nom]: champ.schema });
-      const sans = verdictBoutEnBout(schema, []);
-      const avec = verdictBoutEnBout(schema, [champ.nom]);
+      const sans = verdictBoutEnBout(schema, [], AUCUN_CHAMP_DE_GOUVERNANCE);
+      const avec = verdictBoutEnBout(schema, [champ.nom], AUCUN_CHAMP_DE_GOUVERNANCE);
       if (!sans.franchi) refusesSansDeclaration += 1;
       // Le trou n'est pas « le champ est libre » : c'est que DEUX MOTS DANS UN
       // MANIFESTE, et rien d'autre, retournent le verdict.
@@ -204,29 +233,35 @@ describe("G1 · ADR 0015 — la déclaration `idFields` éteint encore la garde 
       "cliquet : sans déclaration, les six sont refusés — sinon la mesure ne vaut rien",
     ).toBe(CHAMPS_LIBRES_ORDINAIRES.length);
 
-    // 🔴 CE QUI EST MESURÉ AUJOURD'HUI : les six. `analyserArgumentsDuSchema()`
-    //    porte toujours son paramètre `idFields`, et son corps toujours le
-    //    `if (identifiants.has(nom)) continue;` que l'ADR 0015 dit retirer.
-    //    Le jour où la couture sera faite, CE TEST ROUGIT — et c'est voulu.
-    expect(eteints).toEqual(CHAMPS_LIBRES_ORDINAIRES.map((champ) => champ.nom));
+    // ✅ **CE QUI EST MESURÉ DEPUIS LE LOT 1d : ZÉRO.** Ce test annonçait les six,
+    //    et il disait pourquoi : `analyserArgumentsDuSchema()` portait un
+    //    paramètre `idFields` et un `if (identifiants.has(nom)) continue;`. Les
+    //    deux ont disparu — le paramètre de la SIGNATURE, pas seulement de
+    //    l'appel — et le compte est tombé à zéro.
+    //
+    //    ⚠️ IL N'EST PAS DEVENU MUET POUR AUTANT, et c'est ce que le cliquet
+    //       ci-dessus garantit : `refusesSansDeclaration` vaut toujours six. Les
+    //       six champs sont donc bien soumis, bien refusés, et la déclaration ne
+    //       retourne plus aucun de ces six verdicts. Le jour où l'exonération
+    //       reviendrait — sous ce nom ou sous un autre — ce compte remonterait.
+    expect(eteints).toEqual([]);
   });
 
-  it.fails(
-    "ADR 0015 — une déclaration `idFields` ne changera PLUS aucun verdict (non cousu à ce jour)",
-    () => {
-      const retournes = CHAMPS_LIBRES_ORDINAIRES.filter((champ) => {
-        const schema = schemaFerme({ [champ.nom]: champ.schema });
-        return (
-          !verdictBoutEnBout(schema, []).franchi && verdictBoutEnBout(schema, [champ.nom]).franchi
-        );
-      });
-      expect(retournes.map((champ) => champ.nom)).toEqual([]);
-    },
-  );
+  it("✅ ADR 0015 — une déclaration `idFields` ne change PLUS aucun verdict", () => {
+    const retournes = CHAMPS_LIBRES_ORDINAIRES.filter((champ) => {
+      const schema = schemaFerme({ [champ.nom]: champ.schema });
+      return (
+        !verdictBoutEnBout(schema, [], AUCUN_CHAMP_DE_GOUVERNANCE).franchi &&
+        verdictBoutEnBout(schema, [champ.nom], AUCUN_CHAMP_DE_GOUVERNANCE).franchi
+      );
+    });
+    expect(retournes.map((champ) => champ.nom)).toEqual([]);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  G2 · ADR 0016 — LA DÉCLARATION EST ADMISE, PUIS PERDUE AVANT L'ÉTAPE 11
+//  G2 · ADR 0016 — LA DÉCLARATION EST ADMISE, CUMULÉE, ET LUE PAR L'ÉTAPE 11
+//  (✅ cousue au lot 1d ; le filet AU NOM garde sa borne, chiffrée ci-dessous)
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -264,7 +299,7 @@ const ECHAPPES: readonly string[] = NOMS_DE_GOUVERNANCE.filter(
   (nom) => familleDeGouvernance(nom) === null,
 );
 
-describe("G2 · ADR 0016 — `governanceFields` est admis, cumulé… et jamais lu par l'étape 11", () => {
+describe("G2 · ADR 0016 — `governanceFields` est admis, cumulé, et LU par l'étape 11", () => {
   it("le filet laisse encore échapper des noms ordinaires, et ANNONCE combien", () => {
     console.log(
       `[G2 · filet] ${String(NOMS_DE_GOUVERNANCE.length)} nom(s) confronté(s) · ` +
@@ -311,7 +346,15 @@ describe("G2 · ADR 0016 — `governanceFields` est admis, cumulé… et jamais 
     expect(cumul.union.length).toBe(NOMS_DE_GOUVERNANCE.length);
   });
 
-  it("l'ÉTAPE 11 ne voit rien de cette déclaration — mesuré sur le VERDICT", () => {
+  /**
+   * ⚠️ **LE CONTRASTE, ET IL EST LA MOITIÉ DE LA MESURE.** Ce test dit ce que la
+   *    déclaration change en établissant d'abord ce qu'elle NE change PAS : sans
+   *    elle, les neuf échappés franchissent toujours. C'est la borne de
+   *    `FAMILLES_GOUVERNANCE`, inchangée par l'ADR 0016 — le filet n'a pas été
+   *    élargi, il a été DOUBLÉ. Sans ce compte, le « zéro franchi » du test
+   *    suivant se lirait comme « le filet s'est mis à les reconnaître ».
+   */
+  it("SANS la déclaration, l'étape 11 ne voit toujours rien — la borne du filet, chiffrée", () => {
     const surveilles: string[] = [];
     const franchis: string[] = [];
 
@@ -319,40 +362,65 @@ describe("G2 · ADR 0016 — `governanceFields` est admis, cumulé… et jamais 
       // Un champ de gouvernance REFERMÉ par son schéma : la branche 4 (« argument
       // libre ») ne peut donc pas jouer, et l'on isole la branche 1.
       const schema = schemaFerme({ [nom]: { type: "string", format: "date-time" } });
-      const analyse = analyserArgumentsDuSchema(schema, []);
+      const analyse = analyserArgumentsDuSchema(schema, AUCUN_CHAMP_DE_GOUVERNANCE);
       if (analyse.porteUnArgumentDeGouvernance) surveilles.push(nom);
       // Pire cas pour la garde : MÊME domaine. Le § 20 dit « JAMAIS », sans
       // clause « autre domaine » — donc un refus est attendu même ici.
-      const { franchi } = verdictBoutEnBout(schema, [], { adapterId: DOMAINE_LU });
+      const { franchi } = verdictBoutEnBout(schema, [], AUCUN_CHAMP_DE_GOUVERNANCE, {
+        adapterId: DOMAINE_LU,
+      });
       if (franchi) franchis.push(nom);
     }
 
     console.log(
-      `[G2 · étape 11] ${String(ECHAPPES.length)} échappé(s) DÉCLARÉ(s) de gouvernance · ` +
+      `[G2 · étape 11 · SANS déclaration] ${String(ECHAPPES.length)} échappé(s) confronté(s) · ` +
         `${String(surveilles.length)} surveillé(s) par l'étape 11 · ` +
         `${String(franchis.length)} appel(s) FRANCHI(s) sur session marquée : ${franchis.join(", ")}`,
     );
 
-    // 🔴 CE QUI EST MESURÉ AUJOURD'HUI. `analyserArgumentsDuSchema()` n'a aucun
-    //    paramètre pour recevoir `governanceFields`, et `cumulerChampsDeGouvernance()`
-    //    n'y est pas appelée : la déclaration est admise, journalisée, portée
-    //    dans `ops_tool` — et perdue avant la seule décision qui compte.
-    expect(surveilles, "aucun échappé déclaré n'est surveillé").toEqual([]);
+    // Le filet AU NOM ne les reconnaît pas, et l'ADR 0016 ne le lui demandait pas.
+    expect(surveilles, "aucun échappé n'est surveillé par le seul filet").toEqual([]);
     expect(franchis).toEqual([...ECHAPPES]);
   });
 
-  it.fails(
-    "ADR 0016 — un champ de gouvernance DÉCLARÉ sera refusé sur session marquée (non cousu)",
-    () => {
-      const franchis = ECHAPPES.filter(
-        (nom) =>
-          verdictBoutEnBout(schemaFerme({ [nom]: { type: "string", format: "date-time" } }), [], {
-            adapterId: DOMAINE_LU,
-          }).franchi,
-      );
-      expect(franchis).toEqual([]);
-    },
-  );
+  /**
+   * ✅ **COUSUE AU LOT 1d.** Ce test était un `it.fails` — et il aurait échoué
+   * POUR TOUJOURS, y compris après la couture : son harnais n'avait aucun
+   * paramètre `governanceFields`, donc il ne déclarait rien. Il serait resté vert
+   * sur un défaut fermé, et la dette qu'il nommait aurait cessé d'être lisible.
+   * Le harnais porte désormais le paramètre, et le test DÉCLARE ce que son titre
+   * annonce.
+   */
+  it("✅ ADR 0016 — un champ de gouvernance DÉCLARÉ est refusé sur session marquée", () => {
+    const franchis: string[] = [];
+    const surveilles: string[] = [];
+    let ajoutes = 0;
+    let perdus = 0;
+
+    for (const nom of ECHAPPES) {
+      const schema = schemaFerme({ [nom]: { type: "string", format: "date-time" } });
+      const analyse = analyserArgumentsDuSchema(schema, [nom]);
+      if (analyse.porteUnArgumentDeGouvernance) surveilles.push(nom);
+      ajoutes += analyse.ajoutesParLaDeclaration.length;
+      perdus += analyse.perdusParLeCumul.length;
+      // Pire cas : MÊME domaine. Le § 20 dit « JAMAIS », sans clause « autre
+      // domaine » — la branche 1 doit refuser là aussi.
+      const { franchi } = verdictBoutEnBout(schema, [], [nom], { adapterId: DOMAINE_LU });
+      if (franchi) franchis.push(nom);
+    }
+
+    console.log(
+      `[G2 · étape 11 · AVEC déclaration] ${String(ECHAPPES.length)} échappé(s) DÉCLARÉ(s) · ` +
+        `${String(surveilles.length)} surveillé(s) par l'étape 11 · ` +
+        `${String(ajoutes)} ajouté(s) par la déclaration · ${String(perdus)} perdu(s) par le cumul · ` +
+        `${String(franchis.length)} appel(s) FRANCHI(s) : ${franchis.join(", ") || "aucun"}`,
+    );
+
+    expect(surveilles, "chacun des échappés déclarés est surveillé").toEqual([...ECHAPPES]);
+    expect(ajoutes, "chaque déclaration apporte exactement son nom").toBe(ECHAPPES.length);
+    expect(perdus, "l'union n'a rien perdu — l'invariant de l'ADR 0016").toBe(0);
+    expect(franchis, "ADR 0016 — la déclaration ferme les neuf échappés").toEqual([]);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -399,7 +467,7 @@ function modulesDeProduction(): readonly string[] {
   return trouves;
 }
 
-describe("G3 · la fonction d'union existe, personne ne l'appelle", () => {
+describe("G3 · la fonction d'union est APPELÉE — et par qui, nommément", () => {
   it("compte les appelants de production de `cumulerChampsDeGouvernance`, et les NOMME", () => {
     const modules = modulesDeProduction();
     const definisseurs: string[] = [];
@@ -444,129 +512,266 @@ describe("G3 · la fonction d'union existe, personne ne l'appelle", () => {
     expect(modules.length, "le scan doit avoir lu des modules").toBeGreaterThan(30);
     expect(definisseurs.length, "la fonction doit exister quelque part").toBe(1);
 
-    // 🔴 CE QUI EST MESURÉ AUJOURD'HUI : zéro. L'ADR 0016, point 3, demande que
-    //    l'union entre dans `analyserArgumentsDuSchema()`. Elle n'y est pas.
-    expect(appelants).toEqual([]);
+    // ✅ CE QUI EST MESURÉ DEPUIS LE LOT 1d. L'ADR 0016, point 3, demandait que
+    //    l'union entre dans `analyserArgumentsDuSchema()`. Elle y est.
+    //
+    // ⚠️ L'APPELANT EST NOMMÉ, PAS COMPTÉ. `toBeGreaterThan(0)` serait satisfait
+    //    par n'importe quel module, y compris un appel décoratif ajouté ailleurs
+    //    pour faire verdir la garde. Le seul endroit où cette union DÉCIDE
+    //    quelque chose est la dérivation de l'étape 11 ; c'est celui-là qu'on
+    //    exige, et un déplacement du code devra passer par cette ligne.
+    expect(appelants).toEqual(["chaine/etape-11-provenance.ts"]);
   });
 
-  it.fails(
-    "ADR 0016 point 3 — l'union sera appelée par `core/chaine` (non cousue à ce jour)",
-    () => {
-      const appelants = modulesDeProduction().filter((chemin) => {
-        const code = sansCommentaires(readFileSync(chemin, "utf8"));
-        return (
-          !/export function cumulerChampsDeGouvernance/.test(code) &&
-          /cumulerChampsDeGouvernance\s*\(/.test(code)
-        );
-      });
-      expect(appelants.length).toBeGreaterThanOrEqual(1);
-    },
-  );
+  /** ✅ COUSUE AU LOT 1d. C'était un `it.fails` : il rougissait, il est passé `it()`. */
+  it("✅ ADR 0016 point 3 — l'union est appelée par `core/chaine`", () => {
+    const appelants = modulesDeProduction().filter((chemin) => {
+      const code = sansCommentaires(readFileSync(chemin, "utf8"));
+      return (
+        !/export function cumulerChampsDeGouvernance/.test(code) &&
+        /cumulerChampsDeGouvernance\s*\(/.test(code)
+      );
+    });
+    expect(appelants.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  G4 · LES DEUX COPIES DES CONSTANTES, CONFRONTÉES PAR LEUR SOURCE
+//  G4 · LA SECONDE ÉCRITURE A DISPARU — ET L'UNIQUE DÉFINITION EST APPELÉE
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * ⚠️ POURQUOI CETTE GARDE LIT LE FICHIER SOURCE PLUTÔT QUE D'APPELER LES DEUX
- *    FONCTIONS.
+ * ═══ CE QUE CETTE GARDE MESURAIT, ET POURQUOI ELLE A CHANGÉ D'OBJET ═══
  *
- * `champs-declares.temoin.spec.ts` confronte déjà `estValeurLibre()` et
- * `estTexteLibre()` sur un corpus de 24 formes écrites à la main. C'est utile, et
- * c'est BORNÉ à ce que ce corpus a NOMMÉ : le jour où quelqu'un ajoute `"email"`
- * ou `"hostname"` à l'un seulement des deux `FORMATS_CONTRAIGNANTS`, aucune forme
- * du corpus ne porte ce `format`, et les deux dérivations divergent EN SILENCE.
+ * Elle confrontait DEUX écritures de « quels mots-clés de JSON Schema referment
+ * l'ensemble des valeurs » — celle du kit et celle de l'étape 11 — en extrayant
+ * leurs constantes de la source, parce qu'un corpus de formes ne trouve que ce
+ * qu'il a NOMMÉ. Sa propre note disait la suite : *« elle disparaît le jour où
+ * `estTexteLibre()` devient un appel à `estValeurLibre()` — c'est-à-dire quand il
+ * n'y aura plus deux listes. »*
  *
- * Cette garde-ci ne devine pas les formes : elle EXTRAIT les deux listes de
- * leur source et les confronte élément par élément. Un ajout d'un seul côté la
- * fait rougir, quel que soit le mot ajouté.
+ * Ce jour est arrivé. Mais **elle ne disparaît pas : elle se retourne.** Une
+ * garde retirée parce que son défaut est fermé laisse la porte ouverte à sa
+ * réouverture — et c'est exactement par là qu'une seconde source de vérité
+ * revient : quelqu'un a besoin d'un cas particulier « juste pour cette étape »,
+ * réécrit trois lignes en local, et le dépôt retrouve ses deux verdicts sans
+ * qu'aucun test ne bouge.
  *
- * ⚠️ ELLE DOIT RESTER TANT QUE LA SECONDE SOURCE DE VÉRITÉ EXISTE, et elle
- *    disparaît le jour où `estTexteLibre()` devient un appel à
- *    `estValeurLibre()` — c'est-à-dire quand il n'y aura plus deux listes.
+ * Ce qu'elle mesure désormais, en deux temps :
+ *
+ *  · **① la seconde écriture n'est plus là.** Aucune des six marques qu'une
+ *    dérivation locale laisse — les deux constantes, les trois fonctions
+ *    privées, la borne de profondeur en littéral nu — ne subsiste dans le source
+ *    de l'étape 11 ;
+ *  · **② l'unique définition est IMPORTÉE ET APPELÉE.** ① seule serait verte sur
+ *    une étape 11 qui aurait tout supprimé sans rien brancher — c'est-à-dire sur
+ *    la panne exacte que le lot 1c a nommée : une décision écrite, et non cousue.
+ *
+ * ⚠️ LES DEUX DÉTECTEURS SONT ÉPROUVÉS SUR DES SOURCES FABRIQUÉES avant d'être
+ *    appliqués au vrai fichier. Un détecteur mort rend « aucune marque trouvée »
+ *    sur n'importe quoi, et cette garde serait verte pour la pire des raisons.
  */
 
-/** Le module qui porte la SECONDE écriture, dérivé de l'import de ce fichier. */
+/** Le module qui portait la SECONDE écriture, dérivé de l'import de ce fichier. */
 const ETAPE_11_SOURCE = fileURLToPath(new URL("../chaine/etape-11-provenance.ts", import.meta.url));
 
 /**
- * Les chaînes entre guillemets du littéral d'un `const NOM … = [ … ]`.
+ * LES MARQUES QU'UNE DÉRIVATION LOCALE LAISSE DANS UN SOURCE.
  *
- * ⚠️ L'OUVRANTE SE CHERCHE APRÈS LE `=`, ET C'EST UN DÉFAUT MESURÉ, PAS UNE
- *    PRÉCAUTION. `const TEMOINS_DE_PROSE: readonly string[] = [` porte un `[`
- *    DANS SON ANNOTATION DE TYPE, refermé aussitôt : partir du premier crochet
- *    venu extrait `readonly string[]`, c'est-à-dire une liste VIDE. La garde
- *    aurait alors comparé deux listes dont l'une ne dit rien — verte pour la
- *    pire des raisons. Le cliquet « l'extraction doit avoir trouvé » est ce qui
- *    l'a fait rougir.
+ * ⚠️ ELLES SONT NOMMÉES D'APRÈS CE QUI A RÉELLEMENT ÉTÉ RETIRÉ, et la borne de
+ *    profondeur en fait partie : côté kit elle est une constante NOMMÉE
+ *    (`PROFONDEUR_VALEUR`), côté étape 11 c'était un chiffre nu (`niveau > 4`).
+ *    Un chiffre nu est une seconde écriture qui ne se voit pas — deux bornes
+ *    décalées d'un cran rendent le même verdict sur tout schéma peu profond, et
+ *    c'est le corpus tout entier de l'ancien témoin qui était peu profond.
  */
-function extraireLitteral(source: string, nom: string): readonly string[] {
-  const debut = source.indexOf(`const ${nom}`);
-  if (debut < 0) return [];
-  const egal = source.indexOf("=", debut);
-  if (egal < 0) return [];
-  const ouvrante = source.indexOf("[", egal);
-  const fermante = source.indexOf("]", ouvrante);
-  if (ouvrante < 0 || fermante < 0) return [];
-  const corps = source.slice(ouvrante + 1, fermante);
-  return [...corps.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1] ?? "");
+const MARQUES_DE_SECONDE_ECRITURE: readonly { readonly nom: string; readonly motif: RegExp }[] = [
+  { nom: "const FORMATS_CONTRAIGNANTS", motif: /const\s+FORMATS_CONTRAIGNANTS/ },
+  { nom: "const TEMOINS_DE_PROSE", motif: /const\s+TEMOINS_DE_PROSE/ },
+  { nom: "function patternReferme", motif: /function\s+patternReferme/ },
+  { nom: "function estConteneurOuvert", motif: /function\s+estConteneurOuvert/ },
+  { nom: "function estTexteLibre", motif: /function\s+estTexteLibre/ },
+  { nom: "borne de profondeur en littéral nu", motif: /niveau\s*>\s*\d/ },
+];
+
+/** Les marques de seconde écriture présentes dans un source, hors commentaires. */
+function marquesDeSecondeEcriture(source: string): readonly string[] {
+  const code = sansCommentaires(source);
+  return MARQUES_DE_SECONDE_ECRITURE.filter(({ motif }) => motif.test(code)).map(({ nom }) => nom);
 }
 
-describe("G4 · les deux écritures de « ce schéma referme la valeur » ne divergent pas", () => {
+/**
+ * Le nombre d'APPELS à `estValeurLibre` dans un source — jamais ses citations.
+ *
+ * ⚠️ LES TROIS FORMES DE NON-APPEL SONT CELLES QUE L'ADR 0019 A MESURÉES : une
+ *    citation en commentaire, une clause `import … from`, une clause
+ *    `export … from`. La parenthèse d'appel les écarte toutes les trois — un nom
+ *    suivi d'une virgule ou d'une accolade n'en porte pas — et l'argument de type
+ *    optionnel est la troisième règle de l'ADR 0019, celle qui déclarait
+ *    `avecJournal` non cousue. Le témoin le PROUVE plutôt que ce commentaire ne
+ *    l'affirme.
+ */
+function appelsAEstValeurLibre(source: string): number {
+  return [...sansCommentaires(source).matchAll(/estValeurLibre\s*(?:<[^>]*>\s*)?\(/g)].length;
+}
+
+/** Les noms importés par l'étape 11 depuis le module qui porte l'unique définition. */
+function importesDuKit(code: string): readonly string[] {
+  const noms: string[] = [];
+  for (const clause of code.matchAll(/import\s*\{([^}]*)\}\s*from\s*"([^"]+)"/g)) {
+    if (!(clause[2] ?? "").endsWith("/champs-declares.js")) continue;
+    for (const nom of (clause[1] ?? "").split(",")) {
+      const propre = nom.trim();
+      if (propre.length > 0) noms.push(propre);
+    }
+  }
+  return noms;
+}
+
+describe("G4 · il n'existe plus qu'UNE écriture de « ce schéma referme la valeur »", () => {
   const source = readFileSync(ETAPE_11_SOURCE, "utf8");
 
-  it("confronte `FORMATS_CONTRAIGNANTS` des DEUX modules, et ANNONCE les deux comptes", () => {
-    const chaine = extraireLitteral(source, "FORMATS_CONTRAIGNANTS");
-    const kit = [...FORMATS_CONTRAIGNANTS];
-    const seulementKit = kit.filter((f) => !chaine.includes(f));
-    const seulementChaine = chaine.filter((f) => !kit.includes(f));
+  it("① le détecteur de seconde écriture SAIT en voir une — témoin fabriqué", () => {
+    // ⚠️ SANS CE TÉMOIN, LA GARDE SUIVANTE EST VERTE SUR UN DÉTECTEUR MORT. Une
+    //    faute de frappe dans un motif, un `sansCommentaires` qui mangerait le
+    //    code au lieu des commentaires, et « aucune marque trouvée » ne voudrait
+    //    plus rien dire.
+    const fabrique = [
+      'const FORMATS_CONTRAIGNANTS: ReadonlySet<string> = new Set(["date"]);',
+      'const TEMOINS_DE_PROSE: readonly string[] = ["une phrase"];',
+      "function patternReferme(motif: string): boolean { return motif.length > 0; }",
+      "function estConteneurOuvert(schema: ObjetJson): boolean { return true; }",
+      "function estTexteLibre(schema: ObjetJson, niveau = 0): boolean {",
+      "  if (niveau > 4) return true;",
+      "  return true;",
+      "}",
+    ].join("\n");
+
+    const vues = marquesDeSecondeEcriture(fabrique);
+    // Et la MÊME source, mise en commentaire de bout en bout, ne doit RIEN rendre :
+    // c'est ce qui distingue « le code la porte » de « un JSDoc la nomme ».
+    const enCommentaire = marquesDeSecondeEcriture(`/*\n${fabrique}\n*/`);
 
     console.log(
-      `[G4 · formats] kit : ${String(kit.length)} · étape 11 : ${String(chaine.length)} · ` +
-        `seulement kit : ${seulementKit.join(", ") || "aucun"} · ` +
-        `seulement étape 11 : ${seulementChaine.join(", ") || "aucun"}`,
+      `[G4 · témoin du détecteur] ${String(MARQUES_DE_SECONDE_ECRITURE.length)} marque(s) ` +
+        `cherchée(s) · ${String(vues.length)} vue(s) dans la source fabriquée · ` +
+        `${String(enCommentaire.length)} vue(s) quand la MÊME source est en commentaire`,
     );
 
-    // Cliquet : une extraction muette rendrait deux listes « d'accord » parce
-    // qu'aucune des deux ne dirait rien.
+    expect(vues, "le détecteur doit voir les six marques qu'il cherche").toEqual(
+      MARQUES_DE_SECONDE_ECRITURE.map(({ nom }) => nom),
+    );
+    expect(enCommentaire, "une marque citée en commentaire n'est pas une écriture").toEqual([]);
+  });
+
+  it("① l'étape 11 ne porte AUCUNE des marques d'une seconde écriture", () => {
+    const restantes = marquesDeSecondeEcriture(source);
+
+    console.log(
+      `[G4 · seconde écriture] ${String(MARQUES_DE_SECONDE_ECRITURE.length)} marque(s) ` +
+        `cherchée(s) dans ${String(source.length)} caractère(s) de source · ` +
+        `${String(restantes.length)} trouvée(s)` +
+        (restantes.length > 0 ? ` : ${restantes.join(", ")}` : ""),
+    );
+
     expect(
-      chaine.length,
-      "l'extraction depuis la source doit avoir trouvé la liste",
-    ).toBeGreaterThan(0);
-    expect(kit.length, "la liste exportée ne doit pas être vide").toBeGreaterThan(0);
-    expect(seulementKit).toEqual([]);
-    expect(seulementChaine).toEqual([]);
+      restantes,
+      "une seconde dérivation de « ce schéma referme la valeur » est réapparue dans " +
+        "`core/chaine/etape-11-provenance.ts` — deux dérivations d'un même fait finissent " +
+        "par se contredire, et l'admission dirait alors le contraire du § 20",
+    ).toEqual([]);
   });
 
-  it("confronte `TEMOINS_DE_PROSE` des DEUX modules — un témoin retiré affaiblit `pattern`", () => {
-    const chaine = extraireLitteral(source, "TEMOINS_DE_PROSE");
-    const kit = [...TEMOINS_DE_PROSE];
+  it("② le compteur d'appels ÉCARTE les trois formes de non-appel — témoin fabriqué", () => {
+    const citation = "// estValeurLibre(schema) serait le bon juge ici.";
+    const importation = 'import { estValeurLibre } from "../adapter-kit/champs-declares.js";';
+    const reexport = 'export { estValeurLibre } from "../adapter-kit/champs-declares.js";';
+    const appel = "if (estValeurLibre(sous)) libres.push(nom);";
+    const avecArgumentDeType = "if (estValeurLibre<ObjetJson>(sous)) libres.push(nom);";
+
+    const mesures = {
+      citation: appelsAEstValeurLibre(citation),
+      importation: appelsAEstValeurLibre(importation),
+      reexport: appelsAEstValeurLibre(reexport),
+      appel: appelsAEstValeurLibre(appel),
+      argumentDeType: appelsAEstValeurLibre(avecArgumentDeType),
+      deuxAppels: appelsAEstValeurLibre(`${appel}\n${appel}`),
+    };
 
     console.log(
-      `[G4 · témoins de prose] kit : ${String(kit.length)} · étape 11 : ${String(chaine.length)} · ` +
-        `identiques : ${String(kit.length === chaine.length && kit.every((t, i) => t === chaine[i]))}`,
+      `[G4 · témoin du compteur] commentaire → ${String(mesures.citation)} · ` +
+        `import → ${String(mesures.importation)} · ré-export → ${String(mesures.reexport)} · ` +
+        `appel → ${String(mesures.appel)} · appel<T> → ${String(mesures.argumentDeType)} · ` +
+        `deux appels → ${String(mesures.deuxAppels)}`,
     );
 
-    expect(chaine.length, "l'extraction doit avoir trouvé les témoins").toBeGreaterThanOrEqual(3);
-    expect(kit.length).toBe(chaine.length);
-    // ⚠️ L'ORDRE COMPTE AUTANT QUE LE CONTENU : `patternReferme()` exige que
-    //    TOUS les témoins soient rejetés, donc retirer le seul témoin qu'un
-    //    motif accepte suffit à transformer ce motif en « fermeture ».
-    expect(kit).toEqual([...chaine]);
+    expect(mesures.citation, "une citation en commentaire n'est pas un appel").toBe(0);
+    expect(mesures.importation, "un import n'est pas un appel").toBe(0);
+    expect(mesures.reexport, "un ré-export n'est pas un appel").toBe(0);
+    expect(mesures.appel, "un appel est un appel").toBe(1);
+    expect(mesures.argumentDeType, "règle ③ de l'ADR 0019 — `nom<T>(…)` est un appel").toBe(1);
+    expect(mesures.deuxAppels, "le compteur compte, il ne devine pas").toBe(2);
   });
 
-  it("confronte la BORNE DE PROFONDEUR des deux écritures", () => {
-    // Côté étape 11, la borne est un littéral nu dans le corps (`niveau > 4`) ;
-    // côté kit, c'est une constante nommée. C'est déjà une asymétrie : la
-    // garde la mesure plutôt que de la supposer suivie.
-    const litteraux = [...source.matchAll(/niveau\s*>\s*(\d+)/g)].map((m) => Number(m[1]));
+  it("② l'étape 11 IMPORTE l'unique définition, et l'APPELLE", () => {
+    const code = sansCommentaires(source);
+    const importes = importesDuKit(code);
+    const appels = appelsAEstValeurLibre(source);
+
     console.log(
-      `[G4 · profondeur] kit : ${String(PROFONDEUR_VALEUR)} · ` +
-        `étape 11 : ${litteraux.length > 0 ? litteraux.join(", ") : "aucun littéral trouvé"}`,
+      `[G4 · couture] ${String(importes.length)} nom(s) importé(s) de ` +
+        `\`champs-declares.js\` : ${importes.join(", ") || "aucun"} · ` +
+        `${String(appels)} appel(s) à \`estValeurLibre\` dans le code de l'étape 11`,
     );
-    expect(litteraux.length, "la borne doit être trouvée dans la source").toBeGreaterThanOrEqual(1);
-    for (const borne of litteraux) expect(borne).toBe(PROFONDEUR_VALEUR);
+
+    expect(
+      importes,
+      "l'étape 11 doit IMPORTER `estValeurLibre` de la couche basse — la porter en local " +
+        "serait la seconde source de vérité qu'on vient de retirer",
+    ).toContain("estValeurLibre");
+    expect(
+      appels,
+      "l'étape 11 importe `estValeurLibre` sans l'appeler : une définition unique qui " +
+        "n'atteint pas le chemin de production est exactement la panne du lot 1c",
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("② et le verdict SERVI par l'étape 11 suit bien la fonction du kit", () => {
+    // ⚠️ LA COUTURE SE PROUVE AUSSI PAR LE COMPORTEMENT, PAS SEULEMENT PAR LE
+    //    TEXTE DU SOURCE. Les deux formes sont DÉRIVÉES de la liste exportée :
+    //    un `format` qu'elle porte referme, un `format` inventé ne referme rien.
+    //    Si la branche était recâblée sur autre chose, ces deux-là cesseraient de
+    //    se répondre.
+    const parLEtape = (sous: ValeurJson): boolean =>
+      analyserArgumentsDuSchema(
+        { type: "object", properties: { champ: sous }, additionalProperties: false },
+        AUCUN_CHAMP_DE_GOUVERNANCE,
+      ).libres.some((champ) => champ.nom === "champ");
+
+    // ⚠️ LE REPLI EST LA CHAÎNE VIDE, ET NON UN FORMAT RECOPIÉ. Une liste vidée
+    //    rendrait alors « libre », donc ROUGIR, au lieu de faire passer la garde
+    //    sur un nom écrit à la main ici — qui serait la troisième source de
+    //    vérité que ce lot vient justement de retirer.
+    const contraignant = [...FORMATS_CONTRAIGNANTS][0] ?? "";
+    const libreSousUnFormatContraignant = parLEtape({ type: "string", format: contraignant });
+    const libreSousUnFormatInvente = parLEtape({ type: "string", format: "texte-long" });
+
+    console.log(
+      `[G4 · verdict servi] format \`${String(contraignant)}\` (contraignant) → libre : ` +
+        `${String(libreSousUnFormatContraignant)} · format inventé → libre : ` +
+        `${String(libreSousUnFormatInvente)} · ` +
+        `${String(FORMATS_CONTRAIGNANTS.size)} format(s) contraignant(s) dans l'unique liste · ` +
+        `${String(TEMOINS_DE_PROSE.length)} témoin(s) de prose · ` +
+        `borne de profondeur : ${String(PROFONDEUR_VALEUR)}`,
+    );
+
+    // Plancher : une liste vidée rendrait `contraignant` indéfini et les deux
+    // mesures identiques — vertes en n'ayant rien confronté.
+    expect(FORMATS_CONTRAIGNANTS.size, "plancher — l'unique liste n'est pas vide").toBeGreaterThan(
+      0,
+    );
+    expect(libreSousUnFormatContraignant, "un format contraignant referme le champ").toBe(false);
+    expect(libreSousUnFormatInvente, "un format inventé ne referme rien").toBe(true);
   });
 });
 
@@ -576,26 +781,37 @@ describe("G4 · les deux écritures de « ce schéma referme la valeur » ne div
 
 describe("G5 · `idFields` n'atteint PAS la branche 1 — et ce cliquet doit tenir", () => {
   /**
-   * ⚠️ CE TEST EST UN CLIQUET, PAS UN CONSTAT. Dans
-   * `analyserArgumentsDuSchema()`, `familleDeGouvernance(nom)` est évaluée AVANT
-   * le `if (identifiants.has(nom)) continue;`. L'ordre de ces deux lignes est la
-   * seule chose qui empêche un dépôt tiers d'éteindre AUSSI la branche que le
-   * § 20 déclare inconditionnelle — en déclarant simplement son destinataire
-   * comme un identifiant.
+   * ⚠️ CE TEST EST UN CLIQUET, PAS UN CONSTAT — ET SON SUJET A CHANGÉ DE NATURE
+   *    AU LOT 1d, SANS CHANGER D'ATTENTE.
    *
-   * Rien dans le code ne NOMME cet ordre : c'est un invariant qui tient par
-   * l'emplacement de deux instructions. Un `continue` remonté de trois lignes au
-   * cours d'une refonte le romprait sans qu'aucune autre garde ne bouge.
+   * Il gardait un invariant D'ORDRE : dans `analyserArgumentsDuSchema()`,
+   * `familleDeGouvernance(nom)` était évaluée AVANT le
+   * `if (identifiants.has(nom)) continue;`, et l'emplacement de ces deux
+   * instructions était la seule chose qui empêchait un dépôt tiers d'éteindre
+   * AUSSI la branche que le § 20 déclare inconditionnelle — en déclarant son
+   * destinataire comme un identifiant. Rien dans le code ne NOMMAIT cet ordre :
+   * un `continue` remonté de trois lignes au cours d'une refonte l'aurait rompu
+   * sans qu'aucune autre garde ne bouge.
+   *
+   * ✅ **L'ADR 0015 A SUPPRIMÉ LA SECONDE INSTRUCTION.** Il n'y a plus d'ordre à
+   *    tenir, donc plus rien à casser par déplacement : la branche de gouvernance
+   *    est désormais hors d'atteinte d'une déclaration PAR CONSTRUCTION.
+   *
+   *    Le test reste, et il n'est pas devenu décoratif : il MESURE cette absence
+   *    d'atteinte, et il rougirait le jour où une exonération par déclaration
+   *    reviendrait — sous ce nom ou sous un autre —, exactement comme il aurait
+   *    rougi sur un `continue` déplacé.
    */
-  it("un champ de gouvernance déclaré `idFields` reste surveillé — et on ANNONCE combien", () => {
+  it("un champ de gouvernance que le manifeste dit identifiant reste surveillé — et on ANNONCE combien", () => {
     const retenusParLeNom = NOMS_DE_GOUVERNANCE.filter((nom) => familleDeGouvernance(nom) !== null);
     const perdusParLaDeclaration: string[] = [];
 
     for (const nom of retenusParLeNom) {
       const schema = schemaFerme({ [nom]: { type: "string" } });
-      // Le pire cas : l'adaptateur déclare son propre champ de gouvernance
-      // comme un identifiant, ce qui est exactement l'exonération de l'ADR 0015.
-      const analyse = analyserArgumentsDuSchema(schema, [nom]);
+      // Le pire cas : l'adaptateur déclare son propre champ de gouvernance comme
+      // un identifiant. Depuis l'ADR 0015, la dérivation n'a même plus de quoi
+      // recevoir cette déclaration — et c'est bien ce que ce compte mesure.
+      const analyse = analyserArgumentsDuSchema(schema, AUCUN_CHAMP_DE_GOUVERNANCE);
       if (!analyse.porteUnArgumentDeGouvernance) perdusParLaDeclaration.push(nom);
     }
 
@@ -625,20 +841,24 @@ describe("G5 · `idFields` n'atteint PAS la branche 1 — et ce cliquet doit ten
  * de session se débarrasse d'une marque en changeant de valeur, sans qu'aucun
  * compte ne bouge. L'ADR 0014 y répond par un type marqué, `SessionId`.
  *
- * ⚠️ CETTE GARDE MESURE OÙ LE TYPE EST ARRIVÉ, PAS S'IL EXISTE. Le type existe :
- *    `core/identite/session.ts` le fabrique, et `DependancesOrchestrateur` le
- *    porte déjà. La question qui décide de la sécurité est ailleurs — les
- *    interfaces que l'étape 11 consomme réellement l'ont-elles adopté ?
+ * ⚠️ CETTE GARDE MESURE OÙ LE TYPE EST ARRIVÉ, PAS S'IL EXISTE. Le type existait
+ *    déjà au lot 1c : `core/identite/session.ts` le fabrique, et
+ *    `DependancesOrchestrateur` le portait. La question qui décide de la sécurité
+ *    est ailleurs — les interfaces que l'étape 11 consomme RÉELLEMENT l'ont-elles
+ *    adopté ?
  *
- * Le fait même que ce fichier-ci compile avec `const SESSION = "…"`, une chaîne
- * nue passée à `ContexteProvenance` et à `marquerResultat()`, EST la mesure : un
- * type marqué refuserait ce littéral. La garde ci-dessous le rend lisible en
- * comptant les deux formes dans la source plutôt qu'en le laissant à déduire.
+ * ✅ **AU LOT 1d, OUI.** La première mesure de cette garde était le fait même que
+ *    ce fichier compilait avec `const SESSION = "…"`, une chaîne nue passée à
+ *    `ContexteProvenance` et à `marquerResultat()`. Ce n'est plus le cas : le
+ *    littéral a été remplacé par `sessionIdDeTemoin()`, la fabrique NOMMÉE des
+ *    témoins, parce que le type marqué refuse désormais la chaîne. La garde
+ *    ci-dessous compte les deux formes dans la source plutôt que de le laisser à
+ *    déduire — et son compte s'est inversé.
  */
 const ETAPES_SOURCE = fileURLToPath(new URL("../chaine/etapes.ts", import.meta.url));
 
-describe("G6 · ADR 0014 — le type marqué s'arrête avant la garde qu'il devait tenir", () => {
-  it("compte les `sessionId` encore typés `string` dans le contrat des étapes", () => {
+describe("G6 · ADR 0014 — le type marqué est descendu jusqu'à la garde qu'il devait tenir", () => {
+  it("compte les `sessionId` du contrat des étapes, nus contre marqués", () => {
     const source = sansCommentaires(readFileSync(ETAPES_SOURCE, "utf8"));
     const nus = [...source.matchAll(/sessionId\s*:\s*string/g)].length;
     const marques = [...source.matchAll(/sessionId\s*:\s*SessionId/g)].length;
@@ -656,15 +876,18 @@ describe("G6 · ADR 0014 — le type marqué s'arrête avant la garde qu'il deva
       "la source doit porter au moins une déclaration de sessionId",
     ).toBeGreaterThanOrEqual(1);
 
-    // 🔴 CE QUI EST MESURÉ AUJOURD'HUI : le contrat des étapes garde la chaîne
-    //    nue. `ContexteProvenance.sessionId` et les deux méthodes d'
-    //    `IndexProvenance` — c'est-à-dire l'ancre du § 20 elle-même — n'ont pas
-    //    reçu le type que l'ADR 0014 a posé pour elles.
-    expect(marques).toBe(0);
-    expect(nus).toBeGreaterThanOrEqual(1);
+    // ✅ **CE QUI EST MESURÉ DEPUIS LE LOT 1d : LE COMPTE S'EST INVERSÉ.** Le
+    //    contrat des étapes gardait la chaîne nue en TROIS points —
+    //    `ContexteProvenance.sessionId` et les deux méthodes d'`IndexProvenance`,
+    //    c'est-à-dire l'ancre du § 20 elle-même. Les trois portent le type marqué.
+    //
+    //    ⚠️ LE PLANCHER EST SUR LE TOTAL, PAS SUR `marques` : c'est lui qui
+    //       distingue « tout est marqué » d'« on n'a rien su lire ».
+    expect(nus, "plus aucun `sessionId: string` dans le contrat des étapes").toBe(0);
+    expect(marques, "et les trois points d'ancrage portent le type marqué").toBe(3);
   });
 
-  it.fails("ADR 0014 — le contrat des étapes portera `SessionId` (non resserré à ce jour)", () => {
+  it("✅ ADR 0014 — le contrat des étapes porte `SessionId`", () => {
     const source = sansCommentaires(readFileSync(ETAPES_SOURCE, "utf8"));
     expect([...source.matchAll(/sessionId\s*:\s*string/g)].length).toBe(0);
   });

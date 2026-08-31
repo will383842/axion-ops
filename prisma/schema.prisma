@@ -432,10 +432,24 @@ model OpsAudit {
 /// § 12 — une clé réutilisée avec un payload DIFFÉRENT doit rendre
 /// `invalid_input`, PAS L'AUTRE RÉSULTAT EN SILENCE.
 ///
-/// § 20 — la clé voyage dans `ctx.idempotencyKey`, JAMAIS dans `input`.
+/// § 20 — la clé voyage dans l'EN-TÊTE de l'appel, JAMAIS dans `input`. Et elle
+/// n'atteint plus l'adaptateur : `ToolContext` porte `idempotencyRef`, son
+/// empreinte (ADR 0020).
 model OpsIdempotency {
   tool String
-  key  String
+
+  /// L'EMPREINTE de la clé — soixante-quatre caractères hexadécimaux —, JAMAIS
+  /// la clé (ADR 0020). La chaîne d'origine est choisie par l'appelant : la
+  /// conserver jusqu'au TTL reviendrait à garder un texte que le socle n'a pas
+  /// écrit, ce que le § 31 refuse partout ailleurs.
+  /// `core/limits/idempotency.ts` la calcule par `empreinteDeCleDIdempotence`,
+  /// APRÈS avoir confronté la clé reçue à une forme fermée.
+  ///
+  /// ⚠️ CONSÉQUENCE ACCEPTÉE : cette table n'est plus lisible « à l'œil » par
+  ///    clé. L'exploitant qui cherche une réservation part de l'outil et de la
+  ///    fenêtre, pas de la chaîne. Aucune migration n'est due — aucune ligne
+  ///    n'existe.
+  key String
 
   status IdempotencyStatus
 

@@ -26,10 +26,18 @@ import type { ZodType, output } from "zod/v4";
 /**
  * Ce que l'outil promet quand on le rejoue.
  *
- * · `key`           — rejouable avec une clé ; `ctx.idempotencyKey` la porte,
- *                     JAMAIS `input` (§ 09).
+ * · `key`           — rejouable avec une clé. Elle voyage dans l'EN-TÊTE de
+ *                     l'appel, JAMAIS dans `input` (§ 09).
+ *
+ *                     ⚠️ **L'ADAPTATEUR NE LA VOIT PAS — ADR 0020.** `ctx` porte
+ *                     `idempotencyRef`, l'EMPREINTE SHA-256 de la clé : un jeton
+ *                     stable et borné, sur lequel un adaptateur peut appuyer
+ *                     l'idempotence d'une API tierce. L'appelant choisit le
+ *                     préimage, jamais le condensat — et aucun extrait d'une
+ *                     lecture marquée ne survit au passage.
  * · `non-rejouable` — un second appel produit un second effet.
- * · `n/a`           — sans objet (lecture pure).
+ * · `n/a`           — sans objet (lecture pure). ⚠️ La FORME de la clé est
+ *                     confrontée même ici : ce qui est ignoré a d'abord été jugé.
  */
 export const IDEMPOTENCIES = ["key", "non-rejouable", "n/a"] as const;
 
@@ -196,12 +204,16 @@ interface ChampsOutil extends ChampsDeGouvernanceDeclares {
  *    `ManifesteOutil` (donc à `bytes`, donc à `manifestSha`), à `SchemaOutilRecu`
  *    et à `LigneOpsTool`.
  *
- * 🔧 **CE QUI RESTE, ET QUI N'EST PAS DANS CE PÉRIMÈTRE** — la liste complète est
- *    à l'**ADR 0016**, point 2 : `OutilDuCatalogue`
- *    (`core/chaine/etapes.ts`), la colonne `ops_tool.governanceFields`
- *    (`prisma/schema.prisma`), et l'union dans `analyserArgumentsDuSchema()`
- *    (`core/chaine/etape-11-provenance.ts`), pour laquelle
- *    `cumulerChampsDeGouvernance()` de `champs-declares.ts` est écrit et gardé.
+ * ✅ **COUSUE AU LOT 1d** : `OutilDuCatalogue` (`core/chaine/etapes.ts`) porte le
+ *    champ, `orchestrateur.ts` le passe, et `analyserArgumentsDuSchema()`
+ *    (`core/chaine/etape-11-provenance.ts`) en fait l'UNION avec le filet au nom
+ *    par `cumulerChampsDeGouvernance()`.
+ *
+ * 🔴 **CE QUI RESTE — LA COLONNE `ops_tool.governanceFields`**
+ *    (`prisma/schema.prisma`, ADR 0016 point 2). Elle n'existe pas, et aucune
+ *    implémentation de `CatalogueOutils` ne lit encore Prisma : la déclaration
+ *    voyage aujourd'hui par le TYPE. Le tronçon manquant se pose avec
+ *    `core/transport/`.
  *
  * ═══ POURQUOI CE CHAMP EXISTE — LA MESURE, PAS LA CRAINTE ═══
  *

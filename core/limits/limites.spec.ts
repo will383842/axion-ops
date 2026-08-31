@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { APPEL_STEPS } from "../types.js";
 import { creerCalculArgHash, type CoffreArgHash } from "./arg-hash.js";
 import { LIMITES_DE_DEPART, TOUT_OUTIL, fenetreCanonique } from "./config.js";
-import type { DepotIdempotence } from "./idempotency.js";
+import { empreinteDeCleDIdempotence, type DepotIdempotence } from "./idempotency.js";
 import { DepotIdempotenceEnMemoire, DepotQuotaEnMemoire } from "./memoire.js";
 import { ETAPES_LIMITES, appliquerLimites, type ResultatValidation } from "./limites.js";
 import type { DepotQuota } from "./quota.js";
@@ -290,9 +290,14 @@ describe("core/limits — la chaîne complète", () => {
     if (!premier.ok) throw new Error("inatteignable");
     if (premier.etape !== 14) throw new Error("inatteignable");
 
+    // ⚠️ LA CLÔTURE VISE L'EMPREINTE, PAS LA CLÉ — ADR 0020. `ops_idempotency.key`
+    //    porte le condensat SHA-256 : une clôture adressée à la chaîne d'origine
+    //    ne trouverait aucune ligne, et le rejeu ci-dessous rendrait « reservee »
+    //    au lieu de « rejeu ». Cette ligne EST une preuve de la couture, et elle
+    //    passe par la fonction du socle plutôt que par un hachage réécrit ici.
     await idem.cloturer({
       tool: OUTIL,
-      key: "cle-client-1",
+      key: empreinteDeCleDIdempotence("cle-client-1"),
       status: "done",
       resultRef: "ref-42",
       completedAt: MAINTENANT,

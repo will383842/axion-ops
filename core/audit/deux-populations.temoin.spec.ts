@@ -33,6 +33,9 @@ import { describe, expect, it } from "vitest";
 
 import { calculerSelfHash, CHAMPS_COUVERTS } from "./canonique.js";
 import { contenuTemoin, HorlogeFigee, SCELLEUR_TEMOIN } from "./fixtures.js";
+// ADR 0014 — la session d'un témoin vient de la fabrique NOMMÉE de
+// `core/identite/`, jamais d'un littéral : le type marqué ne l'accepte plus.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 import { avecJournal, Journal, type EnteteAppel } from "./journal.js";
 import { JournalMemoire } from "./memoire.js";
 import { ARG_HASH_NON_LU, ARG_HASH_NON_VALIDE, type Terminaison } from "./vocabulaire.js";
@@ -46,7 +49,7 @@ const ARG_HASH_VALIDE = "c".repeat(64);
 
 const ENTETE: EnteteAppel = {
   principal: "temoin",
-  sessionId: "session-1",
+  sessionId: sessionIdDeTemoin(),
   tool: "ops.temoin.lire",
   toolVersion: "1.0.0",
   adapterVersion: "1.0.0",
@@ -148,7 +151,7 @@ describe("TÉMOIN — § 12 : les deux populations d'`argHash` se distinguent-el
     // `false` comme pour une empreinte brute — les deux se séparent par la
     // valeur réservée, qu'aucun HMAC ne produira.
     const { journal, store } = journalNeuf();
-    const entete = enteteAvantIdentification("inconnu", "session-0");
+    const entete = enteteAvantIdentification("inconnu", sessionIdDeTemoin());
     const refus: Terminaison<never> = { genre: "refus", etape: 1, code: null };
 
     await avecJournal(journal, entete, () => Promise.resolve(refus));

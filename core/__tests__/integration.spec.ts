@@ -112,6 +112,10 @@ import {
 import { ETAPES_REVENDIQUEES } from "../chaine/index.js";
 import { SCELLEUR_TEMOIN } from "../audit/fixtures.js";
 import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
+// ADR 0014 — la session de témoin vient de la fabrique NOMMÉE de `core/identite/` :
+// le type marqué de `SessionId` ne se laisse plus écrire en littéral.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
+import type { SessionId } from "../identite/session.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0 · Le décor — aucun secret réel, aucun réseau, une horloge figée
@@ -119,7 +123,7 @@ import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 
 const T0 = new Date("2026-08-30T18:04:11.000Z");
 const PRINCIPAL = "jeton-integration";
-const SESSION = "session-integration";
+const SESSION: SessionId = sessionIdDeTemoin();
 const TTL_IDEMPOTENCE_MS = 24 * 3_600_000;
 
 /** Une horloge qui avance d'une milliseconde par lecture : `durationMs` reste

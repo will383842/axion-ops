@@ -10,6 +10,9 @@
  */
 
 import type { AppelStep, Effect, ErrorCode, PolicyLevel } from "../types.js";
+// ADR 0014 — import de TYPE. Nommer `SessionId` n'est pas le droit d'en frapper
+// une : la garde G2 refuse l'import de VALEUR, pas celui du nom.
+import type { SessionId } from "../identite/session.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Decision — l'issue de la chaîne d'autorisation (§ 11)
@@ -151,6 +154,57 @@ export const OUTIL_CLOTURE = "ops.audit.purge";
 export const PRINCIPAL_SYSTEME = "system";
 
 /**
+ * La marque de {@link SessionHorsAppel}. `declare const`, `unique symbol`, **NON
+ * EXPORTÉE** — c'est le motif exact de la marque de `SessionId` : aucun autre
+ * module ne peut nommer la propriété, donc aucun ne peut écrire un littéral
+ * assignable au type. Il n'existe qu'un seul habitant, et il est ci-dessous.
+ */
+declare const MARQUE_SESSION_HORS_APPEL: unique symbol;
+
+/**
+ * LA SESSION D'UNE LIGNE QUI N'EST PAS UN APPEL. Un type marqué à **UN SEUL
+ * HABITANT** : {@link SESSION_HORS_APPEL}.
+ *
+ * ⚠️ POURQUOI CE SECOND TYPE EXISTE, ET CE QUE SON ABSENCE COÛTAIT. L'ADR 0014
+ *    resserre `ContenuLigne.sessionId` en `SessionId` — le type marqué que seule
+ *    `core/identite/session.ts` sait frapper. Le resserrement a révélé un cas que
+ *    l'ADR n'avait pas nommé : **`ops_audit` porte des lignes qui ne sont pas des
+ *    appels**, et elles n'ont AUCUNE session de pilotage à inscrire dans une
+ *    colonne non nulle. Il y en a une aujourd'hui — la clôture de purge, que
+ *    {@link OUTIL_CLOTURE} distingue — et l'ADR 0022 en annonce une seconde.
+ *
+ * ⚠️ POURQUOI PAS UNE `SessionId` RÉSERVÉE. Il aurait fallu la FRAPPER, donc
+ *    ouvrir une quatrième fabrique dans `core/identite/session.ts` — c'est-à-dire
+ *    élargir le seul module qui a le droit de créer une session, pour un usage
+ *    qui n'est justement pas une session. Un type distinct dit la vérité : la
+ *    colonne porte deux populations, et le compilateur sait laquelle est
+ *    laquelle.
+ *
+ * ⚠️ ET LES DEUX ENSEMBLES SONT DISJOINTS PAR CONSTRUCTION, PAS PAR CONVENTION.
+ *    `FORME_SESSION_ID` (`core/identite/session.ts`) n'admet que 64 caractères
+ *    hexadécimaux ; la valeur ci-dessous n'en est pas un, et aucun tirage de
+ *    32 octets ne la produira jamais. Une revue qui regroupe `ops_audit` par
+ *    session ne peut donc pas confondre une purge avec un appel — c'est le motif
+ *    d'{@link OUTIL_INCONNU}, appliqué à la colonne voisine.
+ */
+export type SessionHorsAppel = string & {
+  readonly [MARQUE_SESSION_HORS_APPEL]: "ligne du socle, hors chaîne d'appel";
+};
+
+/**
+ * La valeur réservée que porte {@link ContenuLigne.sessionId} d'une ligne qui
+ * n'est pas un appel.
+ *
+ * ⚠️ ELLE N'ENCODE RIEN, ET C'EST UN CHANGEMENT ASSUMÉ. `construireCloture()`
+ *    y écrivait `purge-<seqDepuis>-<seqJusqua>` : une donnée de la purge logée
+ *    dans la colonne « session », c'est-à-dire un second endroit où lire une
+ *    borne que `partialSources` porte DÉJÀ, sous une forme versionnée que
+ *    `decoderCharge()` sait relire. Deux dérivations d'un même fait, dont une
+ *    seule serait relue le jour où le format bouge.
+ */
+export const SESSION_HORS_APPEL = "ops.hors-appel" as SessionHorsAppel;
+
+/**
  * ⚠️ CONTRADICTION DU CDC, RENDUE VISIBLE PLUTÔT QUE BOUCHÉE EN SILENCE.
  *
  * Le § 11 exige qu'une ligne soit écrite pour TOUTE terminaison, refus compris —
@@ -239,10 +293,25 @@ export interface ContenuLigne extends PorteurDEffetExterieur {
    *    pour deux usages à la fois : le marquage du § 20, et le regroupement des
    *    appels d'une même session au § 24.
    *
-   * 🔧 **TYPE À RESSERRER PAR LE CONSTRUCTEUR ① :** `SessionId`, le type marqué
-   *    de `core/identite/`.
+   * ✅ **TYPE RESSERRÉ — ADR 0014, LOT 1d :** {@link SessionId}, le type marqué de
+   *    `core/identite/`. Une ligne du journal ne peut donc plus porter une
+   *    session que le socle n'a pas frappée.
+   *
+   * ⚠️ **ET CE RESSERREMENT A RÉVÉLÉ UN CAS QUE L'ADR N'AVAIT PAS NOMMÉ.**
+   *    `ops_audit` porte des lignes QUI NE SONT PAS DES APPELS — la clôture de
+   *    purge (`OUTIL_CLOTURE`) aujourd'hui, la ligne d'intention (ADR 0022)
+   *    demain. Elles n'ont aucune session de pilotage à porter, et la colonne est
+   *    non nulle. C'est {@link SESSION_HORS_APPEL} qui répond, avec le motif de
+   *    la valeur réservée exposé à {@link OUTIL_INCONNU} : une valeur convenue,
+   *    NOMMÉE, plutôt que quatre inventions différentes.
+   *
+   * ⚠️ L'UNION NE ROUVRE RIEN. Ses deux membres sont marqués, le second n'a
+   *    qu'UN habitant, et aucune `string` ne leur est assignable. Le verrou n° 1
+   *    du § 20 — `ToolContext`, `ContexteProvenance`, `IndexProvenance` — reste
+   *    une {@link SessionId} PURE, sans union : c'est là que la garde
+   *    d'exfiltration s'ancre, et une ligne de journal n'y entre jamais.
    */
-  readonly sessionId: string;
+  readonly sessionId: SessionId | SessionHorsAppel;
 
   readonly tool: string;
 

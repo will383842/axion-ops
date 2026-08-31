@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import { verifierAucunContenu } from "./contenu.js";
 import { CHAMPS_COUVERTS } from "./canonique.js";
 import { contenuTemoin } from "./fixtures.js";
+import type { ContenuLigne } from "./vocabulaire.js";
 
 describe("TÉMOIN — § 31 : la garde de contenu sait-elle rougir ?", () => {
   it("rougit sur une phrase avec espaces glissée dans `recordIds`, et ANNONCE son compte", () => {
@@ -192,16 +193,29 @@ describe("TÉMOIN — § 31 : la garde de contenu sait-elle rougir ?", () => {
     // Contre-témoin du compte : la garde doit voir CHAQUE champ, pas s'arrêter
     // au premier. Sans quoi le compte annoncé serait vrai et la couverture
     // fausse.
-    const verdict = verifierAucunContenu(
-      contenuTemoin(7, {
-        principal: "un principal avec des espaces",
-        sessionId: "une session avec des espaces",
-        tool: "un outil avec des espaces",
-        toolVersion: "une version avec des espaces",
-        adapterVersion: "une autre avec des espaces",
-        argHash: "pas une empreinte",
-      }),
-    );
+    // ⚠️ **LA CONVERSION CI-DESSOUS EST LE SUJET DU TEST, PAS UN CONTOURNEMENT.**
+    //    Depuis l'ADR 0014, `ContenuLigne.sessionId` est un type MARQUÉ : une
+    //    chaîne d'humain n'y est plus assignable, et c'est justement ce que ce
+    //    fichier doit pouvoir écrire — « ce que le kit fabrique, une garde peut
+    //    le MUTILER ; une garde qui ne peut pas mutiler son sujet ne prouve
+    //    rien ». La conversion porte sur la LIGNE ENTIÈRE et une seule fois, pas
+    //    sur le champ : convertir vers `SessionId` aurait posé, dans un fichier
+    //    quelconque, la forme exacte que la garde G3 de l'ADR 0014 traque.
+    //
+    // ⚠️ ET ELLE MESURE UNE BORNE RÉELLE : le type marqué ferme le chemin du
+    //    CODE, il ne ferme pas la COLONNE. Une valeur venue d'une base corrompue
+    //    ou d'une migration arrive sans passer par TypeScript — c'est pour ce
+    //    cas-là que la garde de contenu du § 31 s'exécute À L'ÉCRITURE.
+    const ligneMutilee = {
+      ...contenuTemoin(7),
+      principal: "un principal avec des espaces",
+      sessionId: "une session avec des espaces",
+      tool: "un outil avec des espaces",
+      toolVersion: "une version avec des espaces",
+      adapterVersion: "une autre avec des espaces",
+      argHash: "pas une empreinte",
+    } as unknown as ContenuLigne;
+    const verdict = verifierAucunContenu(ligneMutilee);
 
     console.log(
       `[témoin § 31 · couverture] ${String(verdict.champsInspectes)} champ(s) inspecté(s), ` +

@@ -35,27 +35,41 @@
  * (`manifest.ts`) et `enregistrerAdaptateur()` à l'admission
  * (`core/registry/enregistrer.ts`).
  *
- * ═══ ⚠️ LA SECONDE SOURCE DE VÉRITÉ, ASSUMÉE, DATÉE ET MESURÉE ═══
+ * ═══ ✅ LA SECONDE SOURCE DE VÉRITÉ A ÉTÉ REFERMÉE — LOT 1d ═══
  *
- * {@link estValeurLibre} redit ce que `estTexteLibre()` de
- * `core/chaine/etape-11-provenance.ts` dit déjà : quels mots-clés de JSON Schema
- * REFERMENT l'ensemble des valeurs d'un champ. Deux dérivations d'un même fait
- * finissent par se contredire — c'est une règle durable de ce dépôt, pas une
- * crainte.
+ * {@link estValeurLibre} répond à « quels mots-clés de JSON Schema REFERMENT
+ * l'ensemble des valeurs d'un champ ». `core/chaine/etape-11-provenance.ts`
+ * portait sa PROPRE réponse à la même question — `estTexteLibre()`, avec ses
+ * copies privées de {@link FORMATS_CONTRAIGNANTS}, {@link TEMOINS_DE_PROSE} et
+ * {@link patternReferme}. Deux dérivations d'un même fait finissent par se
+ * contredire ; ici, la contradiction avait un prix nommé : l'admission dirait
+ * « ce champ est fermé, votre `idFields` est effectif » pendant que le § 20
+ * continuerait de le surveiller — ou l'inverse, qui est pire.
  *
+ * **`estTexteLibre()` a disparu.** L'étape 11 IMPORTE et APPELLE
+ * {@link estValeurLibre} : il n'existe plus qu'une écriture, et elle est ici.
  * Elle est ici, et pas là-bas, pour une raison de sens de dépendance :
  * `core/chaine` importe déjà `core/adapter-kit` (`sousSchemas`, `json`), si bien
  * que l'inverse serait un cycle. La couche basse est donc la seule qui puisse
  * porter la définition commune.
  *
- * 🔧 **CE QU'IL RESTE À FAIRE, ET QUI N'EST PAS DANS CE PÉRIMÈTRE :**
- *    `estTexteLibre()` doit devenir un appel à {@link estValeurLibre} plutôt
- *    qu'une seconde écriture. Tant que ce n'est pas fait, la divergence n'est
- *    pas supposée absente : elle est **MESURÉE** à chaque exécution de la suite
- *    par `champs-declares.temoin.spec.ts`, qui confronte les deux dérivations
- *    sur un corpus de formes et ANNONCE combien il en a confrontées. Le jour où
- *    l'une des deux bouge sans l'autre, ce témoin rougit — au lieu que la garde
- *    du § 20 s'affaiblisse en silence.
+ * ⚠️ **CE QUI A ÉTÉ MESURÉ AVANT DE FUSIONNER, ET NON SUPPOSÉ.** Le corpus de
+ *    `champs-declares.temoin.spec.ts` a d'abord été porté de 24 à 51 formes, sur
+ *    les trois axes exacts où il était aveugle : les SEPT `format` contraignants
+ *    (quatre seulement étaient éprouvés — une divergence sur `date`, `time` ou
+ *    `ipv6` était muette), les TROIS témoins de prose (aucune forme ne les
+ *    distinguait l'un de l'autre), et la borne de profondeur (jamais atteinte,
+ *    donc deux bornes décalées d'un cran rendaient le même verdict partout).
+ *    Verdict sur le corpus élargi, les deux écritures encore en place :
+ *    **51 formes confrontées, 0 désaccord.** Le remplacement ne change donc rien
+ *    au comportement servi.
+ *
+ * ⚠️ **CE QUI EMPÊCHE LA SECONDE ÉCRITURE DE REVENIR** n'est pas ce paragraphe.
+ *    `core/epreuve/lot1c-la-couture-manquante.temoin.spec.ts` (G4) lit le source
+ *    de l'étape 11 et exige que ni ces constantes ni ces fonctions n'y soient
+ *    RÉÉCRITES, et que {@link estValeurLibre} y soit importée ET appelée — les
+ *    deux, parce que « tout supprimer sans rien brancher » est exactement la
+ *    panne que le lot 1c a nommée.
  *
  * ═══ ⚠️ LA BORNE DE CE MODULE, ÉCRITE AVEC SA MESURE ═══
  *
@@ -532,11 +546,17 @@ export interface CumulGouvernance {
  *    remplacée : un adaptateur qui ne déclare rien reste couvert comme avant.
  *    L'ordre rend l'union déterministe, donc comparable d'un appel à l'autre.
  *
- * 🔧 **CET APPEL RESTE À BRANCHER DANS `analyserArgumentsDuSchema()`**
- *    (`core/chaine/etape-11-provenance.ts`, constructeur ③, ADR 0016 point 3) :
- *    un champ déclaré doit entrer dans `gouvernance` avec une famille NOMMÉE —
- *    {@link FAMILLE_DECLAREE_PAR_L_OUTIL} — pour que le rapport puisse dire
- *    laquelle des deux sources a mordu.
+ * ✅ **CET APPEL EST BRANCHÉ DEPUIS LE LOT 1d** — son unique appelant de
+ *    production est `analyserArgumentsDuSchema()`
+ *    (`core/chaine/etape-11-provenance.ts`), qui construit sa liste
+ *    `gouvernance` SUR l'union rendue ici : un champ que seule la déclaration
+ *    apporte y entre avec une famille NOMMÉE — {@link FAMILLE_DECLAREE_PAR_L_OUTIL} —
+ *    pour que le rapport puisse dire laquelle des deux sources a mordu.
+ *
+ * ⚠️ AVANT CE LOT, ELLE AVAIT ZÉRO APPELANT, ET C'EST LE DÉFAUT QUI A FAIT
+ *    NAÎTRE `core/coutures/registre.ts` : écrite, exportée, gardée par quatre
+ *    tests — et jamais atteinte par une décision. La garde qui compte ses
+ *    appelants vit dans `core/chaine/gouvernance-declaree.temoin.spec.ts`.
  *
  * @param retenusParLeNom les noms que `FAMILLES_GOUVERNANCE` a retenus. Ils sont
  *        REÇUS et non recalculés : le filet vit dans `core/chaine`, qui importe

@@ -176,6 +176,9 @@ export type {
   ColonneTransport,
   ConstruireContexteOutil,
   ConstruireEntete,
+  // ADR 0020 — ce qu'un constructeur de contexte a le droit de fabriquer.
+  // `idempotencyRef` n'en fait PAS partie : l'orchestrateur le pose lui-même.
+  ContexteSansEmpreinte,
   CorpsDeChaine,
   CouvertureEtapes,
   DependancesOrchestrateur,

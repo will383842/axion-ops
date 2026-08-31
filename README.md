@@ -191,10 +191,11 @@ nouvelle**. Vérifié le 2026-08-30 sur la version installée ici :
 
 ## Écarts relevés dans le cahier des charges
 
-Dix points où le CDC se contredit, laisse un trou, ou dit moins que ce que ce
+Onze points où le CDC se contredit, laisse un trou, ou dit moins que ce que ce
 dépôt tient. Ils sont laissés **visibles** dans le code plutôt que bouchés en
 silence. Les points 4 et 5 ont été tranchés au **lot 1b** (ADR 0005), les
-points 6 à 9 au **lot 1c** (ADR 0014 à 0018), les points 2 et 10 au **lot 1c**
+points 6 à 9 au **lot 1c** (ADR 0014 à 0018), le point 11 au **lot 1d**, les
+points 2 et 10 au **lot 1c**
 également ; l'écart avec le document, lui, subsiste et reste écrit.
 
 ⚠️ **Un écart peut être justifié ; il ne peut pas être MUET.**
@@ -314,6 +315,28 @@ au prochain audit.
     > ne se diagnostiquent pas du même geste. Elle est conservée telle quelle : le
     > document en compte huit, et les séparer est une décision à prendre, pas un
     > nettoyage à faire en passant.
+
+11. **Le § 12 donne à `ops_audit` une colonne `sessionId` non nulle, et le
+    journal porte des lignes qui n'ont AUCUNE session.** Toute la prose du § 12
+    décrit une ligne d'appel ; or deux familles de lignes ne sont pas des appels
+    et doivent pourtant s'enchaîner dans le même journal scellé — la **clôture de
+    purge** (§ 31), écrite aujourd'hui, et la **ligne d'intention** (ADR 0022),
+    écrite demain. Elles n'ont pas d'appelant, pas de pilotage, pas de session,
+    et la colonne ne se laisse pas vider. Ce dépôt tranche par une **valeur
+    réservée**, `SESSION_HORS_APPEL` (`core/audit/vocabulaire.ts`), dont la forme
+    est disjointe de celle qu'une vraie session peut prendre : le type marqué
+    `SessionId` de l'**ADR 0014** descend jusqu'à `ContenuLigne`, et il n'y a
+    donc pas moyen d'écrire une ligne sans avoir DÉCIDÉ laquelle des deux
+    populations elle rejoint.
+
+    ⚠️ **LA VALEUR RÉSERVÉE DIT « CETTE LIGNE N'A PAS DE SESSION », PAS « CETTE
+    LIGNE N'EST PAS UN APPEL ».** Les deux phrases se confondent aujourd'hui, et
+    elles cesseront de se confondre à l'ADR 0022 : la ligne d'intention **EST**
+    un appel en vol, avec une vraie session. Le prédicat qui trie les deux
+    familles doit donc rester dérivé de `NOMS_RESERVES_AU_SOCLE` — le nom de
+    l'outil — et ne jamais employer la valeur de session comme critère. Deux
+    dérivations d'un même fait finissent toujours par se contredire ; celle-ci a
+    son contre-exemple déjà écrit.
 
 ---
 

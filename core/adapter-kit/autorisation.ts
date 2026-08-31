@@ -9,16 +9,30 @@
  * d'entrée est `.strict()` pour qu'un champ d'autorisation glissé dans la
  * charge utile soit un REFUS VISIBLE et non un silence.
  *
- * Et le § 20 y ajoute une clé nommément : `idempotencyKey` voyage dans `ctx`,
- * JAMAIS dans `input`.
+ * Et le § 20 y ajoute une clé nommément : la clé d'idempotence voyage dans
+ * l'EN-TÊTE de l'appel, JAMAIS dans `input`.
  *
- * ═══ LA LISTE EST DÉRIVÉE, PAS ÉCRITE ═══
+ * ═══ LA LISTE EST DÉRIVÉE, PAS ÉCRITE — ET ELLE A TROIS ENSEMBLES ═══
  *
  * Les noms interdits sont lus dans le SOURCE de `core/types.ts` : les
  * propriétés de `ToolContext` et celles de `Habilitations`. Une habilitation
  * nouvelle s'ajoute là-bas — « un drapeau nouveau s'ajoute ICI, jamais dans un
  * `input` », dit le fichier — et ce contrôle la refuse le jour même, sans
  * qu'aucune liste soit à retoucher.
+ *
+ * 🔴 **ET UN TROISIÈME ENSEMBLE, QUE LA DÉRIVATION SEULE NE POUVAIT PAS DONNER —
+ *    ADR 0020.** `ToolContext.idempotencyKey` a été RETIRÉE au profit
+ *    d'`idempotencyRef`, qui porte l'empreinte : la clé n'atteint plus
+ *    l'adaptateur. Retirer la propriété retirait aussi le nom de la liste dérivée
+ *    ci-dessus, **en silence** — le contrôle serait resté VERT, simplement plus
+ *    étroit d'un nom, et la règle du § 20 (« jamais dans `input` ») aurait cessé
+ *    d'être gardée sans qu'aucune couleur ne change. Une garde qui RÉTRÉCIT est
+ *    le mode de défaillance le plus coûteux de ce dépôt.
+ *
+ *    D'où `NOMS_RESERVES_HORS_CONTEXTE` (`core/types.ts`) : les noms que le `ctx`
+ *    a PORTÉS et ne porte plus. Ce tableau ne se vide pas, il s'allonge — un nom
+ *    y ENTRE le jour où il quitte `ToolContext` —, et un plancher-témoin LÈVE
+ *    plutôt que de rendre une liste plus courte.
  *
  * ⚠️ **La borne de cette garde, écrite avec sa mesure.** Elle refuse TOUTES les
  * propriétés de `ToolContext`, y compris `sessionId`, `requestId` et `deadline`
@@ -41,7 +55,7 @@ import { readFileSync } from "node:fs";
 // Cet import de VALEUR n'est pas décoratif : il ancre `core/types.ts` au
 // programme TypeScript. Si le fichier déménageait, la compilation romprait ICI,
 // avant que la lecture de source ci-dessous ne devienne muette.
-import { APPEL_STEPS } from "../types.js";
+import { APPEL_STEPS, NOMS_RESERVES_HORS_CONTEXTE } from "../types.js";
 
 /**
  * Retire commentaires de bloc et de ligne sans décaler les numéros de ligne.
@@ -321,7 +335,17 @@ export function proprietesDInterface(source: string, nom: string): readonly stri
 export interface ClesDAutorisation {
   readonly toolContext: readonly string[];
   readonly habilitations: readonly string[];
-  /** L'union, triée — c'est elle que le contrôle 7 confronte au schéma. */
+  /**
+   * TROISIÈME ENSEMBLE — **ADR 0020, et il est obligatoire.**
+   *
+   * Les noms que `ToolContext` a PORTÉS et ne porte plus. Sans lui, retirer une
+   * propriété du `ctx` la retirerait de la liste dérivée EN SILENCE : le contrôle
+   * resterait vert, simplement plus étroit d'un nom, et la règle « la clé
+   * d'idempotence, jamais dans `input` » cesserait d'être gardée sans qu'aucune
+   * couleur ne change.
+   */
+  readonly reservesHorsContexte: readonly string[];
+  /** L'union des TROIS, triée — c'est elle que le contrôle 7 confronte au schéma. */
   readonly toutes: readonly string[];
   /** D'où elles ont été lues, pour que le rapport le dise. */
   readonly origine: string;
@@ -330,17 +354,43 @@ export interface ClesDAutorisation {
 /** Planchers-témoins : sous ces comptes, la dérivation a échoué en silence. */
 const PLANCHER_TOOL_CONTEXT = 5;
 const PLANCHER_HABILITATIONS = 1;
+/**
+ * ADR 0020 — au moins un nom retiré du `ctx` doit rester interdit.
+ *
+ * Le jour où ce plancher tombe, c'est que quelqu'un a vidé
+ * {@link NOMS_RESERVES_HORS_CONTEXTE} — et le contrôle 7 aurait recommencé à
+ * accepter `idempotencyKey` dans un schéma d'entrée.
+ */
+const PLANCHER_RESERVES_HORS_CONTEXTE = 1;
 
 /**
  * Dérive les clés interdites d'un source `core/types.ts`.
+ *
+ * @param reserves les noms retirés du `ctx`. **Paramètre présent POUR LE
+ *        TÉMOIN** : le défaut est la vérité de production, et une garde ne se
+ *        prouve qu'en la faisant rougir. Lui passer `[]` doit lever.
  *
  * @throws si la dérivation rend trop peu de clés. Une liste vide rendrait le
  *         contrôle 7 VACUEUX : il passerait sur n'importe quel schéma, et
  *         l'absence d'alerte se lirait comme une absence de problème.
  */
-export function clesDAutorisationDepuisSource(source: string, origine: string): ClesDAutorisation {
+export function clesDAutorisationDepuisSource(
+  source: string,
+  origine: string,
+  reserves: readonly string[] = NOMS_RESERVES_HORS_CONTEXTE,
+): ClesDAutorisation {
   const toolContext = proprietesDInterface(source, "ToolContext");
   const habilitations = proprietesDInterface(source, "Habilitations");
+  const reservesHorsContexte = [...reserves];
+
+  if (reservesHorsContexte.length < PLANCHER_RESERVES_HORS_CONTEXTE) {
+    throw new Error(
+      `${origine} : ${String(reservesHorsContexte.length)} nom(s) réservé(s) hors contexte ` +
+        `pour un plancher de ${String(PLANCHER_RESERVES_HORS_CONTEXTE)}. ` +
+        "Un nom retiré de `ToolContext` sans être réservé cesse d'être refusé dans un " +
+        "schéma d'entrée, et le contrôle 7 rétrécit SANS changer de couleur (ADR 0020).",
+    );
+  }
 
   if (toolContext.length < PLANCHER_TOOL_CONTEXT) {
     throw new Error(
@@ -356,8 +406,13 @@ export function clesDAutorisationDepuisSource(source: string, origine: string): 
     );
   }
 
-  const toutes = [...new Set([...toolContext, ...habilitations])].sort();
-  return { toolContext, habilitations, toutes, origine };
+  // ⚠️ L'UNION PREND LES TROIS ENSEMBLES — ADR 0020. Le troisième est
+  //    délibérément PLUS LARGE que `ToolContext` : il porte des noms que le type
+  //    ne porte plus. C'est cohérent avec la borne écrite en tête de ce fichier —
+  //    la garde est « bruyante et dérivée plutôt que juste et recopiée » — et
+  //    c'est ce qui empêche un retrait de rétrécir une garde en silence.
+  const toutes = [...new Set([...toolContext, ...habilitations, ...reservesHorsContexte])].sort();
+  return { toolContext, habilitations, reservesHorsContexte, toutes, origine };
 }
 
 /**

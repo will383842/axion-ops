@@ -8,6 +8,91 @@ construction, de croisement et d'épreuve.
 > du jeton Coolify — ne sont pas posées. C'est la raison d'être de cette
 > retenue, pas une négligence.
 
+> ### ⚠️ 2026-08-31 — LOT 1d : CE DOCUMENT DATE DE LA FIN DU LOT 1, ET LE LOT 1d L'A DÉPASSÉ
+>
+> Le **lot 1d** a cousu quatre décisions au chemin de production et posé le
+> mécanisme qui rend une décision non cousue VISIBLE. Ce qui suit remplace les
+> chiffres de tout ce document ; le reste des paragraphes vaut toujours, sauf
+> mention contraire.
+>
+> | Décision | Ce qui a changé                                                                                          |
+> | -------- | -------------------------------------------------------------------------------------------------------- |
+> | ADR 0019 | `core/coutures/` — un registre des coutures, **et enfin ses deux gardes** (G1, G2) plus leurs témoins    |
+> | ADR 0020 | `idempotencyKey` n'atteint plus l'adaptateur ; le `ctx` n'en porte que l'empreinte                       |
+> | ADR 0021 | l'issue d'idempotence se dérive du **cliquet** d'effet extérieur                                         |
+> | ADR 0022 | la ligne d'intention a une forme ET un compteur — **deux entrées au registre, les deux encore ouvertes** |
+>
+> **Les gates, mesurées le 2026-08-31 après la recette** : `pnpm typecheck`
+> vert, `pnpm lint` vert, `pnpm format:check` vert **sur tout le dépôt**,
+> `pnpm build` vert (**90** modules émis), **1 138 tests verts, 12 `it.fails`,
+> 1 `.todo`, 0 rouge** — contre 838 + 2 `it.fails` à la fin du lot 1b.
+>
+> **Le périmètre, écrit avec la mesure** : **184** fichiers TypeScript dans
+> `core/`, `adapters/`, `console/`, `voice/` et `ops/` — **93** de code, **91**
+> de gardes — dont **0 fichier de garde sans compte annoncé**. Les dossiers
+> `adapters/`, `console/` et `voice/` sont toujours **vides** : c'est le lot 2.
+>
+> ### LA MESURE DU LOT 1d — combien de décisions sont BRANCHÉES ?
+>
+> C'est la question que l'épreuve du lot 1c a rendue nécessaire, et à laquelle
+> aucune garde ne savait répondre. Elle a maintenant une réponse, produite à
+> chaque exécution par `core/coutures/registre.spec.ts` :
+>
+> - **18 ADR** dans `docs/adr/`, **18 inscrits au registre**, **0 sans entrée**,
+>   **0 entrée fantôme** ;
+> - **33 entrées** au registre — 18 `cousue`, 9 `à-coudre`, 2 `à-nommer`,
+>   4 `hors-code` ;
+> - **27 symboles confrontés** au graphe d'appels de **90 modules de
+>   production** : **18 ont au moins un appelant**, 9 en ont **zéro et le
+>   registre l'exige** ;
+> - **11 des 18 ADR** portent au moins une décision appelée par un module de
+>   production ;
+> - **0 désaccord** entre la prose du registre et le graphe d'appels réel.
+>
+> ⚠️ **CE QUE CE COMPTE NE DIT PAS.** « Zéro appelant » n'est pas une dette dans
+> tous les cas : **le socle n'a pas de racine de composition**. Il n'existe ni
+> serveur, ni `main.ts`, ni console — `core/transport/` est un lot à venir.
+> `verifierChaine`, `relireLaSanteMonoInstance`, `relireDepuisLeSocle` ont zéro
+> appelant **et c'est l'état attendu** ; l'état `à-coudre` dit cela, et la garde
+> rougit si l'un d'eux en gagne un sans que le registre le dise. Un appelant est
+> par ailleurs une **forme écrite** trouvée dans un source : un appel passé par
+> une table de dispatch ou une injection lui échappe, et la mesure est donc un
+> **plancher** d'appelants, jamais un plafond.
+>
+> ⚠️ **UN CAS QUE `à-coudre` NE SAIT TOUJOURS PAS DIRE, ET IL EST COMPTÉ.**
+> « Exactement zéro appelant » est une condition qu'un symbole **jamais écrit**
+> remplit sans effort. `estLigneDIntention` (ADR 0022) est dans ce cas : il est
+> nommé d'avance, il n'existe pas. La garde compte donc les symboles réellement
+> **définis** — 26 sur 27 — et tient un cliquet nommé sur celui qui ne l'est pas,
+> pour qu'un second ne s'y ajoute pas en silence.
+>
+> ### CE QUE LES 12 `it.fails` SONT
+>
+> Un `it.fails` porte l'attente CORRECTE — celle du CDC ou d'un ADR — et il est
+> vert TANT QUE le socle ne la tient pas. Ce sont **douze défauts ouverts, datés
+> et instrumentés**, pas douze tests qui passent. Le jour où on les ferme, ils
+> ROUGISSENT, ce qui force à les relire au lieu de les laisser vieillir : **cinq
+> l'ont fait pendant ce lot**, et sont passés en `it()`.
+>
+> ⚠️ **UN `it.fails` EST VERT DÈS QU'IL ÉCHOUE, POUR N'IMPORTE QUELLE RAISON.**
+> C'est pourquoi chacun est apparié à un cliquet ou à un témoin de capacité :
+> sans eux, un import cassé les rendrait tous verts d'un coup.
+>
+> ### LE BLOQUANT QUI RESTE OUVERT
+>
+> 🔴 **`ops_audit.tool` et `ops_audit.principal` ne sont bornés par rien, et une
+> terminaison peut ne laisser AUCUNE ligne.** Les deux champs sont posés
+> verbatim dans l'en-tête vivant depuis `AppelEntrant.nomComplet` et
+> `IdentiteAppelante` ; la garde de forme du § 31 refuse la ligne, et l'écriture
+> lève HORS du `try` de `journaliser`. **Rien ne sort** — la porte est bien
+> fermée —, c'est la **trace** qui est perdue, et avec elle l'invariant du § 11
+> (« toute terminaison écrit une ligne ») et la métrique de refus du § 24.
+> Mesuré : 4 formes soumises, 4 levées, **0 ligne écrite**, contre 2 lignes sur
+> 2 cas bien formés. **Le correctif demande deux arbitrages de CDC** — quelle
+> valeur de repli, et un `principal` malformé doit-il refuser l'appel ou
+> seulement borner sa trace — et les combler par une supposition serait le geste
+> exact que le lot 1d existe pour proscrire.
+
 > ### ⚠️ 2026-08-31 — CE DOCUMENT DATE DE LA FIN DU LOT 1
 >
 > Le **lot 1b** a tranché quatre des points laissés ouverts ici, et modifié le
