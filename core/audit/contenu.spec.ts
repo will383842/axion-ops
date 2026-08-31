@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { CHAMPS_COUVERTS } from "./canonique.js";
 import { ErreurContenuJournal, verifierAucunContenu } from "./contenu.js";
-import { contenuTemoin } from "./fixtures.js";
+import { SCELLEUR_TEMOIN, contenuTemoin } from "./fixtures.js";
 import { Journal } from "./journal.js";
 import { JournalMemoire } from "./memoire.js";
 import type { ContenuLigne } from "./vocabulaire.js";
@@ -34,7 +34,7 @@ describe("core/audit — aucun contenu n'entre dans le journal (§ 31)", () => {
         `${String(verdict.anomalies.length)} anomalies`,
     );
 
-    expect(verdict.champsInspectes).toBe(15);
+    expect(verdict.champsInspectes).toBe(16);
     expect(verdict.anomalies).not.toHaveLength(0);
   });
 
@@ -47,11 +47,11 @@ describe("core/audit — aucun contenu n'entre dans le journal (§ 31)", () => {
     );
 
     expect(verdict.champsInspectes).toBe(CHAMPS_COUVERTS.length);
-    expect(verdict.champsInspectes).toBe(15);
+    expect(verdict.champsInspectes).toBe(16);
     expect(verdict.anomalies).toEqual([]);
   });
 
-  it("refuse le poison sur CHACUN des quinze champs couverts — aucun n'échappe", () => {
+  it("refuse le poison sur CHACUN des seize champs couverts — aucun n'échappe", () => {
     // La dérivation : on ne choisit pas les champs à éprouver, on les prend
     // tous. Un champ qui aurait été oublié dans la table des formes resterait
     // vert ici, et c'est précisément ce que cette boucle interdit.
@@ -67,7 +67,7 @@ describe("core/audit — aucun contenu n'entre dans le journal (§ 31)", () => {
 
     console.info(`[garde contenu · balayage] ${String(mesures)} champs éprouvés au poison`);
 
-    expect(mesures).toBe(15);
+    expect(mesures).toBe(16);
     expect(permissifs).toEqual([]);
   });
 
@@ -110,7 +110,7 @@ describe("core/audit — la garde de contenu s'exécute À L'ÉCRITURE", () => {
     // contenu sur le disque : c'est le contenu qu'il fallait empêcher, pas le
     // silence.
     const store = new JournalMemoire();
-    const journal = new Journal(store);
+    const journal = new Journal(SCELLEUR_TEMOIN, store);
 
     await expect(journal.journaliser(contenuTemoin(1, { tool: POISON }))).rejects.toBeInstanceOf(
       ErreurContenuJournal,

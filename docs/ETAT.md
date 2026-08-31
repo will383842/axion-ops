@@ -8,6 +8,31 @@ construction, de croisement et d'épreuve.
 > du jeton Coolify — ne sont pas posées. C'est la raison d'être de cette
 > retenue, pas une négligence.
 
+> ### ⚠️ 2026-08-31 — CE DOCUMENT DATE DE LA FIN DU LOT 1
+>
+> Le **lot 1b** a tranché quatre des points laissés ouverts ici, et modifié le
+> code en conséquence. Les paragraphes concernés portent un marqueur ✅ et
+> renvoient à l'ADR qui les ferme. Le reste du document reste vrai.
+>
+> | Point ouvert au lot 1                 | Tranché par | Ce qui a changé                                      |
+> | ------------------------------------- | ----------- | ---------------------------------------------------- |
+> | § 3.1 — cinq étapes sans propriétaire | lot 1b      | les cinq sont ÉCRITES et CÂBLÉES — voir § 3.1 et § 8 |
+> | § 4.1 — le journal se recalcule       | ADR 0002    | rôle en ajout seul + `selfHash` scellé par HMAC      |
+> | § 4.2 — schéma d'entrée non fermé     | ADR 0003    | le registre exige la fermeture, deux dialectes       |
+> | § 4.3 — l'empreinte des profils       | ADR 0004    | `profilesVersion` / `profilesSha` au manifeste       |
+> | (nouveau) `vault_locked`, étape 0     | ADR 0005    | 14 codes d'erreur, `AppelStep = 0 \| 1 \| … \| 14`   |
+>
+> **Mesures à la fin du lot 1b** : `pnpm typecheck` vert, `pnpm lint` vert,
+> `pnpm format:check` vert **sur tout le dépôt**, **838 tests verts,
+> 2 `it.fails`, 1 `.todo`, 0 rouge** (contre 511 + 2 `.todo` à la fin du lot 1).
+>
+> ⚠️ **CE QUE LES DEUX `it.fails` SONT, ET POURQUOI ILS NE SONT PAS DES ROUGES.**
+> Un `it.fails` porte l'attente CORRECTE — celle du CDC — et est vert TANT QUE le
+> socle ne la tient pas. Ce sont donc **deux défauts ouverts, datés et
+> instrumentés**, pas deux tests qui passent. Le jour où on les corrige, ils
+> rougissent, ce qui force à les repasser en `it()`. Les deux demandent un
+> arbitrage : voir **§ 8**.
+
 ---
 
 ## 1 · Les quatre gates, mesurées
@@ -24,9 +49,12 @@ construction, de croisement et d'épreuve.
 Les dossiers `adapters/`, `console/`, `voice/` et `ops/` sont **vides** — c'est
 le lot 2.
 
-⚠️ **Ce que « vert » ne prouve pas.** Il n'existe aucune CI dans ce dépôt :
-`.github/` n'existe pas. Ces quatre commandes ont été passées à la main. Une
-gate qui n'est lancée par rien ne peut pas rougir — voir § 4.
+⚠️ **Ce que « vert » ne prouve pas — mis à jour au lot 1b.** La CI existe
+désormais (`.github/workflows/ci.yml`, § 3.3) et lance ces quatre commandes plus
+la validation du schéma. Elle **sait rougir**, et c'est mesuré, pas affirmé :
+`ops/temoin-ci.ts` fabrique un défaut par gate et exige que chacune échoue, puis
+reverdisse. Ce qu'elle ne prouve toujours pas : qu'une PR rouge ne peut pas être
+fusionnée — la protection de branche est un réglage GitHub, hors du dépôt.
 
 ---
 
@@ -66,6 +94,33 @@ ci-dessous, puis supprimés.
 ## 3 · Ce qui n'est PAS construit
 
 ### 3.1 · Cinq étapes du § 11 n'ont aucun module — `it.todo` n° 1
+
+> ✅ **2026-08-31, lot 1b seconde moitié — REFERMÉ.** Les cinq modules sont
+> ÉCRITS, testés, exportés par `core/chaine/index.ts`, et câblés par
+> `orchestrerAppel()`, qui a désormais un corps. `etapesNonImplementees()` rend
+> **zéro**.
+>
+> | Étape | Module RÉEL                          |
+> | ----- | ------------------------------------ |
+> | 5     | `core/chaine/etape-05-scopes.ts`     |
+> | 6     | `core/chaine/etape-06-outil.ts`      |
+> | 9     | `core/chaine/etape-09-curseur.ts`    |
+> | 11    | `core/chaine/etape-11-provenance.ts` |
+> | 14    | `core/chaine/etape-14-execution.ts`  |
+>
+> ⚠️ **CE QUI ADOSSE CE ZÉRO À AUTRE CHOSE QU'UNE DÉCLARATION.** Un registre qui
+> se dit implémenté est de la prose, et de la prose ne contredit que de la prose.
+> Ce reste-à-faire a d'ailleurs MENTI pendant tout le lot : il nommait cinq
+> fichiers qui n'existaient pas, pendant qu'un second registre en nommait cinq
+> autres qui existaient, sans que rien ne les confronte. Deux gardes le tiennent
+> désormais : le fichier nommé par `module` doit **EXISTER sur le disque**, et le
+> résolveur d'`executer` est **APPELÉ** — il doit rendre une fonction. Et il n'y a
+> plus qu'une seule table (`core/chaine/modules.ts`), lue par les deux registres.
+>
+> ⚠️ **La table de noms de modules ci-dessous est PÉRIMÉE** : `core/scopes/`,
+> `core/catalogue/` et les autres n'ont jamais été retenus. Elle est conservée
+> telle quelle parce qu'elle porte le RAISONNEMENT — « pourquoi c'est grave » —
+> qui, lui, reste juste et explique ce que le lot a refermé.
 
 `core/__tests__/integration.spec.ts` → « quelles étapes un module
 revendique-t-il ? »
@@ -123,16 +178,36 @@ string>` pour que le compilateur voie le raccordement.
 3. `Coffre.lireCleArgHash()` fournit désormais le port `CoffreArgHash`, mais
    personne ne branche encore le coffre au calcul d'`argHash`.
 
-### 3.3 · Aucune CI
+### 3.3 · ✅ La CI existe désormais (lot 1b)
 
-`.github/` n'existe pas. Le § 23 décrit « push → typecheck · lint · tests
-unitaires · harnais de conformité ». Les scripts existent tous
-(`typecheck`, `lint`, `format:check`, `test`) ; **rien ne les lance.**
+`.github/workflows/ci.yml`. Le § 23 décrit « push → typecheck · lint · tests
+unitaires · harnais de conformité » ; les cinq gates sont posées, plus la
+validation du schéma Prisma contre l'URL **stub** (`stub.invalid`, RFC 2606).
 
-⚠️ La mémoire du projet est formelle sur ce piège, mesuré sur `axionia` : un
-gate qui porte `continue-on-error: true` ne fait jamais rougir une PR, et « le
-risque est couvert par la gate » devient une fausse sécurité. Quand la CI sera
-posée, **vérifier qu'elle rougit sur un témoin fabriqué.**
+**AUCUNE étape ne porte `continue-on-error`**, et ce n'est pas une promesse :
+`ops/workflow.spec.ts` LIT le fichier et rougit sur quatre formes —
+`continue-on-error`, un `if:` conditionné à un secret, un code de retour écrasé
+(`|| true`, `set +e`), une sortie d'erreur jetée. Elle annonce le nombre de
+fichiers, de lignes et d'étapes examinés.
+
+**Un secret absent FAIT ÉCHOUER l'étape, il ne la fait pas sauter.**
+`ops/secrets.ts` porte la liste — **vide aujourd'hui**, et l'étape l'écrit
+plutôt que de le taire : le socle ne sort pas de la machine. La mécanique, elle,
+est en service, et `ops/secrets.spec.ts` l'éprouve sur les trois formes
+d'absence (non exposé, chaîne vide, espaces seuls) — la deuxième étant celle que
+GitHub Actions produit pour un nom mal orthographié.
+
+**La CI sait rougir, et c'est MESURÉ.** Le job `temoin` lance
+`ops/temoin-ci.ts`, qui fabrique un défaut pour chacune des quatre gates, exige
+que chacune ÉCHOUE, retire le défaut et exige que chacune REVERDISSE. Sans la
+seconde moitié, une gate cassée en permanence passerait pour une gate qui mord.
+Exécuté à la main sur ce dépôt : `typecheck` code 2 / 0, `lint` 1 / 0,
+`format:check` 1 / 0, `test` 1 / 0 — quatre gates, zéro anomalie.
+
+⚠️ **Ce que la CI ne prouve pas.** Aucune protection de branche n'est déclarée
+ici : rien, dans ce dépôt, ne dit qu'une PR rouge ne peut pas être fusionnée.
+C'est un réglage GitHub, hors du dépôt, et aucune garde de texte ne l'atteint.
+Les actions tierces sont épinglées **par étiquette** (`@v4`), pas par SHA.
 
 ---
 
@@ -142,6 +217,13 @@ Sept points. Aucun n'est un bug à corriger : chacun est un choix que la Recette
 a refusé de trancher seule.
 
 ### 4.1 · 🔴 Le journal ne résiste pas à une réécriture complète
+
+> ✅ **2026-08-31, lot 1b — TRANCHÉ, voir ADR 0002.** Les DEUX sorties ont été
+> prises, parce qu'elles ne couvrent pas le même attaquant : un rôle PostgreSQL
+> en ajout seul (`prisma/sql/0001-ops-audit-append-only.sql`, avec une purge sous
+> un autre rôle) ET le `selfHash` scellé par HMAC (`core/sceau/`). Réécrire le
+> journal exige désormais deux compromissions distinctes. **Reste ouvert** :
+> `ops_audit` ne porte aucune version de clé de scellement.
 
 `prisma/schema.prisma` + `core/audit/verification.ts`
 
@@ -164,6 +246,12 @@ journal falsifiable pendant toute la construction est un journal qui n'atteste
 rien de la construction.
 
 ### 4.2 · 🔴 Le registre n'exige pas un schéma d'entrée FERMÉ
+
+> ✅ **2026-08-31, lot 1b — TRANCHÉ, voir ADR 0003.** Le dialecte est décidé :
+> `additionalProperties: false` ET `unevaluatedProperties: false` sont acceptés,
+> et le dialecte qui a servi est rendu. Les deux ajouts (a) et (b) sont posés,
+> et le témoin exact cité ci-dessous rougit — `core/registry/`
+> `admission-schema.temoin.spec.ts`.
 
 `core/registry/manifeste-recu.ts`
 
@@ -193,6 +281,11 @@ tourne dans la CI de l'ADAPTATEUR.
 
 ### 4.3 · 🔴 L'empreinte des profils ne voyage pas dans le manifeste
 
+> ✅ **2026-08-31, lot 1b — TRANCHÉ, voir ADR 0004.** `profilesVersion` et
+> `profilesSha` entrent dans `Manifeste` ; le sceau voyage de `core/profiles`
+> jusqu'au registre sans être recalculé nulle part, et le registre confronte LES
+> DEUX champs. C'était la dernière fenêtre : aucun épinglage réel n'existait.
+
 `core/profiles/profiles.ts`
 
 `PROFILES_VERSION` et `empreinteProfils()` sont une garde qui **ne peut pas
@@ -213,32 +306,52 @@ confronte à `empreinteProfils()`, soit **on corrige la phrase de `profiles.ts`
 pour qu'elle cesse de décrire un mécanisme absent.** La première est la seule
 qui rende la garde exécutable.
 
-### 4.4 · 🟠 Deux dérivations du niveau de politique se contredisent
+### 4.4 · ✅ Deux dérivations du niveau de politique se contredisaient — TRANCHÉ (lot 1b)
 
-`core/policy/niveau.ts`
+`core/policy/scope.ts` · `core/policy/niveau.ts` · `core/registry/enregistrer.ts`
 
-`niveauApplique()` répond par **appartenance** aux scopes que
-`scopesCouvrants()` fabrique ; `plancherDuScope()` / `scopeDomine()` répondent
-par **analyse** de la grammaire, en découpant le scope sur son dernier point. Le
-§ 12 ne dit pas si `ops_tool.name` porte déjà le préfixe de son adaptateur, et
-rien ne valide ni ne normalise `ReferenceOutil`.
-
+`niveauApplique()` répondait par **appartenance** aux scopes que
+`scopesCouvrants()` fabrique ; `plancherDuScope()` / `scopeDomine()` répondaient
+par **analyse** de la grammaire, en découpant le scope sur son dernier point.
 Trois conséquences mesurées, sur une politique **parfaitement lisible** — donc
-là où aucun fail-closed ne vient refermer l'écart :
+là où aucun fail-closed ne venait refermer l'écart : le même outil recevait
+`libre` ou `brouillon` selon la façon dont sa référence avait été construite ;
+un RESSERRAGE valide et en vigueur ne mordait pas ; et `classerChangement()`
+faisait passer un élargissement réel par le chemin « resserrage », sans second
+facteur ni `ops:policy`.
 
-- le même outil `zoho.mail.send` reçoit `libre` ou `brouillon` **selon la façon
-  dont sa référence a été construite** ;
-- une ligne de RESSERRAGE valide et en vigueur sur `zoho.mail.*` **ne mord
-  pas**, et rien ne le dit ;
-- `classerChangement()` lit le plancher par `plancherDuScope`, donc `libre`, là
-  où le niveau appliqué est `brouillon` : **un élargissement réel est classé
-  « resserrage »** et part par le chemin libre, sans TOTP ni `ops:policy`.
+**Ce qui est tranché, et écrit à un seul endroit.** La grammaire du § 12 est
+`*` | `adapterId.*` | `adapterId.tool` : un scope se lit de gauche à droite, le
+**PREMIER** point sépare l'adaptateur de l'outil, **donc `adapterId` ne contient
+aucun point**. `zoho.mail.send` est l'outil `mail.send` de l'adaptateur `zoho`,
+et `zoho.mail.*` n'est plus un scope.
 
-**Ce qu'il faut décider : la sémantique du § 12.** Faire passer `scopeCouvre()`
-par `scopeDomine()` impose de trancher — `adapterId` est-il TOUJOURS le préfixe
-complet jusqu'au dernier point ? Poser en outre la garde manquante : une ligne
+Ce n'est pas un arbitrage de confort : c'est déjà la règle que
+`core/adapter-kit/manifest.ts` applique au BUILD (`MOTIF_ID` n'admet ni point ni
+majuscule), tandis que `MOTIF_NOM_OUTIL` admet les points.
+
+**Ce qui a été fait.**
+
+- `scopeCouvre()` passe par `scopeDomine()` — **une seule dérivation**.
+  `scopesCouvrants()` subsiste pour l'écran : elle ÉNUMÈRE, elle ne DÉCIDE plus.
+  `core/policy/scope.spec.ts` confronte les deux lectures sur 60 paires.
+- `analyserReference()` refuse une référence qu'aucun scope ne saurait nommer,
+  et `niveauApplique()` replie alors sur le niveau le plus strict avec la raison
+  **`référence-illisible`** — le bon niveau POUR LA BONNE RAISON.
+- La règle est **revalidée à l'enregistrement** : refus
+  `id_innommable_par_un_scope` (`core/registry/enregistrer.ts`). C'était
+  nécessaire — `lireManifesteRecu()` n'exigeait qu'un `id` non vide, donc un
+  manifeste produit ailleurs (le CRM en PHP, § 29) pouvait s'enregistrer sous
+  `zoho.mail`. Le refus INTERROGE `analyserScope()` au lieu de retaper la règle,
+  et `core/registry/id-nommable.temoin.spec.ts` le prouve sur 14 identifiants.
+- Les trois témoins « 🔴 DÉFAUT CONSTATÉ » de `niveau.temoin.spec.ts` ont été
+  **conservés** : ils rejouent la même politique et montrent ce qui referme
+  l'écart. Aucun n'a été supprimé.
+
+⛔ **Reste ouvert** : la garde manquante que le lot 1 nommait déjà — une ligne
 d'`ops_policy` en vigueur dont le scope ne couvre AUCUN outil enregistré est une
-anomalie affichée, qui annonce le nombre d'outils confrontés.
+anomalie qui devrait être affichée, avec le nombre d'outils confrontés. Elle
+suppose un catalogue d'outils, qui appartient à la chaîne d'appel.
 
 ### 4.5 · 🟠 Un effet peut partir sans trace (objectif O6)
 
@@ -260,19 +373,30 @@ dans le rapport, en remplaçant la phrase absolue par sa borne. (b) Le refermer 
 chaînage accepte deux lignes, et une intention non close est précisément le
 signal qu'on veut voir. Coût : une écriture de plus par appel exécuté.
 
-### 4.6 · 🟠 `ops_audit.argHash` porte deux populations
+### 4.6 · ✅ `ops_audit.argHash` portait deux populations — REFERMÉ (lot 1b)
 
-`core/audit/journal.ts`
+`core/audit/journal.ts` · `core/audit/vocabulaire.ts` · `prisma/schema.prisma`
 
-L'en-tête est désormais **affiné** après l'étape 8 : le journal et le jeton de
-confirmation désignent le même appel (garde exécutée). Mais les terminaisons
-**antérieures** à l'étape 8 gardent l'empreinte de la charge brute — elles n'ont
-rien d'autre — et **rien dans la ligne ne les distingue.**
+L'en-tête est **affiné** après l'étape 8 : le journal et le jeton de
+confirmation désignent le même appel. Mais les terminaisons **antérieures** à
+l'étape 8 gardaient l'empreinte de la charge brute — elles n'ont rien d'autre —
+et **rien dans la ligne ne les distinguait.**
 
-Le remède est une colonne booléenne de plus sur `ops_audit`. Elle entrerait dans
-l'empreinte chaînée du § 12, donc **elle change le calcul du journal** : à
-décider avant le premier chaînage réel, pas à glisser. En attendant,
-`stepDenied < 8` permet de savoir laquelle des deux on lit.
+`ops_audit.argHashValidated` porte désormais le fait lui-même, et il **entre
+dans l'empreinte chaînée** (`CHAMPS_COUVERTS`, seize champs). Il a été posé
+maintenant précisément pour cela : aucune base ne tourne, aucune ligne n'existe.
+Après le premier chaînage réel, il aurait fallu une clôture de rupture et deux
+régimes de vérification dans le même journal.
+
+**Le remède provisoire était faux, et le témoin le montre.** `stepDenied < 8`
+est une INFÉRENCE : elle se trompe sur une terminaison par **exception**, où
+`stepDenied` est nul — l'empreinte y est brute et l'inférence la déclare
+validée. Mesuré dans `core/audit/deux-populations.temoin.spec.ts`.
+
+**Trois états, pas deux, et le troisième se lit ailleurs.** `false` couvre
+l'empreinte brute ET « arguments jamais lus » (refus d'étape 1). Les deux se
+séparent par la VALEUR : `ARG_HASH_NON_LU` est une constante convenue qu'aucun
+HMAC ne produira. Un troisième champ n'aurait rien ajouté.
 
 ### 4.7 · 🟡 Bornes et périmètres à confirmer
 
@@ -363,3 +487,121 @@ pour qu'on ne puisse pas le confondre avec une garde qui refuserait tout.
 Deux tests sont marqués **`.todo`**, chacun avec le motif écrit sur place et
 repris ci-dessus (§ 3.1 et § 3.2). Aucune assertion n'a été relâchée à la valeur
 observée : une garde calée sur le défaut du jour ne garde plus rien.
+
+---
+
+## 8 · Lot 1b, seconde moitié — ce que la chaîne a coûté, et ce qu'elle laisse
+
+**Date : 2026-08-31.** Établi par la Recette du lot 1b, après onze passes de
+construction et trois passes d'épreuve adverse.
+
+### 8.1 · Ce qui est désormais tenu par du code
+
+Les cinq étapes orphelines du § 11 sont écrites, et l'ORDRE appartient à
+`orchestrerAppel()`. Trois propriétés en découlent, chacune tenue par une
+structure et non par une consigne :
+
+- **L'invariant de sortie du § 11 est tenu par le TYPE DE RETOUR.**
+  `orchestrerAppel()` rend un `ResultatAppel`, qui étend `AppelJournalise` — dont
+  le champ `ligne` est la ligne ÉCRITE. Il n'existe aucune façon de construire
+  cette valeur sans qu'une écriture ait eu lieu.
+- **Le schéma passe avant le quota**, et l'orchestrateur ne PEUT pas inverser
+  l'ordre : il n'a pas la main dessus, c'est `appliquerLimites` qui reçoit le
+  validateur et l'exécute lui-même.
+- **Une seule table dit quel fichier exécute quelle étape** — `modules.ts` —, et
+  les deux registres la lisent. La contradiction n'est plus improbable, elle est
+  impossible.
+
+### 8.2 · Les deux `it.fails` — deux défauts ouverts, datés
+
+**① `ops_audit` nie une exécution qui a eu lieu.**
+`core/audit/journal.ts` dérive le triplet de la ligne du seul GENRE de la
+terminaison : `refus` ⇒ `decision: "refusé"`, `outcome: "non-exécuté"`. Or
+l'étape 14 est la seule dont le refus arrive APRÈS l'effet extérieur —
+`result_too_large` se prononce sur ce qui SORT, pas sur ce qui s'est passé. Un
+`send` PARTI dont la réponse dépasse le plafond est donc journalisé « refusé /
+non-exécuté ». La ligne existe, l'invariant tient — **elle est fausse**, et une
+revue des effets extérieurs conduite sur `ops_audit` ne verrait jamais cet envoi.
+
+L'information existe pourtant à cet instant : `ExecutionEtablie` porte
+`octetsBruts`, donc la preuve que l'adaptateur a répondu.
+
+⛔ **Arbitrage Will.** Faire porter au `Refus` le fait « l'effet extérieur a eu
+lieu » est mécanique. QUELLE valeur d'`outcome` retenir ne l'est pas : `outcome`
+entre dans l'empreinte chaînée (**ADR 0002**), donc en ajouter une est une
+rupture de format — sans coût aujourd'hui, aucune base ne tournant. Qu'elle ne
+soit pas `non-exécuté` n'est, en revanche, pas un arbitrage.
+
+**② La « valeur réservée » du mode agrégat n'est réservée par rien.**
+`CLE_AGREGAT_ABSENTE` distingue « 40 éléments sans canal » de « 40 éléments dont
+le canal n'a pas été rendu ». Ce ne sont pas la même panne — et un adaptateur qui
+rend littéralement cette chaîne comme VALEUR du champ d'agrégat fusionne les deux
+populations en un seul compte, donc les rend irrécupérables.
+
+⛔ **Arbitrage Will.** Le remède est structurel — un booléen `champAbsent` que le
+socle produit et qu'aucune valeur d'adaptateur ne peut usurper —, mais il
+**ajoute un champ à une sortie que le § 13.2 énumère**. C'est la même décision
+que la troisième ligne du tableau ci-dessous, et les deux se prennent ensemble.
+
+### 8.3 · Ce qui attend une décision, sans témoin exécutable
+
+| Écart                                                         | Pourquoi la Recette ne l'a pas tranché                                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`sessionId` ni contraint, ni authentifié, ni lié au jeton** | Toute la garde du § 20 s'y ancre. Le contrat manquant est une décision de TRANSPORT — il n'existe pas encore. À écrire AVANT, pas après.               |
+| **`idFields` est cru sur parole**                             | Le § 20 pose que « l'étiquetage se décide côté socle, jamais sur déclaration ». Exiger la fermeture d'un `messageId` rejetterait de vrais outils.      |
+| **L'enveloppe ne dit pas ce qu'elle a perdu**                 | Sources écartées par le plafond, non conformes fondus, valeur d'agrégat absente. Le § 13.2 énumère TREIZE champs ; en ajouter un est une décision CDC. |
+| **Le § 15 n'a aucun code pour un scope insuffisant**          | Trois causes de nature très différente sortent avec `code: null`. Le § 24 ne pourra pas les séparer dans sa métrique.                                  |
+| **Le § 24 n'a aucune ligne pour l'écart d'épinglage**         | Le § 20 prescrit d'ALERTER ; le niveau n'est fixé par rien. `critique` est retenu **par décision de module**, écrit dans le type pour qu'il se relise. |
+| **L'index de provenance est LOCAL AU PROCESSUS**              | Deux instances derrière un répartiteur verraient la garde du § 20 s'appliquer une fois sur deux, sans qu'aucun compte ne le dise.                      |
+| **Fuite d'existence résiduelle**                              | Fermée à scopes VIDES. Un porteur qui a UN scope mais pas le BON apprend encore qu'un nom n'existe pas : il faudrait l'`effect` d'un outil illisible.  |
+| **Cinq bornes de durée et de taille**                         | Les quatre de Will (2026-08-31) plus `TTL_MARQUAGE_MS`. Chacune vit à UN seul endroit, pour qu'une révision soit UNE ligne. Lot 6.                     |
+
+### 8.4 · Ce que la Recette a fait aux tests, et ce qu'elle n'a pas fait
+
+**Aucun test n'a été supprimé.** Trente-six témoins adverses sont passés de
+`it.fails` à `it()` — **la plupart sans qu'une ligne de leur corps ne change**,
+parce qu'ils portaient déjà l'attente du CDC et non la valeur fausse. C'est
+l'idiome qui a fonctionné : un défaut écrit sous `it.fails` rougit le jour où il
+est corrigé, ce qui interdit de le corriger en silence.
+
+⚠️ **CE QUI A BOUGÉ QUAND MÊME, ET IL FAUT LE COMPTER.** Dix-huit tests ont vu au
+moins une assertion changer. Dire « aucune ligne de leur corps » sans cette
+réserve serait exactement le travers que ce dépôt combat : une mesure juste
+énoncée plus largement qu'elle. Quatre familles, et chacun des tests le dit sur
+place, en nommant l'assertion et le motif :
+
+- **cinq** attendaient la valeur de remplacement `SOURCE_NON_CONFORME` à
+  l'identique. C'était précisément ce dédoublonnage-là qui faisait fondre cinq
+  canaux en échec en une seule entrée : le correctif SUFFIXE le rang, donc la
+  valeur servie change. L'attente du § 13.2 — le nombre de canaux — est
+  inchangée ;
+- **six** portaient le SYMPTÔME du défaut plutôt que la règle : une levée
+  d'`ErreurContenuJournal`, une enveloppe servie, un « la garde est verte alors
+  que… ». Ils sont RETARGÉS sur ce qui rend la règle vraie. Le premier a reçu un
+  **cliquet** : la garde du § 31, présentée avec la valeur BRUTE, doit toujours
+  refuser — sans quoi ce test serait vert des deux façons ;
+- **cinq** exigeaient `admisParLeRegistre === true` comme PRÉCONDITION. Deux des
+  cinq formes ne sont plus admises par le § 09 ; garder cette exigence aurait
+  rendu ces tests verts POUR LA MAUVAISE RAISON — « le registre le refuse déjà ».
+  L'admission est désormais MESURÉE et annoncée, jamais exigée ;
+- **deux** portaient le COMPTE des contournements. Il est passé de six à un, et
+  le seul qui reste — `idFields` — est nommé dans l'attente, pour que le jour où
+  il sera tranché, le test rougisse.
+
+**Ce que la Recette n'a pas fait :** relâcher une assertion à la valeur observée,
+et corriger un défaut qui demandait un arbitrage. Les huit du § 8.3 sont
+au-dessus de son mandat.
+
+### 8.5 · Gardes éprouvées par un témoin posé dans le code RÉEL
+
+Quatre témoins ont été fabriqués DANS les fichiers de production, la suite
+relancée, puis les fichiers restaurés. Les quatre ont rougi :
+
+| Témoin posé                                               | Ce qui a rougi                                  |
+| --------------------------------------------------------- | ----------------------------------------------- |
+| Un chemin de module fantôme dans `modules.ts`             | 3 tests, sur les DEUX registres                 |
+| La garde fail-closed de `deciderEtape10` neutralisée      | le témoin des six niveaux corrompus             |
+| `format` redevenu une fermeture dans `estTexteLibre`      | 4 tests, dont la mesure d'ensemble des 5 formes |
+| `continue-on-error: true` dans `.github/workflows/ci.yml` | la garde qui LIT le YAML                        |
+
+Une garde qui ne peut pas échouer n'existe pas. Celles-ci le peuvent.

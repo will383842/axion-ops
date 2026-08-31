@@ -37,7 +37,7 @@ import type { EnveloppeChiffree } from "./chiffrement.js";
 import type { DepotDeSecrets, EnregistrementSecret } from "./depot.js";
 import { ErreurDeCoffre } from "./erreurs.js";
 import type { RefusDeCoffre } from "./erreurs.js";
-import { CODE_COFFRE_VERROUILLE } from "./erreurs.js";
+import { CODE_COFFRE_VERROUILLE, ETAPE_COFFRE } from "./erreurs.js";
 import { appliquerGeste } from "./etat.js";
 import type { EtatCoffre, GesteCoffre } from "./etat.js";
 import { JOURNAL_MUET } from "./evenements.js";
@@ -73,6 +73,26 @@ export const NOM_CLE_ARG_HASH = "argHash.hmac";
 
 /** La version courante de la clé `argHash`. Une rotation l'incrémente. */
 export const VERSION_CLE_ARG_HASH = 1;
+
+/**
+ * LE NOM DU SECRET QUI PORTE LA CLÉ DE SCELLEMENT DU JOURNAL (ADR 0002).
+ *
+ * Déclaré ICI, une seule fois, pour la même raison que celui de l'`argHash` :
+ * c'est le coffre qui répond à « sous quel nom, en quelle version ».
+ *
+ * ⚠️ CETTE CLÉ-CI NE SE TOURNE PAS COMME LES AUTRES. Une rotation rend
+ *    INVÉRIFIABLE tout le journal scellé avec l'ancienne — ce n'est pas un
+ *    défaut, c'est la propriété recherchée : si l'ancienne clé suffisait encore
+ *    à valider les anciennes lignes, il suffirait de la garder pour recalculer
+ *    la chaîne. L'ancienne clé se SÉQUESTRE donc hors ligne tant que le journal
+ *    qu'elle a scellé est conservé (§ 31 : douze mois archivés), et `ops_audit`
+ *    ne porte AUJOURD'HUI aucune colonne de version de clé. Voir ADR 0002,
+ *    « ce qui reste ouvert ».
+ */
+export const NOM_CLE_SCEAU_JOURNAL = "journal.sceau";
+
+/** La version courante de la clé de scellement. Voir la réserve ci-dessus. */
+export const VERSION_CLE_SCEAU_JOURNAL = 1;
 
 /** Clair connu. Il n'est pas secret — c'est le déchiffrer qui prouve quelque
  *  chose, pas le connaître. */
@@ -289,7 +309,11 @@ export class Coffre {
         : "Le coffre est verrouillé : aucun outil ne peut être appelé. Déverrouiller " +
           "depuis la console (écran Déverrouillage), pas depuis un terminal.";
 
-    return { code: CODE_COFFRE_VERROUILLE, etat: this.etatCourant, message };
+    // `etape` porte le numéro que `ops_audit.stepDenied` inscrit — DÉRIVÉ
+    // d'`APPEL_STEPS` par `core/vault/erreurs.ts`, jamais un littéral. Sans
+    // lui, la colonne restait nulle et le refus était indiscernable d'une
+    // exception (ADR 0005).
+    return { code: CODE_COFFRE_VERROUILLE, etape: ETAPE_COFFRE, etat: this.etatCourant, message };
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -321,6 +345,31 @@ export class Coffre {
       return null;
     }
     const clair = await this.lire(NOM_CLE_ARG_HASH, VERSION_CLE_ARG_HASH);
+    return clair.toString("utf8");
+  }
+
+  /**
+   * LE PONT VERS `core/sceau` — implémente le port `CoffreSceauJournal`.
+   *
+   * ADR 0002 : `ops_audit.selfHash` est un HMAC, pas un SHA nu. Sans clé,
+   * quiconque obtient l'écriture en base peut retirer une tranche PUIS
+   * recalculer toute la chaîne, et `verifierChaine` rend alors « valide » sur
+   * un journal amputé.
+   *
+   * ⚠️ REND `null`, NE LÈVE PAS, quand le secret n'est pas encore configuré :
+   *    c'est le contrat du port, et c'est à `creerScelleurJournal` de décider
+   *    que l'absence est fatale — ce qu'il fait, bruyamment. En revanche un
+   *    coffre FERMÉ lève : ne pas pouvoir lire et n'avoir rien à lire sont deux
+   *    situations différentes, et les confondre servirait un journal scellé
+   *    avec rien le jour où le coffre est verrouillé.
+   */
+  public async lireCleSceauJournal(): Promise<string | null> {
+    this.exigerOuvert();
+    const ligne = await this.depot.lire(NOM_CLE_SCEAU_JOURNAL, VERSION_CLE_SCEAU_JOURNAL);
+    if (ligne === null) {
+      return null;
+    }
+    const clair = await this.lire(NOM_CLE_SCEAU_JOURNAL, VERSION_CLE_SCEAU_JOURNAL);
     return clair.toString("utf8");
   }
 

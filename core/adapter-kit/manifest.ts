@@ -33,6 +33,9 @@ import { toJSONSchema } from "zod/v4";
 import { ADAPTER_MODES, DATA_CLASSES, EFFECTS } from "../types.js";
 import type { AdapterMode, DataClass, Effect } from "../types.js";
 import { canoniser, empreinteCanonique, octetsCanoniques, versValeurJson } from "./json.js";
+import { analyserFermeture } from "./fermeture.js";
+import { verifierFormeDuSceau } from "./profils.js";
+import type { SceauProfils } from "./profils.js";
 import type { ObjetJson, ValeurJson } from "./json.js";
 import { IDEMPOTENCIES, PAGINATIONS } from "./types.js";
 import type {
@@ -89,6 +92,28 @@ export interface Manifeste {
   readonly id: string;
   readonly version: string;
   readonly mode: AdapterMode;
+  /**
+   * LA VERSION DE L'ÉNUMÉRATION DE PROFILS contre laquelle ce manifeste a été
+   * produit (ADR 0004). Elle dit ce que l'auteur CROYAIT viser.
+   */
+  readonly profilesVersion: string;
+  /**
+   * L'EMPREINTE de cette énumération. Elle dit ce qu'il visait VRAIMENT.
+   *
+   * ⚠️ POURQUOI LES DEUX. Un adaptateur fédéré produit son manifeste DANS UN
+   *    AUTRE DÉPÔT, contre sa propre copie de `core/profiles`. Si les deux
+   *    divergent, le manifeste reste syntaxiquement valide et les noms de
+   *    profils restent connus : la divergence ne se voit NULLE PART. Une
+   *    version inchangée avec une empreinte changée est précisément le cas
+   *    qu'on veut voir — quelqu'un a modifié l'énumération sans en changer la
+   *    version.
+   *
+   * ⚠️ CE CHAMP CHANGE TOUTES LES EMPREINTES DE MANIFESTE. Il a été ajouté au
+   *    lot 1b, AVANT tout épinglage réel (`adapters.lock.json` n'existe encore
+   *    qu'en exemple). Après le premier épinglage, l'ajouter aurait exigé de
+   *    revalider à la main chaque `manifestSha` de chaque dépôt tiers.
+   */
+  readonly profilesSha: string;
   readonly profiles: readonly string[];
   /** NOMS de secrets seulement. Jamais une valeur — voir `ReferenceSecret`. */
   readonly secrets: readonly string[];
@@ -174,11 +199,6 @@ function commeObjet(valeur: ValeurJson): ObjetJson | null {
   return valeur as ObjetJson;
 }
 
-/** `true` si le JSON Schema est un objet FERMÉ (`additionalProperties: false`). */
-function estSchemaFerme(schema: ValeurJson): boolean {
-  return commeObjet(schema)?.["additionalProperties"] === false;
-}
-
 /** Les noms de propriétés d'un JSON Schema d'objet, ou `[]`. */
 export function proprietesDuSchema(schema: ValeurJson): readonly string[] {
   const proprietes = commeObjet(schema)?.["properties"];
@@ -228,8 +248,14 @@ function analyserCompaction(
 export function analyserDefinition<TProfile extends string>(
   definition: DefinitionAdaptateur<TProfile>,
   profilsConnus: readonly TProfile[],
+  sceauProfils: SceauProfils,
 ): AnalyseDefinition {
   const anomalies: string[] = [];
+
+  // Le sceau est vérifié DANS SA FORME ici, et confronté au socle par le
+  // REGISTRE. Un sceau malformé produirait un manifeste qu'aucun registre ne
+  // pourrait admettre, et l'auteur ne l'apprendrait qu'au déploiement.
+  anomalies.push(...verifierFormeDuSceau(sceauProfils));
 
   if (!MOTIF_ID.test(definition.id)) {
     anomalies.push(
@@ -367,16 +393,30 @@ export function analyserDefinition<TProfile extends string>(
     const entree = schemaJson(outil.input, "input", `${ou}, schéma d'entrée`, anomalies);
     const sortie = schemaJson(outil.output, "output", `${ou}, schéma de sortie`, anomalies);
 
-    if (entree !== null && !estSchemaFerme(entree)) {
+    if (entree !== null) {
       // § 09 : le schéma d'entrée est `.strict()`, pour qu'un champ
       // d'autorisation glissé dans la charge utile soit un REFUS VISIBLE et non
       // un silence. Un schéma ouvert accepterait `peutVoirAppels: true` sans
       // broncher, et le contrôle 7 du harnais n'aurait plus rien à mordre.
-      anomalies.push(
-        `${ou} : schéma d'entrée OUVERT (\`additionalProperties\` ≠ false). Un champ ` +
-          "d'autorisation glissé dans la charge utile y passerait en silence. Fermez le " +
-          "schéma avec `.strict()`.",
-      );
+      //
+      // ⚠️ LA MÊME FONCTION QUE LE REGISTRE. `core/registry` applique cette
+      //    analyse-ci à un manifeste venu d'AILLEURS (ADR 0003) ; l'écrire deux
+      //    fois ferait deux définitions de « fermé », et le build accepterait
+      //    ce que l'admission refuse — ou l'inverse, ce qui est pire.
+      const fermeture = analyserFermeture(entree);
+      if (!fermeture.ferme) {
+        anomalies.push(
+          `${ou} : schéma d'entrée OUVERT — ${
+            fermeture.ouverts.length > 0
+              ? `${String(fermeture.ouverts.length)} schéma(s) d'objet sans fermeture (${fermeture.ouverts.join(", ")})`
+              : fermeture.profondeurDepassee
+                ? "profondeur maximale dépassée : le socle ne peut pas conclure"
+                : "aucun schéma d'objet à fermer n'a été trouvé"
+          }. Un champ d'autorisation glissé dans la charge utile y passerait en ` +
+            `silence. Fermez le schéma avec \`.strict()\` (\`additionalProperties: false\`) ` +
+            "ou `unevaluatedProperties: false`.",
+        );
+      }
     }
 
     if (entree === null || sortie === null) continue;
@@ -444,6 +484,8 @@ export function analyserDefinition<TProfile extends string>(
       id: definition.id,
       version: definition.version,
       mode: definition.mode,
+      profilesVersion: sceauProfils.version,
+      profilesSha: sceauProfils.empreinte,
       profiles: [...definition.profiles],
       secrets: definition.secrets.map((secret) => secret.name),
       tools: outils,
@@ -475,8 +517,9 @@ export class ErreurManifeste extends Error {
 export function construireManifeste<TProfile extends string>(
   definition: DefinitionAdaptateur<TProfile>,
   profilsConnus: readonly TProfile[],
+  sceauProfils: SceauProfils,
 ): Manifeste {
-  const { manifeste, verdict } = analyserDefinition(definition, profilsConnus);
+  const { manifeste, verdict } = analyserDefinition(definition, profilsConnus, sceauProfils);
   if (manifeste === null) throw new ErreurManifeste(verdict.anomalies);
   return manifeste;
 }

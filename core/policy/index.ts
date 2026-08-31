@@ -15,6 +15,7 @@
  */
 
 export {
+  analyserReference,
   analyserScope,
   GENRES_SCOPE,
   nomQualifie,

@@ -37,8 +37,42 @@ export {
   calculerSelfHash,
   canonicalStringify,
   champsCouverts,
+  messageDeLigne,
   sha256Hex,
 } from "./canonique.js";
+
+export {
+  DROITS_TABLE,
+  ROLE_ECRITURE,
+  ROLE_PURGE,
+  TABLE_JOURNAL,
+  aLeDroit,
+  cheminDuScriptDeDroits,
+  lireDroits,
+  lireDroitsDuJournal,
+} from "./droits-sql.js";
+export type { DroitTable, DroitsDunRole, LectureDroits } from "./droits-sql.js";
+
+/**
+ * ADR 0002, seconde moitié : QUELLE OPÉRATION PASSE SOUS QUEL RÔLE.
+ *
+ * `droits-sql.js` lit le script ; celui-ci porte la décision côté CODE et la
+ * confronte au script. Sans lui, la séparation n'existait que dans le cluster —
+ * donc pas du tout sur une base où le script n'aurait pas été appliqué.
+ */
+export {
+  ACTEURS_JOURNAL,
+  DROIT_EXIGE,
+  ErreurRoleJournal,
+  OPERATIONS_DE_LACTEUR,
+  OPERATIONS_EXCLUSIVES,
+  OPERATIONS_JOURNAL,
+  ROLE_DE_LACTEUR,
+  droitsInterdits,
+  roleDe,
+  verifierSeparationDesRoles,
+} from "./roles.js";
+export type { ActeurJournal, OperationJournal, VerdictSeparation } from "./roles.js";
 export type { ChampCouvert, ChampExclu, JsonValeur } from "./canonique.js";
 
 export {
@@ -51,7 +85,18 @@ export {
 } from "./cloture.js";
 export type { ChargeCloture } from "./cloture.js";
 
-export { ErreurContenuJournal, verifierAucunContenu } from "./contenu.js";
+export {
+  ErreurContenuJournal,
+  // Ce que l'étape 14 LIT pour normaliser `recordIds` et borner `failedSources`
+  // en amont — plutôt que d'en recopier les règles et de laisser les copies
+  // diverger. `MAX_SEGMENTS_ALPHABETIQUES` est l'une des quatre bornes que Will
+  // a laissées en l'état le 2026-08-31 : elle reste ici, et ici seulement.
+  MAX_SEGMENTS_ALPHABETIQUES,
+  bornesDeListeDuJournal,
+  compteSegmentsAlphabetiques,
+  estIdentifiantDeJournal,
+  verifierAucunContenu,
+} from "./contenu.js";
 export type { VerdictContenu } from "./contenu.js";
 
 export {
@@ -65,7 +110,7 @@ export type { AppelJournalise, EnteteAppel } from "./journal.js";
 export { JournalMemoire } from "./memoire.js";
 
 export { HORLOGE_SYSTEME } from "./ports.js";
-export type { ArgHasher, Horloge, JournalStore } from "./ports.js";
+export type { ArgHasher, Horloge, JournalStore, ScelleurJournal } from "./ports.js";
 
 export {
   ErreurPurge,
@@ -86,6 +131,7 @@ export type {
 
 export {
   ARG_HASH_NON_LU,
+  ARG_HASH_NON_VALIDE,
   DECISIONS,
   FORME_EMPREINTE,
   LONGUEUR_EMPREINTE,

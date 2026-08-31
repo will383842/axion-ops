@@ -344,6 +344,28 @@ model OpsAudit {
   /// réduit rien.
   argHash String
 
+  /// L'`argHash` de la ligne porte-t-il l'empreinte de la valeur VALIDÉE ?
+  ///
+  /// ⚠️ SANS CETTE COLONNE, `argHash` PORTAIT DEUX POPULATIONS SANS QUE RIEN NE
+  ///    LES DISTINGUE. Le § 11 veut une ligne pour TOUTE terminaison, refus
+  ///    compris — donc aussi pour les refus ANTÉRIEURS à l'étape 8, qui n'ont
+  ///    que la charge BRUTE à empreindre. Toutes les autres lignes portent
+  ///    l'empreinte de la valeur VALIDÉE, la seule à laquelle le jeton de
+  ///    confirmation du § 20 se lie. Les deux DIFFÈRENT dès qu'un schéma porte
+  ///    un `.default()`, une coercition ou une transformation.
+  ///
+  ///    Le lot 1 s'en remettait à `stepDenied < 8` pour deviner laquelle on
+  ///    lisait. C'était une INFÉRENCE, pas une donnée : elle est fausse pour
+  ///    une terminaison par exception (`stepDenied` est nul), et elle
+  ///    s'effondrerait si l'ordre des étapes du § 11 changeait.
+  ///
+  /// ⚠️ ELLE ENTRE DANS L'EMPREINTE CHAÎNÉE (`core/audit/canonique.ts`,
+  ///    `CHAMPS_COUVERTS`). C'est pour cela qu'elle est posée MAINTENANT :
+  ///    aucune base ne tourne, aucune ligne n'existe. Ajoutée après le premier
+  ///    chaînage réel, elle aurait exigé une clôture de rupture et deux régimes
+  ///    de vérification cohabitant dans le même journal.
+  argHashValidated Boolean
+
   /// § 12, règle 3 — CE N'EST PAS ANONYME. C'est de la PSEUDONYMISATION : un
   /// identifiant `CalendlyEvent` mène à une fiche portant `cancelUrl` et
   /// `rescheduleUrl` — des URL-capacités. Purgés à la même échéance que

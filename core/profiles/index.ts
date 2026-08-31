@@ -30,6 +30,7 @@ export {
   PROFILES,
   PROFILES_VERSION,
   PROFILE_NAMES,
+  SCEAU_PROFILS,
   declarerProfils,
   empreinteProfils,
   estProfil,
@@ -37,7 +38,13 @@ export {
   trierProfils,
 } from "./profiles.js";
 
-export type { Profil, ProfileName, ProfilsDeclares, ToolContext } from "./profiles.js";
+export type {
+  Profil,
+  ProfileName,
+  ProfilsDeclares,
+  SceauProfils,
+  ToolContext,
+} from "./profiles.js";
 
 export {
   CIBLE_TOKENS_DEFINITIONS,

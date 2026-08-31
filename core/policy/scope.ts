@@ -8,6 +8,47 @@
  * ⚠️ CE FICHIER NE DÉCIDE D'AUCUN NIVEAU. Il répond à une seule question :
  *    « ce scope couvre-t-il cet outil ? ». Le choix du niveau est dans
  *    `niveau.ts`, et il n'emploie PAS la spécificité — voir plus bas.
+ *
+ * ═══ LA QUESTION LAISSÉE OUVERTE AU LOT 1, ET TRANCHÉE ICI ═══
+ *
+ * Le lot 1 a mesuré que ce dossier RÉPONDAIT DEUX FOIS à un même fait, et que
+ * les deux réponses se contredisaient sur une politique parfaitement lisible :
+ *
+ *  · `niveauApplique()` répondait par APPARTENANCE aux trois scopes que
+ *    `scopesCouvrants()` FABRIQUE depuis une `ReferenceOutil` ;
+ *  · `plancherDuScope()` / `scopeDomine()` répondaient par ANALYSE de la
+ *    grammaire, en découpant le scope sur son DERNIER point.
+ *
+ * Le même outil `zoho.mail.send` recevait `libre` ou `brouillon` selon la
+ * fonction interrogée, sans qu'une seule anomalie soit levée — donc là où aucun
+ * fail-closed ne venait refermer l'écart. Et la contradiction atteignait le TRI
+ * resserrage / desserrage, c'est-à-dire le chemin qui ne demande NI second
+ * facteur NI `ops:policy`.
+ *
+ * ⚖️ CE QUI EST TRANCHÉ, ET ÉCRIT ICI UNE SEULE FOIS : la grammaire du § 12
+ *    est `*` | `adapterId.*` | `adapterId.tool`. Un scope se lit donc de gauche
+ *    à droite, et le PREMIER point sépare l'adaptateur du reste — DONC
+ *    `adapterId` NE CONTIENT AUCUN POINT.
+ *
+ *    Ce n'est pas un arbitrage de confort : c'est déjà la règle que
+ *    `core/adapter-kit/manifest.ts` applique au BUILD (`MOTIF_ID` n'admet que
+ *    des minuscules, des chiffres et des tirets), tandis que le nom d'outil,
+ *    lui, admet les points (`MOTIF_NOM_OUTIL`). `zoho.mail.send` est donc
+ *    l'outil `mail.send` de l'adaptateur `zoho`, et `zoho.mail.*` n'est PAS un
+ *    scope : c'est un identifiant d'adaptateur à points, que rien ne peut
+ *    enregistrer.
+ *
+ *    La règle est REVALIDÉE À L'ENREGISTREMENT — un manifeste vient d'un autre
+ *    dépôt, souvent d'un autre langage, et `lireManifesteRecu` n'exigeait
+ *    jusqu'ici qu'un `id` non vide. Voir le refus `id_innommable_par_un_scope`
+ *    de `core/registry/enregistrer.ts`, qui INTERROGE `analyserScope()` plutôt
+ *    que de retaper la règle.
+ *
+ * ⚠️ IL N'Y A PLUS QU'UNE SEULE DÉRIVATION : `scopeCouvre()` passe désormais
+ *    par `scopeDomine()`, donc par `analyserScope()`. `scopesCouvrants()`
+ *    subsiste pour l'écran de politique — elle ÉNUMÈRE, elle ne DÉCIDE plus —
+ *    et une garde exhaustive de `scope.spec.ts` confronte les deux sur tout le
+ *    produit scopes × références qu'elle sait fabriquer.
  */
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -18,23 +59,21 @@
  * L'outil appelé, tel que la chaîne d'appel le connaît : un adaptateur et un
  * nom LOCAL d'outil.
  *
- * ⚠️ ÉCART RELEVÉ — le § 12 donne `ops_tool.name` ET `ops_tool.adapterId` sans
- *    dire si `name` porte déjà le préfixe de l'adaptateur. Les exemples du CDC
- *    (`zoho.mail.send`, `ops.policy.tighten`) sont qualifiés, et l'adaptateur
- *    du § 27 s'appelle `zoho.mail` — donc `adapterId` contient lui-même des
- *    points. Plutôt que de deviner, ce module :
- *      · ne DÉCOUPE jamais un nom qualifié à l'aveugle ;
- *      · accepte les deux conventions par `referenceDepuisNom()` ;
- *      · teste la couverture en FABRIQUANT les scopes qui couvriraient la
- *        référence, jamais en analysant le scope pour en extraire un adapterId.
- *    Un découpage naïf sur le premier point ferait de `zoho.mail.send` un outil
- *    « mail.send » de l'adaptateur « zoho » — et un scope `zoho.mail.*` cesserait
- *    de couvrir quoi que ce soit, EN SILENCE.
+ * Le § 12 donne `ops_tool.name` ET `ops_tool.adapterId` sans dire si `name`
+ * porte déjà le préfixe de l'adaptateur. `referenceDepuisNom()` accepte donc
+ * les deux conventions — mais il ne DEVINE pas où couper : il RECONNAÎT un
+ * préfixe qui correspond exactement à l'`adapterId` reçu.
+ *
+ * ⚠️ `adapterId` NE CONTIENT AUCUN POINT (voir l'en-tête du fichier). Une
+ *    référence qui en porterait un ne serait nommable par AUCUN scope : c'est
+ *    `analyserReference()` qui le dit, et `niveauApplique()` qui replie sur le
+ *    niveau le plus strict plutôt que de calculer sur un nom ambigu.
  */
 export interface ReferenceOutil {
-  /** `ops_tool.adapterId`. Peut contenir des points (`zoho.mail`). */
+  /** `ops_tool.adapterId`. UN SEUL SEGMENT — jamais de point (`zoho`). */
   readonly adapterId: string;
-  /** Nom LOCAL de l'outil, sans le préfixe de l'adaptateur (`send`). */
+  /** Nom LOCAL de l'outil, sans le préfixe de l'adaptateur. Les points y sont
+   *  admis (`mail.send`), et c'est ce qui rend le découpage non ambigu. */
   readonly tool: string;
 }
 
@@ -99,6 +138,23 @@ function segmentsValides(dotted: string, minimum: number): boolean {
 }
 
 /**
+ * Le motif de refus d'un identifiant d'adaptateur, ÉCRIT UNE SEULE FOIS.
+ *
+ * Il DIT la règle plutôt que de constater un échec : un message qui se
+ * contenterait de « n'est pas un identifiant d'adaptateur » laisserait
+ * quelqu'un croire qu'il a mal orthographié son nom, alors que la cause
+ * ordinaire est un identifiant à points — la lecture même que ce module vient
+ * d'écarter. Le § 15 veut qu'une erreur dise quoi faire.
+ */
+function motifAdapterId(scope: string, adapterId: string, position: string): string {
+  const cause = adapterId.includes(".")
+    ? "il porte un point, et un identifiant d'adaptateur n'en porte aucun — " +
+      "le PREMIER point d'un scope sépare l'adaptateur de l'outil"
+    : "attendu des minuscules, des chiffres, un tiret ou un souligné";
+  return `scope « ${scope} » — ${position} (« ${adapterId} ») n'est pas un identifiant d'adaptateur : ${cause}`;
+}
+
+/**
  * Analyse un scope selon la grammaire du § 12. Un scope hors grammaire est
  * INVALIDE, pas « ne couvre rien » : la nuance décide de tout, parce qu'une
  * ligne ignorée est une ligne qui n'impose plus son niveau — donc un
@@ -116,10 +172,10 @@ export function analyserScope(scope: string): AnalyseScope {
 
   if (scope.endsWith(".*")) {
     const adapterId = scope.slice(0, -2);
-    if (!segmentsValides(adapterId, 1)) {
+    if (!SEGMENT.test(adapterId)) {
       return {
         valide: false,
-        motif: `scope « ${scope} » — la partie avant « .* » n'est pas un identifiant d'adaptateur`,
+        motif: motifAdapterId(scope, adapterId, "la partie avant « .* »"),
       };
     }
     return { valide: true, genre: "adaptateur", adapterId, tool: null };
@@ -132,16 +188,41 @@ export function analyserScope(scope: string): AnalyseScope {
     };
   }
 
-  if (!segmentsValides(scope, 2)) {
+  // ═══ LE DÉCOUPAGE, ET LE SEUL ═══
+  //
+  // Sur le PREMIER point, jamais sur le dernier. C'est la conséquence directe
+  // de la décision écrite en tête de fichier — `adapterId` ne contient aucun
+  // point —, et c'est ce qui rend le découpage NON AMBIGU : `zoho.mail.send`
+  // est l'outil `mail.send` de l'adaptateur `zoho`, et il n'a pas d'autre
+  // lecture. Tant que le découpage se faisait sur le DERNIER point, le même nom
+  // avait deux lectures défendables, et les deux fonctions de ce dossier en
+  // choisissaient chacune une.
+  const premierPoint = scope.indexOf(".");
+  if (premierPoint === -1) {
     return {
       valide: false,
       motif: `scope « ${scope} » — attendu « adapterId.tool », soit au moins deux segments`,
     };
   }
 
-  const segments = scope.split(".");
-  const tool = segments[segments.length - 1] ?? "";
-  const adapterId = segments.slice(0, -1).join(".");
+  const adapterId = scope.slice(0, premierPoint);
+  const tool = scope.slice(premierPoint + 1);
+
+  if (!SEGMENT.test(adapterId)) {
+    return {
+      valide: false,
+      motif: motifAdapterId(scope, adapterId, "la partie avant le PREMIER point"),
+    };
+  }
+  if (!segmentsValides(tool, 1)) {
+    return {
+      valide: false,
+      motif:
+        `scope « ${scope} » — « ${tool} » n'est pas un nom d'outil : minuscules, chiffres, ` +
+        "tiret, souligné, segments séparés par des points",
+    };
+  }
+
   return { valide: true, genre: "outil", adapterId, tool };
 }
 
@@ -163,9 +244,52 @@ export function specificite(genre: GenreScope): number {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
+ * La référence est-elle NOMMABLE par un scope ?
+ *
+ * ⚠️ LA VÉRIFICATION EST UN ALLER-RETOUR, PAS UNE SECONDE ÉCRITURE DE LA RÈGLE.
+ *    On fabrique le nom qualifié, on le REDONNE À `analyserScope()`, et on
+ *    exige qu'il en ressorte identique. C'est ce qui rend cette fonction
+ *    incapable de diverger de la grammaire : elle n'en connaît rien, elle
+ *    l'interroge. Une règle retapée ici serait la TROISIÈME dérivation d'un
+ *    fait qui n'en supporte déjà pas deux.
+ *
+ * Ce qu'elle attrape en pratique : un `adapterId` à points (`zoho.mail`), qui
+ * produit un nom qualifié parfaitement valide — `zoho.mail.send` — mais qui se
+ * relit comme l'outil `mail.send` de l'adaptateur `zoho`. La politique posée
+ * sur un adaptateur s'appliquerait alors à un autre, EN SILENCE.
+ */
+export function analyserReference(reference: ReferenceOutil): AnalyseScope {
+  const analyse = analyserScope(nomQualifie(reference));
+  if (!analyse.valide) return analyse;
+
+  if (
+    analyse.genre !== "outil" ||
+    analyse.adapterId !== reference.adapterId ||
+    analyse.tool !== reference.tool
+  ) {
+    return {
+      valide: false,
+      motif:
+        `référence d'outil « ${reference.adapterId} » / « ${reference.tool} » : son nom ` +
+        `qualifié « ${nomQualifie(reference)} » se relit « ${analyse.adapterId ?? "*"} » / ` +
+        `« ${analyse.tool ?? "*"} ». Un identifiant d'adaptateur ne porte aucun point.`,
+    };
+  }
+
+  return analyse;
+}
+
+/**
  * Les TROIS scopes — et eux seuls — qui couvrent cette référence. Fabriqués
  * depuis la référence, jamais recopiés : ajouter un genre à la grammaire se
  * voit ici et nulle part ailleurs.
+ *
+ * ⚠️ ELLE ÉNUMÈRE, ELLE NE DÉCIDE PLUS. `scopeCouvre()` passait par elle
+ *    jusqu'au lot 1b ; c'était la seconde dérivation, et elle contredisait
+ *    `scopeDomine()`. Elle sert désormais à l'écran de politique — « quelles
+ *    lignes pourrais-je poser sur cet outil ? » — et la garde exhaustive de
+ *    `scope.spec.ts` vérifie qu'elle rend exactement les scopes que
+ *    `scopeCouvre()` reconnaît.
  */
 export function scopesCouvrants(reference: ReferenceOutil): readonly string[] {
   return ["*", `${reference.adapterId}.*`, nomQualifie(reference)];
@@ -174,11 +298,22 @@ export function scopesCouvrants(reference: ReferenceOutil): readonly string[] {
 /**
  * Ce scope couvre-t-il cet outil ?
  *
- * Rendu par appartenance à `scopesCouvrants()` : aucune analyse du scope n'est
- * nécessaire, donc aucune ambiguïté sur l'endroit où couper `zoho.mail.send`.
+ * ═══ UNE SEULE DÉRIVATION ═══
+ *
+ * Couvrir un outil, c'est dominer son nom qualifié. Les deux questions n'en
+ * font qu'une, et il n'y a donc qu'un seul code pour y répondre —
+ * `analyserScope()`, via `scopeDomine()`. Tant que cette fonction répondait par
+ * APPARTENANCE à `scopesCouvrants()`, elle donnait une réponse que l'analyse de
+ * la grammaire démentait, sans qu'aucune anomalie ne soit levée.
+ *
+ * ⚠️ RÉFÉRENCE HORS GRAMMAIRE : `scopeDomine` rend `false`, donc « ne couvre
+ *    pas ». Lu tel quel, c'est un RETRAIT de plancher, c'est-à-dire un
+ *    élargissement — l'exact inverse du fail-closed. L'appelant doit donc
+ *    traiter `analyserReference()` AVANT, et `niveauApplique()` le fait :
+ *    référence illisible ⇒ niveau le plus strict, avec sa raison.
  */
 export function scopeCouvre(scope: string, reference: ReferenceOutil): boolean {
-  return scopesCouvrants(reference).includes(scope);
+  return scopeDomine(scope, nomQualifie(reference));
 }
 
 /**

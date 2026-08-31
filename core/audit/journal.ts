@@ -34,10 +34,15 @@
 import type { AppelStep, Effect, PolicyLevel } from "../types.js";
 import { verifierAucunContenu, ErreurContenuJournal } from "./contenu.js";
 import { calculerSelfHash } from "./canonique.js";
-import type { Horloge, JournalStore } from "./ports.js";
+import type { Horloge, JournalStore, ScelleurJournal } from "./ports.js";
 import { HORLOGE_SYSTEME } from "./ports.js";
 import type { ContenuLigne, Decision, LigneEcrite, Outcome, Terminaison } from "./vocabulaire.js";
-import { ARG_HASH_NON_LU, OUTIL_INCONNU, VERSION_INCONNUE } from "./vocabulaire.js";
+import {
+  ARG_HASH_NON_LU,
+  ARG_HASH_NON_VALIDE,
+  OUTIL_INCONNU,
+  VERSION_INCONNUE,
+} from "./vocabulaire.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Erreurs
@@ -80,16 +85,29 @@ export class ErreurJournalIndisponible extends Error {
  * contenu (§ 31), chaîner, écrire.
  */
 export class Journal {
+  readonly #scelleur: ScelleurJournal;
   readonly #store: JournalStore;
   readonly #horloge: Horloge;
 
-  constructor(store: JournalStore, horloge: Horloge = HORLOGE_SYSTEME) {
+  /**
+   * @param scelleur ADR 0002 — le scellement de la chaîne. PREMIER PARAMÈTRE et
+   *   OBLIGATOIRE : un scelleur optionnel, avec un repli en SHA nu quand il
+   *   manque, annulerait la protection pour quiconque oublierait de le passer,
+   *   et personne ne le verrait. Fourni par `core/sceau`.
+   */
+  constructor(scelleur: ScelleurJournal, store: JournalStore, horloge: Horloge = HORLOGE_SYSTEME) {
+    this.#scelleur = scelleur;
     this.#store = store;
     this.#horloge = horloge;
   }
 
   get horloge(): Horloge {
     return this.#horloge;
+  }
+
+  /** Le scelleur, pour que `verifierChaine` vérifie CE journal-ci. */
+  get scelleur(): ScelleurJournal {
+    return this.#scelleur;
   }
 
   /**
@@ -111,7 +129,7 @@ export class Journal {
 
     try {
       const prevHash = await this.#store.dernierSelfHash();
-      const selfHash = calculerSelfHash(prevHash, contenu);
+      const selfHash = calculerSelfHash(this.#scelleur, prevHash, contenu);
       return await this.#store.ajouter({ ...contenu, prevHash, selfHash });
     } catch (erreur: unknown) {
       throw new ErreurJournalIndisponible(erreur);
@@ -252,19 +270,29 @@ export async function avecJournal<T>(
   // ANTÉRIEURES à l'étape 8 gardent l'empreinte brute — elles n'ont rien
   // d'autre.
   //
-  // 🔴 DETTE ASSUMÉE, à porter à Will (voir `docs/ETAT.md`). La colonne
-  //    `ops_audit.argHash` porte donc DEUX populations : les empreintes brutes
-  //    (terminaisons avant l'étape 8) et les empreintes validées (toutes les
-  //    autres). Elles ne se distinguent par rien dans la ligne. Le remède est
-  //    une colonne booléenne de plus sur `ops_audit` — mais elle entrerait dans
-  //    l'empreinte chaînée du § 12, donc elle change le calcul du journal :
-  //    c'est une décision à prendre avant le premier chaînage réel, pas un
-  //    détail à glisser. Le `stepDenied` de la ligne permet, en attendant, de
-  //    savoir laquelle des deux on lit : `stepDenied < 8` ⇒ empreinte brute.
+  // ✅ DETTE SOLDÉE AU LOT 1b. La colonne `ops_audit.argHash` porte DEUX
+  //    populations — les empreintes brutes (terminaisons avant l'étape 8) et
+  //    les empreintes validées (toutes les autres) — et plus rien ne les
+  //    distinguait dans la ligne. `stepDenied < 8` servait d'indice ; ce
+  //    n'était qu'une INFÉRENCE, fausse pour une terminaison par exception, où
+  //    `stepDenied` est nul.
+  //
+  //    `ops_audit.argHashValidated` porte désormais le fait lui-même. Il ENTRE
+  //    DANS L'EMPREINTE CHAÎNÉE, ce qui n'était possible qu'avant le premier
+  //    chaînage réel : aucune base ne tourne, aucune ligne n'existe.
+  //
+  // ⚠️ LES DEUX VALEURS BOUGENT ENSEMBLE, ET C'EST L'AFFINEUR QUI LES BOUGE.
+  //    Deux affectations séparées se seraient désynchronisées au premier
+  //    chemin oublié — une empreinte validée annoncée brute, ou l'inverse, sans
+  //    qu'aucune garde ne puisse le voir : les deux champs sont libres l'un de
+  //    l'autre pour le compilateur. Ici, il n'existe qu'UN endroit où
+  //    l'empreinte change, et il change le drapeau dans le même geste.
   let argHashCourant = entete.argHash;
+  let argHashValideCourant: boolean = ARG_HASH_NON_VALIDE;
 
   const affiner: AffineurDEntete = (argHashValide: string): void => {
     argHashCourant = argHashValide;
+    argHashValideCourant = true;
   };
 
   const ecrire = async (terminaison: Terminaison<T> | null): Promise<LigneEcrite> => {
@@ -284,6 +312,7 @@ export async function avecJournal<T>(
       decision,
       stepDenied,
       argHash: argHashCourant,
+      argHashValidated: argHashValideCourant,
       recordIds: succes?.recordIds ?? [],
       partialSources: succes?.partialSources ?? [],
       durationMs: Math.max(0, fin.getTime() - debut.getTime()),

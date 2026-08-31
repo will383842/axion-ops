@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { sha256Hex } from "./canonique.js";
 import type { ChargeCloture } from "./cloture.js";
 import { construireCloture, decoderCharge, encoderCharge, estLigneDeCloture } from "./cloture.js";
-import { HorlogeFigee, construireJournal, empreinteEtrangere } from "./fixtures.js";
+import {
+  SCELLEUR_TEMOIN,
+  HorlogeFigee,
+  construireJournal,
+  empreinteEtrangere,
+} from "./fixtures.js";
 import { Journal } from "./journal.js";
 import type { JournalMemoire } from "./memoire.js";
 import { ErreurPurge, cumulAncrageTete, dateLimiteRetention, preparerPurge } from "./purge.js";
@@ -47,7 +52,7 @@ async function purger(
     at: new Date(Date.UTC(2026, 8, 1)),
   });
 
-  const journal = new Journal(store, new HorlogeFigee());
+  const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
   await journal.journaliser(preparee.cloture);
   const retirees = store.supprimerIntervalle(preparee.seqDepuis, preparee.seqJusqua);
 
@@ -63,7 +68,7 @@ describe("core/audit — un saut ancré par une clôture reste valide (§ 31)", 
     const store = await construireJournal(12);
     const { retirees, charge } = await purger(store, 4);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
 
     console.info(
       `[garde purge ancrée] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -90,7 +95,7 @@ describe("core/audit — un saut ancré par une clôture reste valide (§ 31)", 
     await purger(store, 4);
     const { charge } = await purger(store, 5);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
 
     console.info(
       `[garde purge · cumul] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -126,7 +131,7 @@ describe("core/audit — un saut ancré par une clôture reste valide (§ 31)", 
     const rangDeC1 = avantSeconde.findIndex(estLigneDeCloture);
     const { charge } = await purger(store, rangDeC1 + 1);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
 
     console.info(
       `[garde purge · cascade] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -160,7 +165,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     if (premiere === undefined || quatrieme === undefined) throw new Error("témoin mal fabriqué");
 
     store.supprimerIntervalle(premiere.seq, quatrieme.seq);
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
 
     console.info(
       `[témoin sans clôture] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -194,7 +199,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       empreinteDerniereConservee: pointe.selfHash,
     };
 
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     await journal.journaliser({
       at: new Date(Date.UTC(2026, 8, 1)),
       principal: "system",
@@ -207,6 +212,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       decision: "autorisé",
       stepDenied: null,
       argHash: ARG_HASH,
+      argHashValidated: true,
       recordIds: [],
       partialSources: encoderCharge(chargeFaussee),
       durationMs: 0,
@@ -214,7 +220,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     });
     store.supprimerIntervalle(premiere.seq, quatrieme.seq);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
     console.info(
       `[témoin mauvaise borne] ${String(rapport.clotures)} clôture(s) lue(s), ` +
         `${String(rapport.sautsAncres)} saut(s) ancré(s)`,
@@ -247,7 +253,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       empreinteDerniereConservee: empreinteEtrangere("autre-purge"),
     };
 
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     await journal.journaliser({
       at: new Date(Date.UTC(2026, 8, 1)),
       principal: "system",
@@ -260,6 +266,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       decision: "autorisé",
       stepDenied: null,
       argHash: ARG_HASH,
+      argHashValidated: true,
       recordIds: [],
       partialSources: encoderCharge(charge),
       durationMs: 0,
@@ -267,7 +274,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     });
     store.supprimerIntervalle(premiere.seq, seconde.seq);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
     console.info(
       `[témoin clôture recopiée] genres : ${rapport.anomalies.map((a) => a.genre).join(", ")}`,
     );
@@ -282,7 +289,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     const premiere = toutes[0];
     if (premiere === undefined) throw new Error("témoin mal fabriqué");
 
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     await journal.journaliser({
       at: new Date(Date.UTC(2026, 8, 1)),
       principal: "system",
@@ -295,6 +302,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       decision: "autorisé",
       stepDenied: null,
       argHash: ARG_HASH,
+      argHashValidated: true,
       recordIds: [],
       partialSources: ["cloture=9", "n-importe-quoi"],
       durationMs: 0,
@@ -302,7 +310,7 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
     });
     store.supprimerIntervalle(premiere.seq, premiere.seq);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
     expect(rapport.clotures).toBe(1);
     expect(rapport.anomalies.map((a) => a.genre)).toContain("clôture-illisible");
     expect(rapport.valide).toBe(false);
@@ -377,6 +385,7 @@ describe("core/audit — `preparerPurge` refuse bruyamment", () => {
       cumulAnterieur: 0,
       empreinteDerniereConservee: pointe.selfHash,
       argHash: ARG_HASH,
+      argHashValidated: true,
       at: new Date(Date.UTC(2026, 8, 1)),
     };
 
@@ -461,7 +470,7 @@ describe("core/audit — une ancre venue d'une autre tranche est ré-admise, jam
     if (cloture === undefined) throw new Error("témoin mal fabriqué : pas de clôture");
 
     const tete = restant.slice(0, 4);
-    const rapport = verifierChaine(tete, { ancresConnues: [cloture] });
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, tete, { ancresConnues: [cloture] });
 
     console.info(
       `[garde ancre hors tranche] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -505,14 +514,16 @@ describe("core/audit — une ancre venue d'une autre tranche est ré-admise, jam
       // Recopiée d'ailleurs : ce n'est la pointe d'aucun des deux journaux.
       empreinteDerniereConservee: empreinteEtrangere("pointe-inventée"),
     };
-    const journalEtranger = new Journal(autre, new HorlogeFigee());
+    const journalEtranger = new Journal(SCELLEUR_TEMOIN, autre, new HorlogeFigee());
     await journalEtranger.journaliser(
       construireCloture(chargeForgee, ARG_HASH, new Date(Date.UTC(2026, 8, 1))),
     );
     const clotureForgee = autre.toutes().find(estLigneDeCloture);
     if (clotureForgee === undefined) throw new Error("témoin mal fabriqué");
 
-    const rapport = verifierChaine(store.toutes(), { ancresConnues: [clotureForgee] });
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes(), {
+      ancresConnues: [clotureForgee],
+    });
 
     console.info(
       `[témoin ancre forgée] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -539,8 +550,10 @@ describe("core/audit — une ancre venue d'une autre tranche est ré-admise, jam
     const cloture = store.toutes().find(estLigneDeCloture);
     if (cloture === undefined) throw new Error("témoin mal fabriqué");
 
-    const adosse = verifierChaine(store.toutes().slice(0, 4), { ancresConnues: [cloture] });
-    const autoportant = verifierChaine(store.toutes());
+    const adosse = verifierChaine(SCELLEUR_TEMOIN, store.toutes().slice(0, 4), {
+      ancresConnues: [cloture],
+    });
+    const autoportant = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
 
     console.info(
       `[garde ancres hors tranche] adossée : ${String(adosse.ancresHorsTranche)} · ` +
@@ -612,13 +625,13 @@ describe("core/audit — la charge ne peut pas mentir sur la tranche qu'elle att
       empreinteDerniereConservee: pointe.selfHash,
     };
 
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     await journal.journaliser(
       construireCloture(menteuse, ARG_HASH, new Date(Date.UTC(2026, 8, 1))),
     );
     store.supprimerIntervalle(premiere.seq, quatrieme.seq);
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
     console.info(
       `[garde seq attestés] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
         `genres : ${rapport.anomalies.map((a) => a.genre).join(", ")}`,

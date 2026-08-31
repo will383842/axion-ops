@@ -30,6 +30,19 @@ import { definirOutil } from "./types.js";
 import type { DefinitionAdaptateur, DefinitionOutil } from "./types.js";
 
 const PROFILS = ["courrier", "dev", "admin", "audit"] as const;
+
+/**
+ * Un SCEAU DE PROFILS témoin (ADR 0004).
+ *
+ * ⚠️ IL EST ÉCRIT ICI, ET C'EST DÉLIBÉRÉ. `core/adapter-kit` ne dépend PAS de
+ *    `core/profiles` — c'est tout le sens de `profils.ts`, qui déclare le
+ *    contrat sans le contenir. Importer `SCEAU_PROFILS` dans ces gardes
+ *    créerait la dépendance que le module refuse, et l'empreinte réelle du
+ *    socle n'apprendrait rien de plus : ce qui est éprouvé ici, c'est que le
+ *    sceau REÇU voyage jusqu'au manifeste, pas sa valeur.
+ */
+const SCEAU_TEMOIN = { version: "1.0.0", empreinte: "a".repeat(64) } as const;
+
 type Profil = (typeof PROFILS)[number];
 
 const CLES = lireClesDAutorisation();
@@ -82,6 +95,7 @@ function entreeAvecSources(
   return {
     definition,
     profilsConnus: PROFILS,
+    sceauProfils: SCEAU_TEMOIN,
     fichiers: sources,
     plancherFichiers: sources.length,
     symbolesAutorises: ["listInbox"],

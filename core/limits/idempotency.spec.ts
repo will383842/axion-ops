@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { creerCalculArgHash, type CoffreArgHash } from "./arg-hash.js";
+import { DepotIdempotenceEnMemoire } from "./memoire.js";
 import {
   MODES_IDEMPOTENCE,
   STATUTS_IDEMPOTENCE,
@@ -12,7 +13,6 @@ import {
   type DepotIdempotence,
   type LigneIdempotence,
   type ModeIdempotence,
-  type StatutIdempotence,
 } from "./idempotency.js";
 
 /**
@@ -32,73 +32,6 @@ const coffre: CoffreArgHash = {
 
 /** On n'emploie que `correspond` : la comparaison à temps constant, la vraie. */
 const calcul = creerCalculArgHash(coffre);
-
-/** Un dépôt d'idempotence en mémoire, qui JOURNALISE l'ordre des appels reçus. */
-class DepotIdemEnMemoire implements DepotIdempotence {
-  readonly lignes = new Map<string, LigneIdempotence>();
-  readonly appels: string[] = [];
-
-  private static cle(tool: string, key: string): string {
-    return `${tool}::${key}`;
-  }
-
-  poser(ligne: LigneIdempotence): void {
-    this.lignes.set(DepotIdemEnMemoire.cle(ligne.tool, ligne.key), ligne);
-  }
-
-  insererSiAbsente(ligne: LigneIdempotence): Promise<boolean> {
-    this.appels.push("insererSiAbsente");
-    const cle = DepotIdemEnMemoire.cle(ligne.tool, ligne.key);
-    if (this.lignes.has(cle)) return Promise.resolve(false);
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  lire(tool: string, key: string): Promise<LigneIdempotence | null> {
-    this.appels.push("lire");
-    return Promise.resolve(this.lignes.get(DepotIdemEnMemoire.cle(tool, key)) ?? null);
-  }
-
-  remplacerSiPerimee(ligne: LigneIdempotence, maintenant: Date): Promise<boolean> {
-    this.appels.push("remplacerSiPerimee");
-    const cle = DepotIdemEnMemoire.cle(ligne.tool, ligne.key);
-    const existante = this.lignes.get(cle);
-    if (existante === undefined) return Promise.resolve(false);
-    if (existante.expiresAt.getTime() > maintenant.getTime()) return Promise.resolve(false);
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  reprendreSiEchouee(ligne: LigneIdempotence): Promise<boolean> {
-    this.appels.push("reprendreSiEchouee");
-    const cle = DepotIdemEnMemoire.cle(ligne.tool, ligne.key);
-    const existante = this.lignes.get(cle);
-    if (existante === undefined || existante.status !== "failed") return Promise.resolve(false);
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  cloturer(params: {
-    readonly tool: string;
-    readonly key: string;
-    readonly status: Extract<StatutIdempotence, "done" | "failed">;
-    readonly resultRef: string | null;
-    readonly completedAt: Date;
-  }): Promise<void> {
-    this.appels.push("cloturer");
-    const cle = DepotIdemEnMemoire.cle(params.tool, params.key);
-    const existante = this.lignes.get(cle);
-    if (existante !== undefined) {
-      this.lignes.set(cle, {
-        ...existante,
-        status: params.status,
-        resultRef: params.resultRef,
-        completedAt: params.completedAt,
-      });
-    }
-    return Promise.resolve();
-  }
-}
 
 function ligne(
   partiel: Partial<LigneIdempotence> & { readonly argHash: string },
@@ -244,7 +177,7 @@ describe("core/limits — étape 13, l'insertion verrouille", () => {
     // préalable suivie d'une insertion laisse deux appels concurrents s'insérer
     // tous deux : la clé primaire en refuse un, mais seulement si on la laisse
     // trancher.
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     const verdict = await reserver(demande(depot, ARG_A));
 
     console.info(`[garde ordre] appels au dépôt : ${depot.appels.join(" → ")}`);
@@ -254,7 +187,7 @@ describe("core/limits — étape 13, l'insertion verrouille", () => {
   });
 
   it("ne touche PAS au dépôt quand l'outil ne déduplique pas (`n/a`)", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     const verdict = await reserver(demande(depot, ARG_A, "n/a"));
 
     console.info(`[garde n/a] ${String(depot.appels.length)} appel(s) au dépôt mesuré(s)`);
@@ -264,7 +197,7 @@ describe("core/limits — étape 13, l'insertion verrouille", () => {
   });
 
   it("exige la clé dans `ctx`, jamais dans `input`", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     let mesures = 0;
     for (const cle of [null, "", "   "]) {
       const verdict = await reserver(demande(depot, ARG_A, "key", cle));
@@ -294,7 +227,7 @@ describe("core/limits — une clé réutilisée avec un autre argument", () => {
     // mesurer ici.
     let mesures = 0;
     for (const statut of STATUTS_IDEMPOTENCE) {
-      const depot = new DepotIdemEnMemoire();
+      const depot = new DepotIdempotenceEnMemoire();
       depot.poser(ligne({ argHash: ARG_A, status: statut }));
 
       const verdict = await reserver(demande(depot, ARG_B));
@@ -312,7 +245,7 @@ describe("core/limits — une clé réutilisée avec un autre argument", () => {
   });
 
   it("sert le résultat mémorisé quand l'argument est LE MÊME", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     depot.poser(ligne({ argHash: ARG_A, status: "done", resultRef: "ref-42" }));
 
     const verdict = await reserver(demande(depot, ARG_A));
@@ -325,7 +258,7 @@ describe("core/limits — une clé réutilisée avec un autre argument", () => {
   it("laisse la clé LIBRE une fois le TTL passé, même pour un autre argument", async () => {
     // La borne de la règle : « même clé, autre argument = invalid_input » ne
     // vaut que DANS la fenêtre du TTL. Au-delà, la ligne est morte.
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     depot.poser(
       ligne({
         argHash: ARG_A,
@@ -347,7 +280,7 @@ describe("core/limits — une clé réutilisée avec un autre argument", () => {
 
 describe("core/limits — le statut décide, une fois l'argument reconnu", () => {
   it("rend `conflict` sur un appel identique EN COURS", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     depot.poser(ligne({ argHash: ARG_A, status: "in_flight", completedAt: null, resultRef: null }));
 
     const verdict = await reserver(demande(depot, ARG_A));
@@ -358,7 +291,7 @@ describe("core/limits — le statut décide, une fois l'argument reconnu", () =>
   });
 
   it("REPREND une réservation `failed` — un échec ne doit pas condamner la clé", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     depot.poser(ligne({ argHash: ARG_A, status: "failed", resultRef: null }));
 
     const verdict = await reserver(demande(depot, ARG_A));
@@ -368,7 +301,7 @@ describe("core/limits — le statut décide, une fois l'argument reconnu", () =>
   });
 
   it("refuse de re-servir un outil `non-rejouable` déjà exécuté", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     depot.poser(ligne({ argHash: ARG_A, status: "done", resultRef: "ref-42" }));
 
     const verdict = await reserver(demande(depot, ARG_A, "non-rejouable"));
@@ -380,7 +313,7 @@ describe("core/limits — le statut décide, une fois l'argument reconnu", () =>
   });
 
   it("clôt la réservation, et le rejeu suivant sert alors le résultat", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     const premiere = await reserver(demande(depot, ARG_A));
     expect(premiere.type).toBe("reservee");
 
@@ -400,7 +333,7 @@ describe("core/limits — le statut décide, une fois l'argument reconnu", () =>
   });
 
   it("ne clôt rien quand rien n'a été réservé", async () => {
-    const depot = new DepotIdemEnMemoire();
+    const depot = new DepotIdempotenceEnMemoire();
     const close = await cloturer({
       depot,
       reservation: { type: "sans-objet" },

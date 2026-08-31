@@ -8,6 +8,9 @@
  * Chaque port porte le module qui doit le fournir. Tant qu'il n'est pas fourni,
  * `core/audit` compile, ses gardes tournent sur des doubles, et rien n'est
  * réimplémenté en double dans le socle.
+ *
+ * ⚠️ « Trois ports » depuis le lot 1 ; QUATRE depuis le lot 1b, qui a ajouté le
+ *    SCELLEUR du chaînage (ADR 0002).
  */
 
 import type { LigneAAjouter, LigneAudit, LigneEcrite } from "./vocabulaire.js";
@@ -125,3 +128,56 @@ export const HORLOGE_SYSTEME: Horloge = {
     return new Date();
   },
 };
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Port 4 — LE SCELLEMENT DE LA CHAÎNE (FOURNI PAR `core/sceau`)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ADR 0002 — `ops_audit.selfHash` est un HMAC, PAS UN SHA NU.
+ *
+ * ═══ CE QUE CE PORT RÉPARE ═══
+ *
+ * Un chaînage par SHA nu ne rend une réécriture visible qu'à la condition que
+ * l'attaquant ne puisse pas RECALCULER la chaîne. N'importe qui peut recalculer
+ * un SHA nu : retirer une tranche puis recalculer chaque empreinte donnait un
+ * journal amputé sur lequel `verifierChaine` rendait `valide = true`. Les
+ * quatre gardes de troncature de ce module ne mordaient donc que sur un
+ * attaquant disposant de `DELETE` SANS `INSERT` — une répartition de droits que
+ * rien n'écrivait nulle part. Elle est écrite depuis
+ * (`prisma/sql/0001-ops-audit-append-only.sql`) ; ce port en est la défense en
+ * profondeur.
+ *
+ * ⚠️ `core/audit` NE L'IMPLÉMENTE PAS, et `derivation.spec.ts` échoue si un
+ *    fichier de ce dossier se met à appeler `createHmac`. Cette garde-là reste
+ *    en service : son motif — une seconde implémentation de l'`argHash` serait
+ *    une seconde clé pour le MÊME usage — n'a pas cessé d'être vrai. Le
+ *    scellement est un usage DIFFÉRENT, avec une clé différente, et il vit dans
+ *    un module à part plutôt que derrière une exception écrite à la main.
+ *
+ * ⚠️ SYNCHRONE, contrairement à `ArgHasher`. La vérification d'une archive de
+ *    douze mois (§ 31) parcourt le journal ligne à ligne ; un scellement
+ *    asynchrone ferait de `verifierChaine` une chaîne de promesses par ligne.
+ *    La clé est donc lue UNE FOIS, à la composition — ce que la nature de cette
+ *    clé autorise : une rotation ne CONTINUE pas la chaîne, elle la casse.
+ *
+ * FOURNI PAR : `core/sceau`.
+ */
+export interface ScelleurJournal {
+  /**
+   * Scelle un message et rend une empreinte hexadécimale de 64 caractères.
+   *
+   * @throws jamais ici — la clé a été validée à la construction du scelleur,
+   *   qui échoue BRUYAMMENT si elle manque, est vide ou est trop courte.
+   */
+  sceller(message: string): string;
+
+  /**
+   * Compare deux sceaux À TEMPS CONSTANT.
+   *
+   * Une comparaison `===` fuit, par son temps de retour, le nombre de
+   * caractères de tête devinés — de quoi construire un sceau cible caractère
+   * par caractère quand cette comparaison garde l'intégrité du journal.
+   */
+  correspond(a: string, b: string): boolean;
+}

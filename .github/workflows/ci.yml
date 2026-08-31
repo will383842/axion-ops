@@ -1,0 +1,149 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#  axion-ops — LA CHAÎNE D'INTÉGRATION
+#
+#  ⚠️ RÈGLE ABSOLUE DE CE FICHIER, ET ELLE EST GARDÉE PAR DU CODE :
+#     AUCUNE étape ne porte `continue-on-error`. AUCUNE étape n'est
+#     conditionnée à la présence d'un secret. AUCUNE commande n'écrase son code
+#     de retour (`|| true`, `set +e`). `ops/workflow.spec.ts` lit CE FICHIER et
+#     rougit sur chacune de ces trois formes.
+#
+#     Ce n'est pas une précaution abstraite. Le dépôt voisin a affirmé pendant
+#     des mois que ses budgets bloquaient les PR ; ils portaient tous
+#     `continue-on-error: true`, et aucune PR n'a jamais rougi. Une revue
+#     entière a raisonné sur cette fausse sécurité.
+#
+#  ⚠️ UN SECRET ABSENT FAIT ÉCHOUER L'ÉTAPE, IL NE LA FAIT PAS SAUTER.
+#     GitHub Actions substitue une CHAÎNE VIDE à un secret inconnu : une étape
+#     écrite `if: ${{ secrets.X != '' }}` DISPARAÎT le jour où le nom est mal
+#     orthographié, où le secret est révoqué, ou sur une exécution issue d'une
+#     fourche — et la chaîne reste verte. La liste des secrets requis vit dans
+#     `ops/secrets.ts` ; l'étape « Secrets requis » échoue si l'un manque.
+#     Elle est VIDE aujourd'hui, et c'est un fait : le socle ne sort pas de la
+#     machine. La mécanique, elle, est en service dès maintenant.
+#
+#  ⚠️ AUCUN APPEL RÉSEAU SORTANT AU-DELÀ DU REGISTRE DE PAQUETS. Le schéma
+#     Prisma est validé contre une URL STUB (`stub.invalid`, RFC 2606) : aucune
+#     base ne tourne ici, et aucun identifiant d'infrastructure n'entre dans ce
+#     dépôt PUBLIC.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Moindre privilège : la chaîne LIT le dépôt, elle n'y écrit rien et ne publie
+# rien. Sans ce bloc, le jeton d'exécution reçoit les droits par défaut du
+# dépôt, qui sont plus larges que ce qu'aucune étape ci-dessous ne demande.
+permissions:
+  contents: read
+
+# Une exécution par référence. Une exécution remplacée est ANNULÉE, et un
+# `cancelled` n'est pas un succès : il ne satisfait aucune protection de branche.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # L'URL STUB du § 23 : `prisma validate` exige une variable, et rien ici ne
+  # se connecte. `stub.invalid` est un domaine réservé (RFC 2606) — il ne
+  # résout nulle part, par construction.
+  DATABASE_URL: postgresql://stub:stub@stub.invalid:5432/stub
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  1 · LES GATES
+  # ═══════════════════════════════════════════════════════════════════════════
+  gates:
+    name: Gates — types, style, format, gardes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # `--frozen-lockfile` : un `pnpm-lock.yaml` qui ne correspond plus au
+      # `package.json` FAIT ÉCHOUER l'installation. Sans ce drapeau, pnpm
+      # résoudrait autre chose que ce qui a été relu, et la chaîne éprouverait
+      # un arbre de dépendances que personne n'a vu.
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      # ─────────────────────────────────────────────────────────────────────
+      #  Les secrets AVANT tout le reste : une étape qui manquerait de son
+      #  secret doit échouer ICI, pas trois étapes plus loin sur un message
+      #  qui parle d'autre chose.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Secrets requis — un secret absent fait ÉCHOUER, il ne fait pas sauter
+        run: pnpm exec tsx ops/verifier-secrets.ts
+
+      - name: Types
+        run: pnpm typecheck
+
+      - name: Style
+        run: pnpm lint
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Schéma Prisma
+        run: pnpm prisma:validate
+
+      # `pnpm test` porte les gardes du socle, y compris le harnais de
+      # conformité du § 09 (`core/adapter-kit/conformite.spec.ts`) et la garde
+      # qui lit CE FICHIER (`ops/workflow.spec.ts`).
+      - name: Gardes
+        run: pnpm test
+
+      # Le harnais de conformité appliqué aux ADAPTATEURS RÉELLEMENT PRÉSENTS.
+      # Il ANNONCE combien il en a mesurés, et il échoue si le dépôt et le
+      # verrou ne parlent pas du même ensemble.
+      - name: Harnais de conformité — adaptateurs
+        run: pnpm exec tsx ops/conformite-ci.ts
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  2 · LE TÉMOIN — CETTE CHAÎNE SAIT-ELLE ROUGIR ?
+  #
+  #  Un dépôt dont la chaîne n'a jamais rougi est une chaîne dont personne ne
+  #  sait si elle regarde. Ce job fabrique un défaut pour CHACUNE des quatre
+  #  gates, exige que chacune ÉCHOUE, puis retire le défaut et exige que
+  #  chacune redevienne verte. Si une seule gate reste verte sur son défaut,
+  #  CE job échoue — et il n'a aucun `continue-on-error` pour l'en empêcher.
+  # ═══════════════════════════════════════════════════════════════════════════
+  temoin:
+    name: Témoin — la chaîne sait rougir
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: gates
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      - name: Fabriquer un défaut par gate, et exiger que chacune rougisse
+        run: pnpm exec tsx ops/temoin-ci.ts

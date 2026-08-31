@@ -54,7 +54,13 @@ export function clesDuManifeste(): readonly string[] {
   // Les méthodes sont appelées SUR le kit, jamais déstructurées : une méthode
   // détachée de son objet perd son `this`, et un kit qui gagnerait un jour un
   // état interne se casserait ici en silence.
-  const kitTemoin = creerAdapterKit(["temoin"] as const);
+  // Le sceau témoin n'est PAS celui du socle, et n'a pas à l'être : ce kit ne
+  // sert qu'à DÉRIVER LA LISTE DES CLÉS d'un manifeste, jamais à en admettre
+  // un. Y passer `SCEAU_PROFILS` ferait croire à un lien qui n'existe pas.
+  const kitTemoin = creerAdapterKit(["temoin"] as const, {
+    version: "0.0.0",
+    empreinte: "0".repeat(64),
+  });
   const temoin = kitTemoin.defineAdapter({
     id: "temoin",
     version: "0.0.0",

@@ -186,8 +186,10 @@ nouvelle**. Vérifié le 2026-08-30 sur la version installée ici :
 
 ## Écarts relevés dans le cahier des charges
 
-Trois points où le CDC se contredit ou laisse un trou. Ils sont laissés
-**visibles** dans le code plutôt que bouchés en silence.
+Cinq points où le CDC se contredit ou laisse un trou. Ils sont laissés
+**visibles** dans le code plutôt que bouchés en silence. Les deux derniers ont
+été **tranchés au lot 1b** (ADR 0005) ; l'écart avec le document, lui, subsiste
+et reste écrit.
 
 1. **`destructive` : scope ou effect ?** Le § 19.2 le range dans le tableau des
    _scopes_ ; le § 09 énumère `ctx.scopes` en **cinq** valeurs, sans lui.
@@ -208,6 +210,21 @@ Trois points où le CDC se contredit ou laisse un trou. Ils sont laissés
    devra trancher : colonnes supplémentaires, ou manifeste épinglé conservé tel
    quel et relu. Sans l'un des deux, l'étape 14 (compaction) et le § 13.3 n'ont
    pas de source.
+
+4. **`vault_locked` n'est pas au § 15 — il y est ajouté ici.** Le § 23 exige que
+   **tout appel d'outil soit refusé** coffre verrouillé, et le § 32 en fait un
+   critère de recette du lot 1 ; le tableau du § 15 n'énumère que treize codes.
+   `ERROR_CODES` en porte **quatorze**. Les deux voisins possibles mentiraient :
+   `internal` ne dit pas quoi faire ensuite, `upstream_unavailable` accuse un
+   adaptateur parfaitement joignable. Voir **ADR 0005**.
+
+5. **Ce refus n'est aucune des quatorze étapes du § 11 : il les précède.**
+   L'outil existe, il est activé, il est au profil — c'est le socle qui ne peut
+   rien déchiffrer. Sans numéro, `ops_audit.stepDenied` reste nul et la ligne
+   devient indiscernable d'une exception, ce qui vide la métrique du § 24 après
+   **chaque déploiement** (le repli du § 23 fait démarrer verrouillé). D'où
+   l'**étape 0** dans `APPEL_STEPS`, et `AppelStep = 0 | 1 | … | 14`. Voir
+   **ADR 0005**.
 
 ---
 

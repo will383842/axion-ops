@@ -17,8 +17,26 @@
 import { sha256Hex } from "./canonique.js";
 import { Journal } from "./journal.js";
 import { JournalMemoire } from "./memoire.js";
-import type { Horloge } from "./ports.js";
+import { creerScelleurJournal } from "../sceau/index.js";
+import type { Horloge, ScelleurJournal } from "./ports.js";
 import type { ContenuLigne, LigneAudit } from "./vocabulaire.js";
+
+/**
+ * LA CLÉ DE SCELLEMENT DES TÉMOINS (ADR 0002).
+ *
+ * ⚠️ CE N'EST PAS UN SECRET, ET ELLE NE DOIT JAMAIS EN DEVENIR UN. Elle est
+ *    écrite en clair dans un dépôt PUBLIC, et son nom le dit. Elle existe pour
+ *    qu'une garde puisse fabriquer un journal, le mutiler, et vérifier que la
+ *    vérification rougit — un test qui ne peut pas mutiler ne prouve rien.
+ *
+ *    Le socle, lui, refuse de démarrer sans une clé du coffre : `core/sceau`
+ *    n'a AUCUN repli, précisément pour qu'une clé de témoin ne puisse jamais
+ *    servir en production.
+ */
+export const CLE_DE_TEMOIN = "cle-de-temoin-axion-ops-jamais-en-production";
+
+/** Le scelleur des témoins. Construit une fois, partagé par les fixtures. */
+export const SCELLEUR_TEMOIN: ScelleurJournal = creerScelleurJournal(CLE_DE_TEMOIN);
 
 /** Origine des horodatages témoins : fixe, pour que les empreintes soient stables. */
 export const INSTANT_ZERO = Date.UTC(2026, 7, 30, 12, 0, 0);
@@ -61,6 +79,10 @@ export function contenuTemoin(rang: number, surcharge: Partial<ContenuLigne> = {
     // bonne FORME — 64 hexadécimaux — puisque c'est tout ce que `core/audit`
     // vérifie, et tout ce qu'il a le droit de vérifier (§ 12, règle 2).
     argHash: sha256Hex(`argHash-temoin-${String(rang)}`),
+    // Une ligne témoin représente un appel ALLÉ AU BOUT : son empreinte porte
+    // donc la valeur validée. Les gardes qui veulent l'autre population la
+    // demandent par surcharge, et c'est le but même de ce champ.
+    argHashValidated: true,
     recordIds: [],
     partialSources: [],
     durationMs: 12,
@@ -77,8 +99,9 @@ export function contenuTemoin(rang: number, surcharge: Partial<ContenuLigne> = {
 export async function construireJournal(
   nombre: number,
   store: JournalMemoire = new JournalMemoire(),
+  scelleur: ScelleurJournal = SCELLEUR_TEMOIN,
 ): Promise<JournalMemoire> {
-  const journal = new Journal(store, new HorlogeFigee());
+  const journal = new Journal(scelleur, store, new HorlogeFigee());
   for (let rang = 0; rang < nombre; rang += 1) {
     await journal.journaliser(contenuTemoin(rang));
   }

@@ -301,6 +301,33 @@ export const ERROR_CODES = [
   "conflict",
   /** Le reste. Dit un identifiant de corrélation, JAMAIS UNE TRACE DE PILE. */
   "internal",
+  /**
+   * ⚠️ AJOUTÉ HORS DU TABLEAU DU § 15 — ÉCART DU CDC, TRANCHÉ AU LOT 1b.
+   *
+   * Le § 23 exige que « tout appel d'outil soit REFUSÉ » quand le coffre est
+   * verrouillé, et le § 32 en fait un critère de recette du lot 1. Le tableau
+   * du § 15, lui, n'énumère que treize codes et n'en donne aucun pour ce cas.
+   * Les deux ne peuvent pas être vrais ensemble.
+   *
+   * Les trois issues possibles, et pourquoi c'est celle-ci :
+   *
+   *  1. rendre `internal` — mentirait sur la cause, et le § 15 exige que le
+   *     message dise ce qu'il faut faire ensuite. « Déverrouille le coffre »
+   *     n'est pas ce que promet `internal`, qui ne rend qu'un identifiant de
+   *     corrélation ;
+   *  2. rendre `upstream_unavailable` — mentirait autrement : l'adaptateur est
+   *     parfaitement joignable, c'est LE SOCLE qui refuse ;
+   *  3. nommer le code manquant.
+   *
+   * `core/vault/erreurs.ts` portait déjà `CODE_COFFRE_VERROUILLE` HORS de cette
+   * union, en écrivant : « la Recette l'y ajoutera, et cette constante
+   * deviendra alors un simple alias typé ». C'est fait ; elle en est un, et le
+   * compilateur tient désormais les deux ensemble.
+   *
+   * Le message dit : quel ÉTAT (absent ≠ verrouillé — ils ne se réparent pas du
+   * même geste) et où déverrouiller. Voir ADR 0005 et README, « Écarts relevés ».
+   */
+  "vault_locked",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -339,8 +366,36 @@ export interface EtapeAppel {
 }
 
 /**
- * LES QUATORZE ÉTAPES, DANS L'ORDRE. La v5 en présentait onze comme
- * exhaustives ; il en manquait trois, et deux étaient dans le mauvais ordre.
+ * LES QUATORZE ÉTAPES DU § 11, DANS L'ORDRE, PRÉCÉDÉES DE L'ÉTAPE 0. La v5 en
+ * présentait onze comme exhaustives ; il en manquait trois, et deux étaient
+ * dans le mauvais ordre.
+ *
+ * ═══ POURQUOI UNE ÉTAPE 0 — ÉCART DU CDC, TRANCHÉ AU LOT 1b ═══
+ *
+ * Le § 23 exige que « tout appel d'outil soit refusé » coffre verrouillé. Ce
+ * refus N'EST AUCUNE des quatorze étapes : il les PRÉCÈDE TOUTES. L'outil
+ * existe (étape 6), il est au profil actif (étape 7), les scopes suffisent
+ * (étape 5) — c'est le socle qui ne peut rien déchiffrer.
+ *
+ * Or le § 11 pose que toute terminaison, refus compris, écrit une ligne
+ * d'`ops_audit` portant LE NUMÉRO de l'étape qui a refusé. Un refus sans numéro
+ * n'a rien à inscrire dans `stepDenied` : la colonne reste nulle, et la ligne
+ * devient indiscernable d'une exception (`decision: "interrompu"`). La
+ * métrique du § 24 perd alors, sans un mot, la totalité des appels refusés
+ * pendant qu'un coffre attendait sa clé — c'est-à-dire, d'après le § 23,
+ * APRÈS CHAQUE DÉPLOIEMENT.
+ *
+ * D'où le numéro ZÉRO, et pas quinze : il dit l'ORDRE réel. Un quinzième rang
+ * ferait croire à un contrôle tardif, et casserait la lecture
+ * « `stepDenied` croissant = on est allé plus loin dans la chaîne » dont
+ * `core/audit/journal.ts` se sert déjà (« `stepDenied < 8` ⇒ empreinte brute »).
+ *
+ * ⚠️ CONSÉQUENCE À CONNAÎTRE : `AppelStep` vaut désormais `0 | 1 | … | 14`, et
+ *    ZÉRO EST UNE VALEUR LÉGITIME. Tout code qui testerait `if (stepDenied)`
+ *    plutôt que `if (stepDenied !== null)` effacerait ce refus-là. Aucun n'existe
+ *    au moment où cette étape est ajoutée — vérifié — mais c'est le piège que
+ *    ce numéro apporte, et il est écrit ici pour qu'il ne soit pas découvert
+ *    plus tard dans une métrique creuse. Voir ADR 0005.
  *
  * DEUX RÈGLES SOUS CE TABLEAU (§ 11) :
  *
@@ -361,6 +416,18 @@ export interface EtapeAppel {
  *    identité, ni principal.
  */
 export const APPEL_STEPS = [
+  {
+    numero: 0,
+    cle: "coffre",
+    libelle: "Coffre ouvert — sinon TOUT appel d'outil est refusé (§ 23)",
+    refus: "vault_locked",
+    // Aucun statut HTTP : le § 23 fait rendre 200 au healthcheck coffre
+    // verrouillé, précisément pour que le déploiement ne rougisse pas. Le refus
+    // vit dans la réponse JSON-RPC, pas dans le statut.
+    statutHttp: null,
+    // S'applique à TOUS les transports : un coffre fermé l'est aussi en stdio.
+    httpSeul: false,
+  },
   {
     numero: 1,
     cle: "host",
@@ -476,9 +543,12 @@ export const APPEL_STEPS = [
 ] as const satisfies readonly EtapeAppel[];
 
 /**
- * Le numéro d'étape, en union fermée `1 | 2 | … | 14`, DÉRIVÉ de `APPEL_STEPS`.
+ * Le numéro d'étape, en union fermée `0 | 1 | … | 14`, DÉRIVÉ de `APPEL_STEPS`.
  * C'est le type de `ops_audit.stepDenied`. Ajouter une étape au tableau élargit
  * le type sans qu'aucune liste ne soit à retoucher.
+ *
+ * ⚠️ `0` EN FAIT PARTIE (étape « coffre », § 23) : `if (stepDenied)` effacerait
+ *    ce refus-là. Le test qui convient est `stepDenied !== null`.
  */
 export type AppelStep = (typeof APPEL_STEPS)[number]["numero"];
 

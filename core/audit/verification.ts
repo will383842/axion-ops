@@ -32,6 +32,7 @@
 import { calculerSelfHash, ErreurCanonique } from "./canonique.js";
 import type { ChargeCloture } from "./cloture.js";
 import { decoderCharge, estLigneDeCloture } from "./cloture.js";
+import type { ScelleurJournal } from "./ports.js";
 import type { LigneAudit } from "./vocabulaire.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -163,18 +164,18 @@ interface Ancre {
  * attestant exactement son propre chaînon. C'est la seule porte d'entrée des
  * ancres, dans la tranche comme hors d'elle.
  */
-function admettreAncre(ligne: LigneAudit): Ancre | null {
+function admettreAncre(scelleur: ScelleurJournal, ligne: LigneAudit): Ancre | null {
   if (!estLigneDeCloture(ligne)) return null;
 
   let recalculee: string;
   try {
-    recalculee = calculerSelfHash(ligne.prevHash, ligne);
+    recalculee = calculerSelfHash(scelleur, ligne.prevHash, ligne);
   } catch {
     // Une clôture dont les champs ne se sérialisent pas n'ancre rien : la passe 1
     // le signale déjà par `ligne-non-sérialisable`.
     return null;
   }
-  if (recalculee !== ligne.selfHash) return null;
+  if (!scelleur.correspond(recalculee, ligne.selfHash)) return null;
 
   const charge = decoderCharge(ligne.partialSources);
   if (charge === null) return null;
@@ -222,6 +223,7 @@ function ancreCadreLeTrou(
  *    « ordonner par `seq`, JAMAIS par `at` »). L'ordre non croissant est signalé.
  */
 export function verifierChaine(
+  scelleur: ScelleurJournal,
   lignes: readonly LigneAudit[],
   options?: Partial<OptionsVerification>,
 ): RapportVerification {
@@ -234,7 +236,7 @@ export function verifierChaine(
   // `empreinteDerniereConservee` au `prevHash`. Une ancre admise sur parole
   // rendrait vert un journal tronqué sans la moindre clôture.
   for (const ligne of options?.ancresConnues ?? []) {
-    const admise = admettreAncre(ligne);
+    const admise = admettreAncre(scelleur, ligne);
     if (admise !== null) {
       ancres.push(admise);
       ancresHorsTranche += 1;
@@ -258,13 +260,13 @@ export function verifierChaine(
 
     let attendue: string | null = null;
     try {
-      attendue = calculerSelfHash(ligne.prevHash, ligne);
+      attendue = calculerSelfHash(scelleur, ligne.prevHash, ligne);
     } catch (erreur: unknown) {
       const motif = erreur instanceof ErreurCanonique ? erreur.message : "erreur inconnue";
       anomalies.push({ genre: "ligne-non-sérialisable", seq: ligne.seq, detail: motif });
     }
 
-    const ligneIntegre = attendue !== null && attendue === ligne.selfHash;
+    const ligneIntegre = attendue !== null && scelleur.correspond(attendue, ligne.selfHash);
 
     if (attendue !== null && !ligneIntegre) {
       anomalies.push({
@@ -295,7 +297,7 @@ export function verifierChaine(
       } else {
         // L'admission passe par la MÊME porte que les ancres d'une autre
         // tranche : un seul chemin, donc un seul jeu de conditions à tenir.
-        const admise = admettreAncre(ligne);
+        const admise = admettreAncre(scelleur, ligne);
         if (admise !== null) ancres.push(admise);
       }
     }

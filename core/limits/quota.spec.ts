@@ -16,7 +16,8 @@ import {
   warnAtParDefaut,
   type CleLimite,
 } from "./config.js";
-import { consommer, type DemandeIncrement, type DepotQuota, type EtatCompteur } from "./quota.js";
+import { DepotQuotaEnMemoire } from "./memoire.js";
+import { consommer, type DepotQuota } from "./quota.js";
 
 /**
  * Gardes de `core/limits/` — les quotas (§ 12 et § 26).
@@ -26,61 +27,6 @@ import { consommer, type DemandeIncrement, type DepotQuota, type EtatCompteur } 
  */
 
 const MAINTENANT = new Date("2026-08-30T14:03:25.000Z");
-
-/**
- * Un dépôt de quota EN MÉMOIRE, qui respecte le contrat d'atomicité de
- * l'interface (l'incrément et sa condition sont indissociables ici, puisque
- * rien n'est concurrent dans un test).
- */
-class DepotEnMemoire implements DepotQuota {
-  readonly compteurs = new Map<string, number>();
-  readonly increments: string[] = [];
-  readonly decrements: string[] = [];
-  /** Fait échouer la compensation, pour éprouver le chemin d'anomalie. */
-  compensationCassee = false;
-
-  private static cle(d: Pick<DemandeIncrement, "window" | "tool" | "principal">): string {
-    return `${d.window}::${d.tool}::${d.principal}`;
-  }
-
-  valeur(d: Pick<DemandeIncrement, "window" | "tool" | "principal">): number {
-    return this.compteurs.get(DepotEnMemoire.cle(d)) ?? 0;
-  }
-
-  incrementerSiSousLePlafond(demande: DemandeIncrement): Promise<EtatCompteur> {
-    const cle = DepotEnMemoire.cle(demande);
-    const courant = this.compteurs.get(cle) ?? 0;
-    if (courant + 1 > demande.limit) {
-      return Promise.resolve({
-        accepte: false,
-        count: courant,
-        limit: demande.limit,
-        warnAt: demande.warnAt,
-        resetAt: demande.resetAt,
-      });
-    }
-    this.compteurs.set(cle, courant + 1);
-    this.increments.push(cle);
-    return Promise.resolve({
-      accepte: true,
-      count: courant + 1,
-      limit: demande.limit,
-      warnAt: demande.warnAt,
-      resetAt: demande.resetAt,
-    });
-  }
-
-  decrementer(cle: Pick<DemandeIncrement, "window" | "tool" | "principal">): Promise<void> {
-    if (this.compensationCassee) {
-      return Promise.reject(new Error("compensation indisponible (témoin)"));
-    }
-    const k = DepotEnMemoire.cle(cle);
-    const courant = this.compteurs.get(k) ?? 0;
-    this.compteurs.set(k, Math.max(0, courant - 1));
-    this.decrements.push(k);
-    return Promise.resolve();
-  }
-}
 
 function demandeType(effect: Effect, depot: DepotQuota): Parameters<typeof consommer>[0] {
   return {
@@ -266,7 +212,7 @@ describe("core/limits — la fenêtre de comptage", () => {
 
 describe("core/limits — étape 12, débit et quota", () => {
   it("accepte jusqu'au plafond mesuré, puis refuse — et ANNONCE la limite mesurée", async () => {
-    const depot = new DepotEnMemoire();
+    const depot = new DepotQuotaEnMemoire();
     const plafondRafale = LIMITES_DE_DEPART.rafale.limite;
 
     let acceptes = 0;
@@ -299,7 +245,7 @@ describe("core/limits — étape 12, débit et quota", () => {
     // compteur d'outil, puis on mesure que la rafale, incrémentée d'abord, est
     // bien rendue. Sans compensation, un appelant bloqué à l'étape 12 brûlerait
     // son quota de rafale à chaque tentative refusée.
-    const depot = new DepotEnMemoire();
+    const depot = new DepotQuotaEnMemoire();
     const plafondOutil = LIMITES_DE_DEPART.outilEcriture.limite;
 
     // 20 écritures : le compteur d'outil est à son plafond. La rafale (10/10 s)
@@ -338,7 +284,7 @@ describe("core/limits — étape 12, débit et quota", () => {
   });
 
   it("rapporte l'anomalie quand la compensation échoue, et ne masque pas le 429", async () => {
-    const depot = new DepotEnMemoire();
+    const depot = new DepotQuotaEnMemoire();
     const plafondOutil = LIMITES_DE_DEPART.outilEcriture.limite;
     for (let i = 0; i < plafondOutil; i += 1) {
       await consommer({
@@ -363,7 +309,7 @@ describe("core/limits — étape 12, débit et quota", () => {
   });
 
   it("alerte au seuil, avant de refuser — le compteur porte son dénominateur", async () => {
-    const depot = new DepotEnMemoire();
+    const depot = new DepotQuotaEnMemoire();
     const seuil = warnAtParDefaut(LIMITES_DE_DEPART.rafale.limite);
 
     let premiereAlerte = 0;

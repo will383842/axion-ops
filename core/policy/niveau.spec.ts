@@ -13,7 +13,7 @@ import type { ReferenceOutil } from "./scope.js";
  */
 
 const T0 = new Date("2026-08-30T12:00:00.000Z");
-const OUTIL: ReferenceOutil = { adapterId: "zoho.mail", tool: "send" };
+const OUTIL: ReferenceOutil = { adapterId: "zoho", tool: "mail.send" };
 
 function ligne(
   partiel: Partial<LignePolitique> & { id: string; level: PolicyLevel },
@@ -71,7 +71,7 @@ describe("core/policy/niveau — deux scopes qui se recouvrent", () => {
       ligne({
         id: "adaptateur",
         level: "confirmé",
-        scope: "zoho.mail.*",
+        scope: "zoho.*",
         expiresAt: new Date(T0.getTime() + 3_600_000),
       }),
     ];
@@ -352,12 +352,12 @@ describe("core/policy/niveau — le plancher d'un scope", () => {
   it("ne retient que les lignes qui DOMINENT le scope, pas celles qu'il domine", () => {
     const lignes = [
       ligne({ id: "global", level: "confirmé", scope: "*" }),
-      ligne({ id: "adaptateur", level: "brouillon", scope: "zoho.mail.*" }),
+      ligne({ id: "adaptateur", level: "brouillon", scope: "zoho.*" }),
       // Celle-ci est plus étroite que le scope visé : elle ne le domine pas.
       ligne({ id: "outil", level: "brouillon", scope: "zoho.mail.send" }),
     ];
 
-    const plancher = plancherDuScope(lignes, "zoho.mail.*", T0);
+    const plancher = plancherDuScope(lignes, "zoho.*", T0);
 
     console.info(
       `[garde plancher] ${String(plancher.mesures)} lignes mesurées, ` +
@@ -374,11 +374,11 @@ describe("core/policy/niveau — le plancher d'un scope", () => {
         ligne({
           id: "voisin",
           level: "libre",
-          scope: "zoho.calendar.*",
+          scope: "agenda.*",
           expiresAt: new Date(T0.getTime() + 1000),
         }),
       ],
-      "zoho.mail.*",
+      "zoho.*",
       T0,
     );
 

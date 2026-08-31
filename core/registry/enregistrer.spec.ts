@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
 
 import { OUTIL_CLOTURE } from "../audit/vocabulaire.js";
-import { PROFILE_NAMES, type ProfileName } from "../profiles/index.js";
+import { PROFILE_NAMES, SCEAU_PROFILS, type ProfileName } from "../profiles/index.js";
+import { lireClesDAutorisation } from "../adapter-kit/autorisation.js";
 import { creerAdapterKit } from "../adapter-kit/kit.js";
 import type { Manifeste } from "../adapter-kit/manifest.js";
 import type { DefinitionAdaptateur, DefinitionOutil } from "../adapter-kit/types.js";
@@ -26,7 +27,17 @@ import type { EntreeVerrou, MotifRefus, VerrouAdaptateurs } from "./types.js";
 const PROFILS: readonly ProfileName[] = PROFILE_NAMES;
 type Profil = ProfileName;
 
-const kit = creerAdapterKit(PROFILS);
+const kit = creerAdapterKit(PROFILS, SCEAU_PROFILS);
+
+/**
+ * Les noms qu'un schéma d'entrée n'a pas le droit de porter (§ 09, contrôle 7).
+ *
+ * DÉRIVÉS de `core/types.ts` — jamais écrits ici. `lireClesDAutorisation()` lit
+ * les propriétés de `ToolContext` et de `Habilitations` dans le source, et lève
+ * si la dérivation rend trop peu de clés : une liste vide rendrait le contrôle
+ * vacueux, et l'absence d'alerte se lirait comme une absence de problème.
+ */
+const CLES_AUTORISATION = lireClesDAutorisation().toutes;
 
 function outil(surcharges: Partial<DefinitionOutil<Profil>> = {}): DefinitionOutil<Profil> {
   const base = kit.definirOutil<z.ZodObject, z.ZodObject>({
@@ -103,6 +114,8 @@ describe("un couple manifeste / verrou cohérent", () => {
       manifesteBrut: manifeste,
       verrou: verrouPour(manifeste, { trustTier: 2, maxDataClass: "sensitive" }),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(resultat.admis).toBe(true);
@@ -130,6 +143,8 @@ describe("l'épinglage par empreinte", () => {
       manifesteBrut: manifeste,
       verrou: verrouPour(manifeste, { manifestSha: `sha256:${"0".repeat(64)}` }),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(motifs(resultat)).toContain("empreinte_divergente");
@@ -146,6 +161,8 @@ describe("l'épinglage par empreinte", () => {
       manifesteBrut: servi,
       verrou: verrouPour(relu),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(motifs(resultat)).toContain("empreinte_divergente");
@@ -157,6 +174,8 @@ describe("l'épinglage par empreinte", () => {
       manifesteBrut: manifeste,
       verrou: { lockVersion: 1, adapters: [] },
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(motifs(resultat)).toContain("adaptateur_absent_du_verrou");
@@ -182,6 +201,8 @@ describe("l'épinglage par empreinte", () => {
       manifesteBrut: altere,
       verrou: verrouPour(propre),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     // Le champ usurpé est NOMMÉ pour ce qu'il est, et non noyé dans un message
@@ -201,6 +222,8 @@ describe("la confiance ne se décerne pas soi-même", () => {
         manifesteBrut: altere,
         verrou: verrouPour(propre),
         profilsConnus: PROFILS,
+        sceauProfils: SCEAU_PROFILS,
+        clesDAutorisation: CLES_AUTORISATION,
       });
       expect(motifs(resultat), `champ « ${champ} »`).toContain("confiance_auto_decernee");
     }
@@ -214,6 +237,8 @@ describe("la confiance ne se décerne pas soi-même", () => {
       manifesteBrut: manifeste,
       verrou: verrouPour(manifeste),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).not.toContain("confiance_auto_decernee");
   });
@@ -231,6 +256,8 @@ describe("l'assertion des secrets", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(motifs(resultat)).toContain("secrets_en_mode_federe");
@@ -242,6 +269,8 @@ describe("l'assertion des secrets", () => {
       manifesteBrut: heberge,
       verrou: verrouPour(heberge),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(motifs(resultat)).not.toContain("secrets_en_mode_federe");
@@ -256,6 +285,8 @@ describe("le plafond de classe de données", () => {
       manifesteBrut: manifeste,
       verrou: verrouPour(manifeste, { maxDataClass: "personal" }),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(motifs(resultat)).toContain("dataclass_au_dessus_du_plafond");
@@ -269,6 +300,8 @@ describe("le plafond de classe de données", () => {
         manifesteBrut: manifeste,
         verrou: verrouPour(manifeste, { maxDataClass: "personal" }),
         profilsConnus: PROFILS,
+        sceauProfils: SCEAU_PROFILS,
+        clesDAutorisation: CLES_AUTORISATION,
       });
       expect(motifs(resultat), `classe « ${classe} »`).not.toContain(
         "dataclass_au_dessus_du_plafond",
@@ -282,6 +315,8 @@ describe("le plafond de classe de données", () => {
       manifesteBrut: manifeste,
       verrou: verrouPour(manifeste, { maxDataClass: "none" }),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("dataclass_au_dessus_du_plafond");
   });
@@ -299,6 +334,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("profil_inconnu");
   });
@@ -317,6 +354,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("prefixe_non_derive");
   });
@@ -331,6 +370,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("outil_en_double");
   });
@@ -357,6 +398,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     console.info(
@@ -376,6 +419,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: voisin,
       verrou: verrouPour(voisin),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(admis)).not.toContain("nom_reserve_au_socle");
   });
@@ -388,6 +433,8 @@ describe("les autres refus d'admission", () => {
       // l'incohérence est alors visible SANS l'empreinte, et doit être nommée.
       verrou: verrouPour(manifeste, { version: "2.0.0" }),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("epinglage_incoherent");
   });
@@ -397,6 +444,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: { id: "axionia" },
       verrou: verrouPour(manifesteTemoin()),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("manifeste_malforme");
     expect(resultat.outilsInspectes).toBe(0);
@@ -414,6 +463,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere as unknown as Manifeste),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).toContain("manifeste_malforme");
   });
@@ -429,6 +480,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(resultat.admis).toBe(false);
@@ -446,6 +499,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(resultat.admis).toBe(false);
@@ -471,6 +526,8 @@ describe("les autres refus d'admission", () => {
       // seule la mesure du contenu peut encore le prendre en défaut.
       verrou: verrouPour(altere),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(resultat.admis).toBe(false);
@@ -496,6 +553,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: propre,
       verrou: verrouPour(propre),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
     expect(motifs(resultat)).not.toContain("bytes_incoherent");
     expect(resultat.admis).toBe(true);
@@ -508,6 +567,8 @@ describe("les autres refus d'admission", () => {
       manifesteBrut: altere,
       verrou: verrouPour(propre, { maxDataClass: "internal" }),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     expect(resultat.admis).toBe(false);

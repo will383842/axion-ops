@@ -32,7 +32,7 @@ import type { ReferenceOutil } from "./scope.js";
  */
 
 const T0 = new Date("2026-08-30T12:00:00.000Z");
-const OUTIL: ReferenceOutil = { adapterId: "zoho.mail", tool: "send" };
+const OUTIL: ReferenceOutil = { adapterId: "zoho", tool: "mail.send" };
 /** Vecteur d'essai PUBLIÉ de la RFC 6238. Aucun secret réel dans ce dépôt. */
 const GRAINE_RFC6238 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 const SCOPES_CONSOLE: readonly OpsScope[] = ["ops:admin", SCOPE_DESSERRAGE];
@@ -403,7 +403,7 @@ describe("core/policy/desserrage — desserrer", () => {
     // niveau desserré. Lever le plancher global n'ouvre rien ailleurs.
     const ailleurs = niveauApplique(
       await depot.lignes(),
-      { adapterId: "zoho.calendar", tool: "poser" },
+      { adapterId: "agenda", tool: "poser" },
       T0,
     );
 
@@ -423,7 +423,7 @@ describe("core/policy/desserrage — desserrer", () => {
       {
         id: "voisine",
         level: "brouillon",
-        scope: "zoho.calendar.poser",
+        scope: "agenda.poser",
         channel: "console",
         expiresAt: null,
         supersededAt: null,

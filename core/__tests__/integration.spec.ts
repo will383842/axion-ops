@@ -42,7 +42,7 @@ import {
 import { creerAdapterKit } from "../adapter-kit/kit.js";
 import { IDEMPOTENCIES } from "../adapter-kit/types.js";
 import { octetsCanoniques as octetsAdapterKit } from "../adapter-kit/json.js";
-import { sansCommentaires } from "../adapter-kit/autorisation.js";
+import { lireClesDAutorisation, sansCommentaires } from "../adapter-kit/autorisation.js";
 import type { Manifeste } from "../adapter-kit/manifest.js";
 
 import { empreinteDuManifesteRecu } from "../registry/lock.js";
@@ -54,6 +54,7 @@ import {
   ETAPE_REFUS_PROFIL,
   PLAFOND_OUTILS_PAR_PROFIL,
   PROFILE_NAMES,
+  SCEAU_PROFILS,
   estServi,
   mesurerBudgetProfil,
   octetsDeLaDefinition,
@@ -76,22 +77,18 @@ import {
 
 import {
   ETAPES_LIMITES,
+  DepotIdempotenceEnMemoire,
+  DepotQuotaEnMemoire,
   MODES_IDEMPOTENCE,
   appliquerLimites,
   cloturerLimites,
   creerCalculArgHash,
   type CalculArgHash,
   type CoffreArgHash,
-  type DemandeIncrement,
-  type DepotIdempotence,
-  type DepotQuota,
-  type EtatCompteur,
-  type LigneIdempotence,
   type ModeIdempotence,
   type ParametresLimites,
   type RefusIntercalaire,
   type ResultatValidation,
-  type StatutIdempotence,
 } from "../limits/index.js";
 
 import {
@@ -104,7 +101,16 @@ import {
 } from "../audit/index.js";
 import type { Horloge } from "../audit/ports.js";
 
-import { Coffre } from "../vault/index.js";
+import {
+  CODE_COFFRE_VERROUILLE,
+  Coffre,
+  ETAPE_COFFRE,
+  decisionDeDemarrage,
+  type EtatCoffre,
+} from "../vault/index.js";
+
+import { ETAPES_REVENDIQUEES } from "../chaine/index.js";
+import { SCELLEUR_TEMOIN } from "../audit/fixtures.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0 · Le décor — aucun secret réel, aucun réseau, une horloge figée
@@ -134,99 +140,6 @@ const coffreArgHash: CoffreArgHash = {
   },
 };
 
-// ── Les deux dépôts en mémoire, copiés du contrat des ports de `core/limits` ──
-
-class DepotQuotaEnMemoire implements DepotQuota {
-  readonly compteurs = new Map<string, number>();
-
-  private static cle(d: Pick<DemandeIncrement, "window" | "tool" | "principal">): string {
-    return `${d.window}::${d.tool}::${d.principal}`;
-  }
-
-  get totalConsomme(): number {
-    let total = 0;
-    for (const valeur of this.compteurs.values()) total += valeur;
-    return total;
-  }
-
-  incrementerSiSousLePlafond(demande: DemandeIncrement): Promise<EtatCompteur> {
-    const cle = DepotQuotaEnMemoire.cle(demande);
-    const courant = this.compteurs.get(cle) ?? 0;
-    const accepte = courant + 1 <= demande.limit;
-    if (accepte) this.compteurs.set(cle, courant + 1);
-    return Promise.resolve({
-      accepte,
-      count: accepte ? courant + 1 : courant,
-      limit: demande.limit,
-      warnAt: demande.warnAt,
-      resetAt: demande.resetAt,
-    });
-  }
-
-  decrementer(cle: Pick<DemandeIncrement, "window" | "tool" | "principal">): Promise<void> {
-    const k = DepotQuotaEnMemoire.cle(cle);
-    this.compteurs.set(k, Math.max(0, (this.compteurs.get(k) ?? 0) - 1));
-    return Promise.resolve();
-  }
-}
-
-class DepotIdempotenceEnMemoire implements DepotIdempotence {
-  readonly lignes = new Map<string, LigneIdempotence>();
-
-  private static cle(tool: string, key: string): string {
-    return `${tool}::${key}`;
-  }
-
-  insererSiAbsente(ligne: LigneIdempotence): Promise<boolean> {
-    const cle = DepotIdempotenceEnMemoire.cle(ligne.tool, ligne.key);
-    if (this.lignes.has(cle)) return Promise.resolve(false);
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  lire(tool: string, key: string): Promise<LigneIdempotence | null> {
-    return Promise.resolve(this.lignes.get(DepotIdempotenceEnMemoire.cle(tool, key)) ?? null);
-  }
-
-  remplacerSiPerimee(ligne: LigneIdempotence, maintenant: Date): Promise<boolean> {
-    const cle = DepotIdempotenceEnMemoire.cle(ligne.tool, ligne.key);
-    const existante = this.lignes.get(cle);
-    if (existante === undefined || existante.expiresAt.getTime() > maintenant.getTime()) {
-      return Promise.resolve(false);
-    }
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  reprendreSiEchouee(ligne: LigneIdempotence): Promise<boolean> {
-    const cle = DepotIdempotenceEnMemoire.cle(ligne.tool, ligne.key);
-    const existante = this.lignes.get(cle);
-    if (existante === undefined || existante.status !== "failed") return Promise.resolve(false);
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  cloturer(params: {
-    readonly tool: string;
-    readonly key: string;
-    readonly status: Extract<StatutIdempotence, "done" | "failed">;
-    readonly resultRef: string | null;
-    readonly completedAt: Date;
-  }): Promise<void> {
-    const cle = DepotIdempotenceEnMemoire.cle(params.tool, params.key);
-    const existante = this.lignes.get(cle);
-    if (existante !== undefined) {
-      this.lignes.set(cle, {
-        ...existante,
-        status: params.status,
-        resultRef: params.resultRef,
-        completedAt: params.completedAt,
-      });
-    }
-    return Promise.resolve();
-  }
-}
-
 // ═════════════════════════════════════════════════════════════════════════════
 //  1 · L'ASSEMBLAGE — un adaptateur fictif, écrit, enregistré, servi
 // ═════════════════════════════════════════════════════════════════════════════
@@ -237,7 +150,17 @@ class DepotIdempotenceEnMemoire implements DepotIdempotence {
  * manifestes qui ne s'y conforment pas.
  */
 const PROFILS_CONNUS: readonly ProfileName[] = PROFILE_NAMES;
-const kit = creerAdapterKit<ProfileName>(PROFILS_CONNUS);
+const kit = creerAdapterKit<ProfileName>(PROFILS_CONNUS, SCEAU_PROFILS);
+
+/**
+ * Les noms qu'un schéma d'entrée n'a pas le droit de porter (§ 09, contrôle 7).
+ *
+ * DÉRIVÉS de `core/types.ts` — jamais écrits ici. `lireClesDAutorisation()` lit
+ * les propriétés de `ToolContext` et de `Habilitations` dans le source, et lève
+ * si la dérivation rend trop peu de clés : une liste vide rendrait le contrôle
+ * vacueux, et l'absence d'alerte se lirait comme une absence de problème.
+ */
+const CLES_AUTORISATION = lireClesDAutorisation().toutes;
 
 /** Un outil de LECTURE, pur, sans clé d'idempotence. */
 const outilLecture = kit.definirOutil<z.ZodObject, z.ZodObject>({
@@ -308,6 +231,8 @@ const ENREGISTREMENT = enregistrerAdaptateur({
   manifesteBrut: MANIFESTE,
   verrou: VERROU,
   profilsConnus: PROFILS_CONNUS,
+  sceauProfils: SCEAU_PROFILS,
+  clesDAutorisation: CLES_AUTORISATION,
 });
 
 /**
@@ -453,6 +378,12 @@ interface AppelFictif {
   readonly sessionMarquee: boolean;
   readonly argumentLibre: boolean;
   readonly confirmation: "absente" | "valide" | "invalide";
+  /**
+   * § 23 — l'état du coffre au moment de l'appel. C'est LUI que l'étape 0
+   * interroge. Il vit sur l'appel plutôt que sur le contexte parce que le
+   * témoin doit pouvoir refermer le coffre sans reconstruire tout le décor.
+   */
+  readonly etatCoffre: EtatCoffre;
   readonly lever?: boolean;
 }
 
@@ -470,7 +401,7 @@ function contexteNeuf(politique: readonly LignePolitique[]): Contexte {
   const store = new JournalMemoire();
   return {
     store,
-    journal: new Journal(store, horlogeQuiAvance(T0)),
+    journal: new Journal(SCELLEUR_TEMOIN, store, horlogeQuiAvance(T0)),
     quota: new DepotQuotaEnMemoire(),
     idempotence: new DepotIdempotenceEnMemoire(),
     calcul: creerCalculArgHash(coffreArgHash),
@@ -518,6 +449,16 @@ async function executerAppel(
     },
     async (affiner): Promise<Terminaison<unknown>> => {
       if (appel.lever === true) throw new Error("panne simulée de l'adaptateur");
+
+      // ── ÉTAPE 0 — le coffre. `core/vault` (§ 23). ────────────────────────
+      //
+      // Elle PRÉCÈDE tout le reste : l'outil existe, il est au profil, les
+      // scopes suffisent — c'est le socle qui ne peut rien déchiffrer. Le
+      // numéro et le code sont DÉRIVÉS de `core/vault`, jamais écrits ici
+      // (ADR 0005).
+      if (!decisionDeDemarrage(appel.etatCoffre).appelsDOutilsAcceptes) {
+        return refus(ETAPE_COFFRE, CODE_COFFRE_VERROUILLE);
+      }
 
       // ── ÉTAPE 5 — scopes. AUCUN MODULE DE `core/` NE LA PORTE. ───────────
       if (!appel.scopes.includes(scopeExigeParEffet(appel.effet))) {
@@ -669,6 +610,7 @@ const LECTURE: AppelFictif = {
   sessionMarquee: false,
   argumentLibre: false,
   confirmation: "absente",
+  etatCoffre: "ouvert",
 };
 
 const ENVOI: AppelFictif = {
@@ -684,6 +626,7 @@ const ENVOI: AppelFictif = {
   sessionMarquee: false,
   argumentLibre: false,
   confirmation: "valide",
+  etatCoffre: "ouvert",
 };
 
 /** Politique de démarrage : `brouillon`, portée `*`, sans expiration. */
@@ -716,6 +659,13 @@ interface Temoin {
 }
 
 const TEMOINS: readonly Temoin[] = [
+  {
+    // § 23 — coffre verrouillé : l'appel est refusé AVANT toute autre étape,
+    // sur un outil qui existe, qui est activé, et qui est au profil actif.
+    etape: ETAPE_COFFRE,
+    politique: POLITIQUE_BROUILLON,
+    appel: { ...LECTURE, etatCoffre: "verrouillé" },
+  },
   {
     etape: 5,
     politique: POLITIQUE_LIBRE,
@@ -857,6 +807,7 @@ describe("§ 11 — la chaîne d'appel, une terminaison par étape", () => {
   it("journal en panne ET corps qui lève : la cause première ne doit pas disparaître", async () => {
     const storeMuet: JournalMemoire = new JournalMemoire();
     const enPanne = new Journal(
+      SCELLEUR_TEMOIN,
       {
         dernierSelfHash: () => Promise.reject(new Error("ops_audit injoignable")),
         ajouter: (ligne) => storeMuet.ajouter(ligne),
@@ -928,7 +879,7 @@ describe("§ 11 — la chaîne d'appel, une terminaison par étape", () => {
     }
 
     const lignes: readonly LigneAudit[] = ctx.store.toutes();
-    const rapport = verifierChaine(lignes, {});
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, lignes, {});
     console.log(
       `[chaînage] ${String(rapport.lignesVerifiees)} ligne(s) vérifiée(s), ` +
         `${String(rapport.anomalies.length)} anomalie(s)`,
@@ -950,42 +901,36 @@ describe("§ 11 — la chaîne d'appel, une terminaison par étape", () => {
  */
 describe("§ 11 — quelles étapes un module revendique-t-il ?", () => {
   /**
-   * 🔴 MARQUÉE `.todo` PAR LA RECETTE (2026-08-30) — ET C'EST UN CONSTAT, PAS
-   *    UN CLASSEMENT SANS SUITE.
+   * ✅ DÉ-`todo`-ÉE AU LOT 1b (2026-08-31), ET VOICI EXACTEMENT CE QUI A CHANGÉ.
    *
-   * Cette garde mesure JUSTE, et ce qu'elle mesure est réel : cinq des dix
-   * étapes du § 11 applicables au transport JSON-RPC n'ont AUCUN module
-   * propriétaire dans `core/` —
+   * À la fin du lot 1, cinq des dix étapes du § 11 applicables au transport
+   * JSON-RPC n'avaient AUCUN module propriétaire — 5, 6, 9, 11, 14 — et cette
+   * garde était marquée `.todo` parce qu'elle ne pouvait pas verdir sans qu'on
+   * écrive cinq modules.
    *
-   *   · 5  (scopes suffisants pour l'`effect`)  → `core/scopes/` à écrire
-   *   · 6  (l'outil existe et est activé)       → `core/catalogue/` à écrire
-   *   · 9  (curseur signé / filtersHash)        → `core/cursor/` à écrire
-   *   · 11 (provenance)                         → `core/provenance/` à écrire
-   *   · 14 (exécution + compaction § 13.3)      → `core/compaction/` à écrire
+   * `core/chaine/etapes.ts` les revendique désormais, par
+   * `ETAPES_REVENDIQUEES`, dérivé comme `ETAPE_POLITIQUE` et `ETAPES_LIMITES`
+   * le font déjà. `core/vault` revendique en outre l'étape 0 du § 23, ajoutée
+   * au § 11 par l'ADR 0005.
    *
-   * Deux d'entre elles (5 et 11) sont des gardes de SÉCURITÉ, et une (9)
-   * empêche une fenêtre de pagination silencieusement fausse. Tant qu'elles
-   * n'ont pas de module, chaque appelant les réécrit à la main — c'est ce que
-   * l'orchestrateur de ce fichier fait, et cette main-là n'est gardée par rien.
+   * ⚠️ CE QUE CE VERT DIT, ET CE QU'IL NE DIT PAS. Il dit qu'aucune étape n'est
+   *    sans PROPRIÉTAIRE : plus aucun appelant n'a de raison d'écrire un numéro
+   *    d'étape ou un code d'erreur à la main. Il NE DIT RIEN de l'exécution :
+   *    les cinq étapes de `core/chaine` sont DÉCLARÉES, pas implémentées, et
+   *    l'orchestrateur LÈVE. C'est `core/chaine/etapes.spec.ts` qui mesure
+   *    cette seconde chose, par la cohérence `statut`/`executer` du registre —
+   *    une entrée ne peut pas se dire implémentée sans porter de fonction.
    *
-   * POURQUOI `.todo` PLUTÔT QUE ROUGE OU RELÂCHÉE. Elle ne peut pas verdir sans
-   * écrire cinq modules : c'est un LOT, pas un correctif, et le faire à la hâte
-   * produirait exactement ce que ce chantier interdit — des gardes vertes parce
-   * qu'elles ne mesurent rien. La RELÂCHER à la valeur observée (`[5,6,9,11,14]`)
-   * la ferait cesser de garder quoi que ce soit : le jour où une SIXIÈME étape
-   * perdrait son propriétaire, elle resterait verte. La LAISSER rouge masquerait
-   * les régressions réelles de toute la suite.
-   *
-   * ⛔ ARBITRAGE DE WILL : ces cinq modules sont-ils du lot 2 ? Voir
-   *    `docs/ETAT.md`. Le jour où ils existent, retirer le `.todo` — la garde
-   *    est écrite pour verdir toute seule, chaque module exportant sa constante
-   *    d'étape comme `ETAPE_POLITIQUE` et `ETAPES_LIMITES` le font déjà.
+   *    Les deux gardes ensemble disent la vérité. Celle-ci seule dirait trop,
+   *    et c'est pourquoi le commentaire précède le vert plutôt que de le suivre.
    */
-  it.todo("dit combien d'étapes sont revendiquées, et lesquelles ne le sont pas", () => {
+  it("dit combien d'étapes sont revendiquées, et lesquelles ne le sont pas", () => {
     const revendiquees = new Set<number>([
+      ETAPE_COFFRE, // core/vault
       ETAPE_REFUS_PROFIL, // core/profiles
       ETAPE_POLITIQUE, // core/policy
       ...ETAPES_LIMITES, // core/limits
+      ...ETAPES_REVENDIQUEES, // core/chaine — DÉCLARÉES, pas implémentées
     ]);
 
     const applicables = APPEL_STEPS.filter((etape) => !etape.httpSeul);
@@ -1002,9 +947,6 @@ describe("§ 11 — quelles étapes un module revendique-t-il ?", () => {
     expect(applicables.length).toBeGreaterThanOrEqual(10);
     expect(revendiquees.size).toBeGreaterThanOrEqual(1);
 
-    // 🔴 CONSTAT — cette attente échoue tant que les étapes 5, 6, 9, 11 et 14
-    //    n'ont pas de module. Elle n'est PAS relâchée à la valeur observée :
-    //    une garde calée sur le défaut du jour ne garde plus rien.
     expect(orphelines.map((e) => e.numero)).toEqual([]);
   });
 });

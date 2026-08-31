@@ -11,7 +11,7 @@ import {
   type ChampCouvert,
   type JsonValeur,
 } from "./canonique.js";
-import { contenuTemoin } from "./fixtures.js";
+import { SCELLEUR_TEMOIN, contenuTemoin } from "./fixtures.js";
 import type { ContenuLigne } from "./vocabulaire.js";
 
 /**
@@ -122,6 +122,7 @@ const VARIANTES: Record<ChampCouvert, Partial<ContenuLigne>> = {
   decision: { decision: "refusé" },
   stepDenied: { stepDenied: 10 },
   argHash: { argHash: sha256Hex("un-autre-argHash") },
+  argHashValidated: { argHashValidated: false },
   recordIds: { recordIds: ["evt-1"] },
   partialSources: { partialSources: ["canal-2"] },
   durationMs: { durationMs: 999 },
@@ -134,22 +135,22 @@ describe("core/audit — les champs couverts par l'empreinte", () => {
     // laisserait l'empreinte inchangée. C'est cet état-là qui doit être
     // impossible, et le test ci-dessous le vérifie champ par champ.
     const ligne = contenuTemoin(1);
-    const empreinte = calculerSelfHash(null, ligne);
-    const memeLigne = calculerSelfHash(null, contenuTemoin(1));
+    const empreinte = calculerSelfHash(SCELLEUR_TEMOIN, null, ligne);
+    const memeLigne = calculerSelfHash(SCELLEUR_TEMOIN, null, contenuTemoin(1));
 
     expect(memeLigne).toBe(empreinte); // déterminisme : sans lui, rien ne tient
   });
 
   it("change d'empreinte quand N'IMPORTE LEQUEL des champs couverts change", () => {
     const ligne = contenuTemoin(1);
-    const reference = calculerSelfHash(null, ligne);
+    const reference = calculerSelfHash(SCELLEUR_TEMOIN, null, ligne);
 
     const inertes: string[] = [];
     let mesures = 0;
 
     for (const champ of CHAMPS_COUVERTS) {
       const modifiee: ContenuLigne = { ...ligne, ...VARIANTES[champ] };
-      if (calculerSelfHash(null, modifiee) === reference) {
+      if (calculerSelfHash(SCELLEUR_TEMOIN, null, modifiee) === reference) {
         inertes.push(champ);
       }
       mesures += 1;
@@ -157,9 +158,10 @@ describe("core/audit — les champs couverts par l'empreinte", () => {
 
     console.info(`[garde couverture] ${String(mesures)} champs couverts mesurés`);
 
-    // Plancher-témoin : `ops_audit` en porte quinze hors chaînage. Zéro champ
+    // Plancher-témoin : `ops_audit` en porte seize hors chaînage — quinze au
+    // lot 1, plus `argHashValidated`. Zéro champ
     // mesuré serait vert sans avoir rien regardé.
-    expect(mesures).toBe(15);
+    expect(mesures).toBe(16);
     expect(mesures).toBe(CHAMPS_COUVERTS.length);
     expect(inertes).toEqual([]);
   });
@@ -173,12 +175,12 @@ describe("core/audit — les champs couverts par l'empreinte", () => {
 
     // `prevHash` n'est pas un champ couvert, c'est le PRÉFIXE : deux chaînons
     // différents donnent deux empreintes.
-    const a = calculerSelfHash(null, ligne);
-    const b = calculerSelfHash(sha256Hex("un-autre-chainon"), ligne);
+    const a = calculerSelfHash(SCELLEUR_TEMOIN, null, ligne);
+    const b = calculerSelfHash(SCELLEUR_TEMOIN, sha256Hex("un-autre-chainon"), ligne);
     expect(a).not.toBe(b);
   });
 
-  it("expose exactement les quinze champs couverts, sans doublon", () => {
+  it("expose exactement les seize champs couverts, sans doublon", () => {
     const couverts = champsCouverts(contenuTemoin(1));
     const cles = Object.keys(couverts);
 

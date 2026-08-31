@@ -245,6 +245,14 @@ export function construireCloture(charge: ChargeCloture, argHash: string, at: Da
     decision: "autorisé",
     stepDenied: AUCUNE_ETAPE,
     argHash,
+    // `true`, et ce n'est pas une commodité. Une clôture n'a jamais eu de
+    // charge BRUTE : le socle FABRIQUE lui-même ce qu'il empreint (`charge`,
+    // ci-dessus), il ne le reçoit d'aucun fil. Il n'existe donc aucune seconde
+    // empreinte de cette ligne dont celle-ci pourrait être la version non
+    // validée — écrire `false` reviendrait à annoncer une valeur brute qui
+    // n'existe pas, et un lecteur du journal chercherait longtemps l'appel qui
+    // l'aurait produite.
+    argHashValidated: true,
     // § 12, règle 3 — une purge ne nomme personne.
     recordIds: [],
     partialSources: encoderCharge(charge),

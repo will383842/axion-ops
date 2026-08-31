@@ -56,6 +56,7 @@ import { proportionEffacee } from "./autorisation.js";
  */
 const PROPORTION_EFFACEE_PLAUSIBLE = 0.7;
 import type { ClesDAutorisation } from "./autorisation.js";
+import type { SceauProfils } from "./profils.js";
 import { anomaliesCompletes } from "./verdict.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -91,6 +92,15 @@ export interface EntreeHarnais<TProfile extends string> {
   readonly definition: DefinitionAdaptateur<TProfile>;
   /** L'énumération fermée de `core/profiles/`, transmise par le kit. */
   readonly profilsConnus: readonly TProfile[];
+  /**
+   * Le SCEAU de cette énumération — version et empreinte (ADR 0004). Il entre
+   * dans le manifeste, et le registre le confronte au sceau du socle.
+   *
+   * ⚠️ Il est REÇU, jamais recalculé ici : `core/adapter-kit` ne contient
+   *    aucune liste de profils, et c'est `core/profiles` qui décide de ce que
+   *    l'empreinte couvre.
+   */
+  readonly sceauProfils: SceauProfils;
   /** Tous les fichiers source de l'adaptateur. */
   readonly fichiers: readonly FichierAdaptateur[];
   /** Plancher-témoin du contrôle 9. Doit valoir au moins 1. */
@@ -177,7 +187,7 @@ export async function executerHarnais<TProfile extends string>(
   const controles: ResultatControle[] = [];
 
   // Le manifeste sert à plusieurs contrôles : on le construit une fois.
-  const premiere = analyserDefinition(definition, entree.profilsConnus);
+  const premiere = analyserDefinition(definition, entree.profilsConnus, entree.sceauProfils);
   const manifeste: Manifeste | null = premiere.manifeste;
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -427,7 +437,7 @@ export async function executerHarnais<TProfile extends string>(
       // Deuxième production, par un chemin indépendant du premier objet. Un SHA
       // qui ne serait stable que parce qu'on relit le MÊME objet ne prouverait
       // rien : ce qui est en jeu, c'est l'ordre des clés à la sérialisation.
-      const seconde = analyserDefinition(definition, entree.profilsConnus);
+      const seconde = analyserDefinition(definition, entree.profilsConnus, entree.sceauProfils);
       mesures = 2;
       if (seconde.manifeste === null) {
         anomalies.push("la seconde production échoue là où la première réussit.");

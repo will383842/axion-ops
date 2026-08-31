@@ -118,6 +118,16 @@ export const FORME_EMPREINTE = /^[0-9a-f]{64}$/;
  */
 export const ARG_HASH_NON_LU = "0".repeat(LONGUEUR_EMPREINTE);
 
+/**
+ * `argHashValidated` d'une ligne dont les arguments n'ont pas été VALIDÉS —
+ * refus antérieur à l'étape 8, ou arguments jamais lus.
+ *
+ * C'est une CONSTANTE NOMMÉE plutôt qu'un `false` littéral : un booléen nu dans
+ * six appelants est six occasions de se tromper de sens, et personne ne le
+ * verrait. `journal.ts` part de cette valeur et n'en sort que par l'affineur.
+ */
+export const ARG_HASH_NON_VALIDE = false;
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  La ligne du journal
 // ═════════════════════════════════════════════════════════════════════════════
@@ -175,6 +185,37 @@ export interface ContenuLigne {
    * se met un jour à calculer un HMAC lui-même.
    */
   readonly argHash: string;
+
+  /**
+   * L'`argHash` ci-dessus porte-t-il l'empreinte de la valeur VALIDÉE ?
+   *
+   * ═══ LES DEUX POPULATIONS D'UNE MÊME COLONNE ═══
+   *
+   * Le § 11 veut une ligne pour TOUTE terminaison, refus compris. Un refus
+   * ANTÉRIEUR à l'étape 8 n'a que la charge BRUTE à empreindre ; toutes les
+   * autres lignes portent l'empreinte de la valeur VALIDÉE — la seule à
+   * laquelle le jeton de confirmation du § 20 se lie. Les deux DIFFÈRENT dès
+   * qu'un schéma porte un `.default()`, une coercition ou une transformation,
+   * c'est-à-dire dans le cas le plus banal.
+   *
+   * Tant que rien ne les distinguait, deux lectures du journal étaient
+   * également défendables et une seule était juste. Le lot 1 s'en remettait à
+   * `stepDenied < 8` — une INFÉRENCE, pas une donnée : elle est fausse pour une
+   * terminaison par exception (`stepDenied` est alors nul), et elle
+   * s'effondrerait si l'ordre des étapes du § 11 changeait.
+   *
+   * ⚠️ TROIS ÉTATS, PAS DEUX, ET LE TROISIÈME SE LIT AILLEURS. `false` couvre
+   *    l'empreinte BRUTE **et** le cas « arguments jamais lus » — un refus
+   *    d'étape 1, où le corps JSON-RPC n'a pas même été ouvert. Ces deux-là se
+   *    séparent par la VALEUR : `ARG_HASH_NON_LU` est une constante convenue
+   *    qu'aucun HMAC ne produira. Un troisième champ n'aurait rien ajouté.
+   *
+   * ⚠️ IL ENTRE DANS L'EMPREINTE CHAÎNÉE (`CHAMPS_COUVERTS`). C'est pour cela
+   *    qu'il est posé maintenant : aucune base ne tourne, aucune ligne
+   *    n'existe. Après le premier chaînage réel, l'ajouter aurait exigé une
+   *    clôture de rupture et deux régimes de vérification dans le même journal.
+   */
+  readonly argHashValidated: boolean;
 
   /**
    * § 12, règle 3 — CE N'EST PAS ANONYME, c'est de la PSEUDONYMISATION. Sur le

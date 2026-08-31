@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { APPEL_STEPS } from "../types.js";
-import { HorlogeFigee } from "./fixtures.js";
+import { SCELLEUR_TEMOIN, HorlogeFigee } from "./fixtures.js";
 import { sha256Hex } from "./canonique.js";
 import type { EnteteAppel } from "./journal.js";
 import {
@@ -47,7 +47,7 @@ function succes(): Terminaison<string> {
 describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
   it("écrit une ligne pour CHACUN des quatorze refus, avec le numéro de l'étape", async () => {
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
     const manquants: string[] = [];
     let terminaisonsEprouvees = 0;
@@ -98,10 +98,15 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
         `${String(store.toutes().length)} lignes écrites`,
     );
 
-    // Plancher-témoin : quatorze étapes du § 11, plus le succès.
+    // DÉRIVÉ : une terminaison par étape, plus le succès. Le compte n'est pas
+    // recopié — il a bougé une fois (étape 0 du § 23, ajoutée au lot 1b,
+    // ADR 0005) et un littéral aurait fait rougir cette garde pour la mauvaise
+    // raison.
     expect(terminaisonsEprouvees).toBe(APPEL_STEPS.length + 1);
-    expect(terminaisonsEprouvees).toBe(15);
-    expect(store.toutes()).toHaveLength(15);
+    expect(store.toutes()).toHaveLength(APPEL_STEPS.length + 1);
+    // Plancher-témoin : les quatorze étapes du § 11 au minimum, plus le succès.
+    // Sans lui, un `APPEL_STEPS` vidé laisserait la dérivation verte sur zéro.
+    expect(terminaisonsEprouvees).toBeGreaterThanOrEqual(15);
     expect(manquants).toEqual([]);
   });
 
@@ -111,7 +116,7 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
     // `avecJournal` rend structurellement impossible ; on prouve ici que la
     // garde ci-dessus le verrait.
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
     const chaineNegligente = async (refuse: boolean): Promise<void> => {
       if (refuse) return; // ← la sortie oubliée
@@ -129,7 +134,7 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
     // Une panne n'est pas un refus. Les confondre falsifierait la métrique du
     // § 24, qui compte les refus pour repérer une injection à demi réussie.
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     const panne = new Error("l'adaptateur a lâché");
 
     await expect(avecJournal(journal, ENTETE, () => Promise.reject(panne))).rejects.toBe(panne);
@@ -148,7 +153,7 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
   it("mesure la durée sur l'horloge injectée", async () => {
     const store = new JournalMemoire();
     const horloge = new HorlogeFigee();
-    const journal = new Journal(store, horloge);
+    const journal = new Journal(SCELLEUR_TEMOIN, store, horloge);
 
     await avecJournal(journal, ENTETE, () => {
       horloge.avancer(250);
@@ -158,9 +163,9 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
     expect(store.toutes()[0]?.durationMs).toBe(250);
   });
 
-  it("chaîne les quinze lignes, et la chaîne se vérifie", async () => {
+  it("chaîne une ligne par terminaison possible, et la chaîne se vérifie", async () => {
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
     for (const etape of APPEL_STEPS) {
       await avecJournal(journal, ENTETE, () =>
@@ -173,10 +178,13 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
     }
     await avecJournal(journal, ENTETE, () => Promise.resolve(succes()));
 
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
     console.info(`[garde chaînage d'appels] ${String(rapport.lignesVerifiees)} lignes vérifiées`);
 
-    expect(rapport.lignesVerifiees).toBe(15);
+    // DÉRIVÉ d'`APPEL_STEPS`, plus le succès — jamais un littéral.
+    expect(rapport.lignesVerifiees).toBe(APPEL_STEPS.length + 1);
+    // Plancher-témoin : un journal vide se vérifierait sans anomalie.
+    expect(rapport.lignesVerifiees).toBeGreaterThanOrEqual(15);
     expect(rapport.valide).toBe(true);
   });
 });
@@ -189,7 +197,7 @@ describe("core/audit — un refus AVANT identification s'écrit quand même (§ 
     // est faux dès le premier balayage de port — ou bien chaque appelant invente
     // les siennes, et la métrique du § 24 devient illisible.
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     const httpSeul = APPEL_STEPS.filter((etape) => etape.httpSeul);
 
     for (const etape of httpSeul) {
@@ -219,7 +227,7 @@ describe("core/audit — un refus AVANT identification s'écrit quand même (§ 
     expect(lignes.map((ligne) => ligne.stepDenied)).toEqual([1, 2, 3, 4]);
 
     // Et la chaîne tient : ces lignes ne sont pas un régime à part.
-    const rapport = verifierChaine(lignes);
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, lignes);
     expect(rapport.lignesVerifiees).toBe(4);
     expect(rapport.valide).toBe(true);
   });
@@ -242,7 +250,7 @@ describe("core/audit — fail-closed : un journal indisponible fait échouer l'a
       },
     };
 
-    const journal = new Journal(storeEnPanne, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, storeEnPanne, new HorlogeFigee());
     let corpsExecute = false;
 
     await expect(

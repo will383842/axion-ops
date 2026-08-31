@@ -43,6 +43,10 @@ const METHODES_EPROUVEES = new Set([
   // rien à lire sont deux situations différentes : coffre fermé, il LÈVE ; il
   // ne rend `null` que quand le secret n'est pas encore configuré.
   "lireCleArgHash",
+  // Le pont vers `core/sceau` (ADR 0002). Même règle que ci-dessus, et un enjeu
+  // plus grand : servir un journal scellé avec rien parce que le coffre est
+  // fermé rendrait toute la chaîne d'`ops_audit` invérifiable en silence.
+  "lireCleSceauJournal",
 ]);
 
 /**
@@ -238,6 +242,7 @@ describe("core/vault/coffre — état VERROUILLÉ", () => {
       ["compter un amorçage", () => coffre.compterUnAmorcage("zoho.refresh_token", 1)],
       ["tourner la clé", () => coffre.tournerCle(cleDeCoffre(0x22))],
       ["lire la clé argHash", () => coffre.lireCleArgHash()],
+      ["lire la clé de scellement du journal", () => coffre.lireCleSceauJournal()],
     ];
 
     let mesurees = 0;
@@ -250,7 +255,9 @@ describe("core/vault/coffre — état VERROUILLÉ", () => {
       `[garde coffre verrouillé] ${String(mesurees)} opérations mesurées, toutes refusées`,
     );
     expect(mesurees).toBe(operations.length);
-    expect(mesurees).toBeGreaterThanOrEqual(5);
+    // Plancher-témoin : six opérations depuis l'ADR 0002, qui a ajouté la clé
+    // de scellement du journal. Le plancher suit la dérivation ci-dessous.
+    expect(mesurees).toBeGreaterThanOrEqual(6);
 
     // ⚠️ CETTE LISTE EST ÉCRITE À LA MAIN — donc elle se périme en silence.
     //    Une méthode nouvelle qui toucherait un secret sans figurer ici passerait
@@ -267,7 +274,7 @@ describe("core/vault/coffre — état VERROUILLÉ", () => {
 
     // Plancher-témoin : zéro méthode dérivée signifierait que le motif de
     // dérivation ne mord plus, pas que le coffre a cessé de se garder.
-    expect(gardees.length).toBeGreaterThanOrEqual(5);
+    expect(gardees.length).toBeGreaterThanOrEqual(6);
 
     const nonEprouvees = gardees.filter((methode) => !METHODES_EPROUVEES.has(methode));
     expect(

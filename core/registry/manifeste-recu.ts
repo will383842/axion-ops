@@ -80,6 +80,14 @@ const SchemaManifesteRecu = z
     id: z.string().min(1),
     version: z.string().regex(MOTIF_VERSION),
     mode: z.enum(ADAPTER_MODES),
+    // ADR 0004 — LE SCEAU DE L'ÉNUMÉRATION DE PROFILS.
+    //
+    // Ils sont obligatoires, et la FORME est vérifiée ici ; la CONFRONTATION au
+    // sceau du socle appartient à `enregistrerAdaptateur()`. Un manifeste
+    // produit avant le lot 1b ne les porte pas : il est refusé pour ce qu'il
+    // est — un document construit contre une énumération dont on ne sait rien.
+    profilesVersion: z.string().min(1),
+    profilesSha: z.string().regex(/^[0-9a-f]{64}$/),
     // NON VIDE. `analyserDefinition()` refuse déjà `profiles: []` au BUILD —
     // « l'adaptateur ne serait exposé dans aucun profil ». Ce refus-là ne vaut
     // que pour un adaptateur écrit en TypeScript avec le kit ; le registre est

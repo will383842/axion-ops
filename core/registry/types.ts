@@ -159,6 +159,70 @@ export const MOTIFS_REFUS = [
    * retapant.
    */
   "nom_reserve_au_socle",
+  /**
+   * Le schéma d'entrée d'un outil n'exprime pas sa FERMETURE (ADR 0003).
+   *
+   * Le § 09 pose que « le schéma d'entrée est `.strict()`, pour qu'un champ
+   * d'autorisation glissé dans la charge utile soit un refus VISIBLE et non un
+   * silence ». Jusqu'au lot 1b, cette règle n'était tenue qu'au BUILD, donc
+   * seulement pour un adaptateur TypeScript passant par le kit. Le registre est
+   * la SEULE barrière statique pour un manifeste produit ailleurs — le CRM en
+   * PHP, dépôt public à jamais (§ 29).
+   *
+   * ⚠️ DEUX DIALECTES SONT ACCEPTÉS : `additionalProperties: false` ET
+   *    `unevaluatedProperties: false`. Voir `core/adapter-kit/fermeture.ts`.
+   */
+  "schema_entree_ouvert",
+  /**
+   * Un outil déclare, dans son schéma d'entrée, une propriété portant le nom
+   * d'une clé d'autorisation — contrôle 7 du § 09.
+   *
+   * « Un handler qui lit une habilitation dans `input` EST UN DÉFAUT » : la
+   * décision de droit atteint la couche service par `ctx`, et par lui seul. La
+   * liste des noms est DÉRIVÉE de `ToolContext` et `Habilitations`, jamais
+   * écrite à la main.
+   *
+   * Témoin mesuré au lot 1 : un manifeste déclarant `peutVoirAppels` dans son
+   * `inputSchema` était admis sans un mot.
+   */
+  "champ_d_autorisation_au_schema",
+  /**
+   * Le manifeste a été produit contre une énumération de profils qui n'est plus
+   * celle du socle (ADR 0004).
+   *
+   * Un adaptateur fédéré produit son manifeste DANS UN AUTRE DÉPÔT, contre sa
+   * propre copie de `core/profiles`. Si les deux divergent — un profil ajouté
+   * d'un côté seulement — le manifeste reste syntaxiquement valide et le nom du
+   * profil reste connu : la divergence ne se voit NULLE PART. C'est
+   * `empreinteProfils()` qui la rend visible d'un seul octet, et c'est ici
+   * qu'elle est confrontée.
+   */
+  "enumeration_profils_divergente",
+  /**
+   * L'`id` de l'adaptateur n'est NOMMABLE PAR AUCUN SCOPE de la grammaire du
+   * § 12 — en pratique, il porte un point.
+   *
+   * ═══ CE QUE CE REFUS REFERME ═══
+   *
+   * La grammaire de `ops_policy.scope` est `*` | `adapterId.*` |
+   * `adapterId.tool` : le PREMIER point sépare l'adaptateur de l'outil, donc un
+   * identifiant d'adaptateur n'en porte aucun. `core/adapter-kit/manifest.ts`
+   * l'applique déjà — mais AU BUILD, donc seulement à un adaptateur écrit en
+   * TypeScript avec le kit. `lireManifesteRecu()` n'exigeait, lui, qu'un `id`
+   * non vide : un manifeste produit ailleurs — le CRM en PHP, dépôt public à
+   * jamais (§ 29) — pouvait s'enregistrer sous `zoho.mail` sans un mot.
+   *
+   * Ses outils devenaient alors ceux d'un AUTRE adaptateur : `zoho.mail` +
+   * `send` se relit `zoho` / `mail.send`, et une ligne de politique posée sur
+   * `zoho.*` — l'agenda, la facturation, le reste — s'appliquait au courrier.
+   * Le lot 1 avait mesuré la contradiction dans `core/policy` ; c'est ici
+   * qu'elle ne peut plus ENTRER.
+   *
+   * ⚠️ Le contrôle INTERROGE `analyserScope()` au lieu de retaper la règle.
+   *    Une seconde écriture de la grammaire serait exactement le défaut que ce
+   *    refus existe pour fermer.
+   */
+  "id_innommable_par_un_scope",
 ] as const;
 
 export type MotifRefus = (typeof MOTIFS_REFUS)[number];

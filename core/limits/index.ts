@@ -82,6 +82,16 @@ export {
   type StatutIdempotence,
 } from "./idempotency.js";
 
+/**
+ * LES DEUX DOUBLES EN MÉMOIRE des ports ci-dessus.
+ *
+ * Exportés comme `core/vault` (`DepotEnMemoire`), `core/policy`
+ * (`DepotPolitiqueMemoire`) et `core/audit` (`JournalMemoire`) exportent les
+ * leurs. Le lot 1 en avait laissé QUATRE copies, écrites à la main dans quatre
+ * fichiers de gardes et déjà divergentes entre elles. Voir `memoire.ts`.
+ */
+export { DepotIdempotenceEnMemoire, DepotQuotaEnMemoire } from "./memoire.js";
+
 export {
   appliquerLimites,
   cloturerLimites,

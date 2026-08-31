@@ -24,6 +24,19 @@ import type { DefinitionAdaptateur, DefinitionOutil } from "./types.js";
  */
 
 const PROFILS = ["courrier", "dev", "admin", "audit"] as const;
+
+/**
+ * Un SCEAU DE PROFILS témoin (ADR 0004).
+ *
+ * ⚠️ IL EST ÉCRIT ICI, ET C'EST DÉLIBÉRÉ. `core/adapter-kit` ne dépend PAS de
+ *    `core/profiles` — c'est tout le sens de `profils.ts`, qui déclare le
+ *    contrat sans le contenir. Importer `SCEAU_PROFILS` dans ces gardes
+ *    créerait la dépendance que le module refuse, et l'empreinte réelle du
+ *    socle n'apprendrait rien de plus : ce qui est éprouvé ici, c'est que le
+ *    sceau REÇU voyage jusqu'au manifeste, pas sa valeur.
+ */
+const SCEAU_TEMOIN = { version: "1.0.0", empreinte: "a".repeat(64) } as const;
+
 type Profil = (typeof PROFILS)[number];
 
 /** Un outil conforme, paramétrable pour fabriquer un témoin défectueux. */
@@ -74,7 +87,7 @@ function definitionTemoin(
   };
 }
 
-const kit = creerAdapterKit(PROFILS);
+const kit = creerAdapterKit(PROFILS, SCEAU_TEMOIN);
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  JSON canonique — la fondation de l'épinglage
@@ -87,12 +100,31 @@ describe("JSON canonique", () => {
     const a = { b: 2, a: 1 } as const;
     const b = { a: 1, b: 2 } as const;
 
+    console.info(
+      `[garde canonique] ${String(Object.keys(a).length)} clé(s) mesurée(s) · ` +
+        `JSON.stringify diffère = ${String(JSON.stringify(a) !== JSON.stringify(b))} · ` +
+        `canoniser concorde = ${String(canoniser(a) === canoniser(b))}`,
+    );
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
     expect(canoniser(a)).toBe(canoniser(b));
     expect(Object.keys(a)).toHaveLength(2);
   });
 
   it("lève sur un nombre non fini au lieu de l'écrire `null` en silence", () => {
+    const nonFinis = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+    let leves = 0;
+    for (const valeur of nonFinis) {
+      try {
+        canoniser({ a: valeur });
+      } catch {
+        leves += 1;
+      }
+    }
+    console.info(
+      `[garde non fini] ${String(nonFinis.length)} valeur(s) mesurée(s) · ` +
+        `${String(leves)} levée(s)`,
+    );
+    expect(leves).toBe(nonFinis.length);
     expect(() => canoniser({ a: Number.NaN })).toThrow(/non fini/);
     // Témoin du comportement qu'on refuse : `JSON.stringify` l'escamote.
     expect(JSON.stringify({ a: Number.NaN })).toBe('{"a":null}');
@@ -108,6 +140,12 @@ describe("le manifeste et son empreinte", () => {
     const premier = kit.defineAdapter(definitionTemoin()).manifeste();
     const second = kit.defineAdapter(definitionTemoin()).manifeste();
 
+    console.info(
+      `[garde empreinte stable] 2 productions mesurées · ` +
+        `${String(premier.tools.length)} outil(s) au manifeste · ` +
+        `empreintes identiques = ` +
+        `${String(empreinteDuManifeste(premier) === empreinteDuManifeste(second))}`,
+    );
     expect(texteDuManifeste(premier)).toBe(texteDuManifeste(second));
     expect(empreinteDuManifeste(premier)).toBe(empreinteDuManifeste(second));
     expect(empreinteDuManifeste(premier)).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -125,6 +163,10 @@ describe("le manifeste et son empreinte", () => {
       .defineAdapter(definitionTemoin({ tools: [outilTemoin({ effect: "send" })] }))
       .empreinte();
 
+    console.info(
+      `[garde épinglage] 2 empreinte(s) mesurée(s) sur un seul champ basculé · ` +
+        `différentes = ${String(envoi !== lecture)}`,
+    );
     expect(envoi).not.toBe(lecture);
   });
 
@@ -132,7 +174,20 @@ describe("le manifeste et son empreinte", () => {
     const manifeste = kit.defineAdapter(definitionTemoin()).manifeste();
     const cles = Object.keys(manifeste);
 
-    expect(cles).toHaveLength(7);
+    // NEUF clés depuis l'ADR 0004 : le sceau de l'énumération de profils
+    // (`profilesVersion`, `profilesSha`) entre dans le manifeste. Le compte est
+    // écrit ici plutôt que dérivé À DESSEIN — c'est le seul endroit du dépôt où
+    // un champ AJOUTÉ au manifeste fait rougir quelque chose, et un champ
+    // ajouté au manifeste change TOUTES les empreintes épinglées.
+    const interdits = ["trustTier", "maxDataClass", "endpoint", "authMode", "secretRef"];
+    console.info(
+      `[garde champs réservés] ${String(cles.length)} clé(s) au manifeste · ` +
+        `${String(interdits.length)} nom(s) réservé(s) confronté(s) · ` +
+        `${String(manifeste.tools.length)} outil(s) inspecté(s) pour « handler »`,
+    );
+    expect(cles).toHaveLength(9);
+    expect(cles).toContain("profilesVersion");
+    expect(cles).toContain("profilesSha");
     for (const interdit of ["trustTier", "maxDataClass", "endpoint", "authMode", "secretRef"]) {
       expect(cles).not.toContain(interdit);
     }
@@ -148,6 +203,10 @@ describe("le manifeste et son empreinte", () => {
     if (outil === undefined) return;
 
     const { bytes: _bytes, ...sansBytes } = outil;
+    console.info(
+      `[garde bytes] 1 outil mesuré · ${String(outil.bytes)} octet(s) sans le champ, ` +
+        `${String(octetsCanoniques(outil as unknown as ValeurJson))} avec`,
+    );
     expect(outil.bytes).toBe(octetsCanoniques(sansBytes as unknown as ValeurJson));
     // Le témoin de l'auto-référence : compter l'entrée AVEC son `bytes` donne
     // une autre valeur — c'est précisément ce qu'on a évité.
@@ -155,6 +214,17 @@ describe("le manifeste et son empreinte", () => {
   });
 
   it("dérive le préfixe de l'id, et le nom complet du préfixe", () => {
+    const cas: ReadonlyArray<readonly [string, string, string]> = [
+      ["axionia", "inbox.recent", "axionia.inbox.recent"],
+      ["zoho", "mail.send", "zoho.mail.send"],
+    ];
+    let mesures = 0;
+    for (const [id, court, attendu] of cas) {
+      expect(nomComplet(prefixeDe(id), court)).toBe(attendu);
+      mesures += 1;
+    }
+    console.info(`[garde préfixe] ${String(mesures)} paire(s) mesurée(s)`);
+    expect(mesures).toBe(2);
     expect(prefixeDe("axionia")).toBe("axionia");
     expect(nomComplet("axionia", "inbox.recent")).toBe("axionia.inbox.recent");
   });
@@ -165,9 +235,21 @@ describe("le manifeste et son empreinte", () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("le manifeste refuse de se construire", () => {
+  /**
+   * ⚠️ ELLE ANNONCE SON COMPTE, ET C'EST LE POINT. Ces huit refus partageaient
+   *    la même aide, et aucun n'annonçait rien : un vert y était indiscernable
+   *    d'un vert obtenu sur zéro élément mesuré. `mesures` est le nombre
+   *    d'outils que `analyserDefinition` a RÉELLEMENT confrontés — zéro
+   *    signifierait que le refus vient d'ailleurs que de ce qu'on éprouve.
+   */
   function anomaliesDe(definition: DefinitionAdaptateur<Profil>): readonly string[] {
-    const { manifeste, verdict } = analyserDefinition(definition, PROFILS);
+    const { manifeste, verdict } = analyserDefinition(definition, PROFILS, SCEAU_TEMOIN);
+    console.info(
+      `[garde refus] ${String(verdict.mesures)} outil(s) mesuré(s) · ` +
+        `${String(verdict.anomalies.length)} anomalie(s) levée(s)`,
+    );
     expect(manifeste).toBeNull();
+    expect(verdict.anomalies.length).toBeGreaterThan(0);
     return verdict.anomalies;
   }
 
@@ -247,17 +329,28 @@ describe("le manifeste refuse de se construire", () => {
   });
 
   it("et `construireManifeste` LÈVE plutôt que de produire un document faux", () => {
+    let leve = false;
+    try {
+      kit.defineAdapter(definitionTemoin({ tools: [] })).manifeste();
+    } catch (erreur: unknown) {
+      leve = erreur instanceof ErreurManifeste;
+    }
+    console.info(`[garde levée] 1 définition vide mesurée · levée = ${String(leve)}`);
     expect(() => kit.defineAdapter(definitionTemoin({ tools: [] })).manifeste()).toThrow(
       ErreurManifeste,
     );
   });
 
   it("le compte mesuré vaut le nombre d'outils, et le plancher interdit le zéro", () => {
-    const { verdict } = analyserDefinition(definitionTemoin(), PROFILS);
+    const { verdict } = analyserDefinition(definitionTemoin(), PROFILS, SCEAU_TEMOIN);
+    console.info(
+      `[garde plancher] ${String(verdict.mesures)} outil(s) mesuré(s) · ` +
+        `plancher ${String(verdict.plancher)}`,
+    );
     expect(verdict.mesures).toBe(1);
     expect(verdict.plancher).toBe(1);
 
-    const vide = analyserDefinition(definitionTemoin({ tools: [] }), PROFILS);
+    const vide = analyserDefinition(definitionTemoin({ tools: [] }), PROFILS, SCEAU_TEMOIN);
     expect(vide.verdict.mesures).toBe(0);
     expect(vide.verdict.anomalies.length).toBeGreaterThan(0);
   });
@@ -265,10 +358,15 @@ describe("le manifeste refuse de se construire", () => {
 
 describe("le kit ferme l'énumération des profils", () => {
   it("refuse d'exister sans profils — sinon la garde du § 14 ne ferme rien", () => {
-    expect(() => creerAdapterKit([])).toThrow(/vide/);
+    console.info(`[garde profils] ${String(PROFILS.length)} profil(s) au kit réel, 0 au témoin`);
+    expect(() => creerAdapterKit([], SCEAU_TEMOIN)).toThrow(/vide/);
   });
 
   it("expose l'énumération reçue, sans en garder de copie propre", () => {
+    console.info(
+      `[garde énumération] ${String(kit.profilsConnus.length)} profil(s) exposé(s) · ` +
+        `même référence = ${String(kit.profilsConnus === PROFILS)}`,
+    );
     expect(kit.profilsConnus).toBe(PROFILS);
   });
 });

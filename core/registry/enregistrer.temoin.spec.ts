@@ -19,6 +19,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
 
 import { octetsCanoniques } from "../adapter-kit/json.js";
+import { SCEAU_PROFILS } from "../profiles/index.js";
+import { lireClesDAutorisation } from "../adapter-kit/autorisation.js";
 import { creerAdapterKit } from "../adapter-kit/kit.js";
 import type { Manifeste } from "../adapter-kit/manifest.js";
 import { enregistrerAdaptateur } from "./enregistrer.js";
@@ -31,7 +33,17 @@ import { MOTIFS_REFUS, type EntreeVerrou, type VerrouAdaptateurs } from "./types
 
 const PROFILS = ["courrier", "dev", "admin", "audit"] as const;
 
-const kit = creerAdapterKit(PROFILS);
+const kit = creerAdapterKit(PROFILS, SCEAU_PROFILS);
+
+/**
+ * Les noms qu'un schéma d'entrée n'a pas le droit de porter (§ 09, contrôle 7).
+ *
+ * DÉRIVÉS de `core/types.ts` — jamais écrits ici. `lireClesDAutorisation()` lit
+ * les propriétés de `ToolContext` et de `Habilitations` dans le source, et lève
+ * si la dérivation rend trop peu de clés : une liste vide rendrait le contrôle
+ * vacueux, et l'absence d'alerte se lirait comme une absence de problème.
+ */
+const CLES_AUTORISATION = lireClesDAutorisation().toutes;
 
 /** Un manifeste témoin, produit par le kit — donc conforme par construction. */
 function manifesteTemoin(): Manifeste {
@@ -90,6 +102,8 @@ describe("TÉMOIN — § 09 : l'admission sait-elle rougir, et sur quoi ?", () =
       manifesteBrut: JSON.parse(JSON.stringify(manifeste)) as unknown,
       verrou: verrou([entreeVerrou(manifeste)]),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     console.log(
@@ -119,6 +133,8 @@ describe("TÉMOIN — § 09 : l'admission sait-elle rougir, et sur quoi ?", () =
       manifesteBrut: servi,
       verrou: verrou([epingle]),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     const motifs = resultat.admis ? [] : resultat.refus.map((refus) => refus.motif);
@@ -142,6 +158,8 @@ describe("TÉMOIN — § 09 : l'admission sait-elle rougir, et sur quoi ?", () =
         manifesteBrut: brut,
         verrou: verrou([entreeVerrou(manifeste)]),
         profilsConnus: PROFILS,
+        sceauProfils: SCEAU_PROFILS,
+        clesDAutorisation: CLES_AUTORISATION,
       });
 
       expect(resultat.admis, `« ${cle} » doit être refusée`).toBe(false);
@@ -166,6 +184,8 @@ describe("TÉMOIN — § 09 : l'admission sait-elle rougir, et sur quoi ?", () =
       manifesteBrut: brut,
       verrou: verrou([entreeVerrou(manifeste)]),
       profilsConnus: PROFILS,
+      sceauProfils: SCEAU_PROFILS,
+      clesDAutorisation: CLES_AUTORISATION,
     });
 
     const motifs = resultat.admis ? [] : resultat.refus.map((refus) => refus.motif);
@@ -252,6 +272,8 @@ describe("TÉMOIN — § 09 : l'admission sait-elle rougir, et sur quoi ?", () =
         manifesteBrut: presente,
         verrou: verrou([epingle]),
         profilsConnus: PROFILS,
+        sceauProfils: SCEAU_PROFILS,
+        clesDAutorisation: CLES_AUTORISATION,
       });
 
       const motifs = resultat.admis ? [] : resultat.refus.map((refus) => refus.motif);
@@ -294,6 +316,8 @@ describe("TÉMOIN — § 09 : l'admission sait-elle rougir, et sur quoi ?", () =
         manifesteBrut: JSON.parse(JSON.stringify(benin)) as unknown,
         verrou: verrou([epingle]),
         profilsConnus: PROFILS,
+        sceauProfils: SCEAU_PROFILS,
+        clesDAutorisation: CLES_AUTORISATION,
       });
       expect(normal.admis, "contre-témoin : le manifeste épinglé, lui, doit être admis").toBe(true);
     },

@@ -44,16 +44,25 @@ interface Verdict {
  * § 11 — `ops_audit.stepDenied` porte LE NUMÉRO de l'étape qui a refusé. Un
  * trou ou un doublon dans la numérotation rend cette colonne indéchiffrable :
  * on ne saurait plus quelle étape le socle a refusée.
+ *
+ * ⚠️ LE PREMIER NUMÉRO N'EST PLUS ÉCRIT ICI, IL EST LU. L'étape 0 (« coffre »,
+ *    § 23) a été ajoutée au lot 1b devant les quatorze du § 11 : une garde qui
+ *    exigeait `index + 1` aurait alors rougi pour la mauvaise raison — non pas
+ *    parce que la numérotation est trouée, mais parce qu'elle commence ailleurs.
+ *    Ce qui doit être garanti est la CONTIGUÏTÉ, pas le point de départ ; c'est
+ *    elle, et elle seule, qui rend `stepDenied` lisible. Le point de départ est
+ *    donc dérivé de la première entrée.
  */
 function verifierNumerotation(etapes: readonly EtapeAppel[]): Verdict {
   const anomalies: string[] = [];
   const numerosVus = new Set<number>();
   const clesVues = new Set<string>();
+  const premier = etapes[0]?.numero ?? 0;
 
   etapes.forEach((etape, index) => {
-    const attendu = index + 1;
+    const attendu = premier + index;
     if (etape.numero !== attendu) {
-      anomalies.push(`position ${String(attendu)} porte le numéro ${String(etape.numero)}`);
+      anomalies.push(`position ${String(index)} porte le numéro ${String(etape.numero)}`);
     }
     if (numerosVus.has(etape.numero)) {
       anomalies.push(`numéro ${String(etape.numero)} en double`);
@@ -91,18 +100,43 @@ describe("core/types — la chaîne d'appel du § 11", () => {
     expect(verifierNumerotation(temoin).anomalies).not.toHaveLength(0);
   });
 
-  it("compte quatorze étapes, numérotées 1 à 14 sans trou ni doublon", () => {
+  it("compte les quatorze étapes du § 11 PLUS l'étape 0, sans trou ni doublon", () => {
     const verdict = verifierNumerotation(APPEL_STEPS);
 
     console.info(`[garde numérotation] ${String(verdict.mesures)} étapes mesurées`);
 
-    // Plancher-témoin : le § 11 en nomme quatorze. Zéro étape mesurée serait
-    // vert sans rien avoir regardé.
-    expect(verdict.mesures).toBe(14);
+    // Plancher-témoin : le § 11 en nomme quatorze, et le lot 1b y a ajouté
+    // l'étape 0 du § 23. Zéro étape mesurée serait vert sans rien regarder.
+    expect(verdict.mesures).toBe(15);
     expect(verdict.anomalies).toEqual([]);
+    // Le point de départ est vérifié ICI, une fois — pas dans la fonction, qui
+    // ne doit garantir que la contiguïté.
+    expect(APPEL_STEPS[0]?.numero).toBe(0);
+    expect(APPEL_STEPS[APPEL_STEPS.length - 1]?.numero).toBe(14);
   });
 
-  it("retrouve chaque étape par son numéro, et aucune hors de 1..14", () => {
+  it("fait de l'étape 0 le refus « coffre verrouillé » du § 23, AVANT tout le reste", () => {
+    // ÉCART DU CDC, tranché au lot 1b (ADR 0005) : le § 23 exige que tout appel
+    // d'outil soit refusé coffre verrouillé, et ce refus n'est aucune des
+    // quatorze étapes — il les PRÉCÈDE. Sans numéro, `ops_audit.stepDenied`
+    // reste nul et la ligne devient indiscernable d'une exception.
+    const coffre = APPEL_STEPS.find((etape) => etape.cle === "coffre");
+
+    expect(coffre).toBeDefined();
+    expect(coffre?.numero).toBe(0);
+    // Elle précède TOUTES les autres — dérivé, pas recopié.
+    const autres = APPEL_STEPS.filter((etape) => etape.cle !== "coffre");
+    console.info(`[garde étape 0] ${String(autres.length)} étapes confrontées à l'étape 0`);
+    expect(autres.length).toBe(14);
+    expect(autres.every((etape) => etape.numero > (coffre?.numero ?? -1))).toBe(true);
+    // Son code est celui que `core/vault` rend déjà, et il est du § 15 élargi.
+    expect(coffre?.refus).toBe("vault_locked");
+    expect(ERROR_CODES).toContain(coffre?.refus);
+    // Elle s'applique à TOUS les transports : un coffre fermé l'est en stdio.
+    expect(coffre?.httpSeul).toBe(false);
+  });
+
+  it("retrouve chaque étape par son numéro, et aucune hors de 0..14", () => {
     let retrouvees = 0;
     for (const etape of APPEL_STEPS) {
       expect(etapeParNumero(etape.numero)).toBe(etape);
@@ -112,7 +146,8 @@ describe("core/types — la chaîne d'appel du § 11", () => {
     console.info(`[garde etapeParNumero] ${String(retrouvees)} étapes retrouvées`);
 
     expect(retrouvees).toBe(APPEL_STEPS.length);
-    expect(etapeParNumero(0)).toBeUndefined();
+    // ⚠️ `0` est désormais une étape RÉELLE : la borne basse est -1.
+    expect(etapeParNumero(-1)).toBeUndefined();
     expect(etapeParNumero(15)).toBeUndefined();
   });
 
@@ -142,9 +177,9 @@ describe("core/types — la chaîne d'appel du § 11", () => {
         `sur ${String(APPEL_STEPS.length)} mesurées`,
     );
 
-    // Plancher-témoin : le § 11 en nomme neuf. Si ce compte tombe à zéro, la
-    // garde ne regarde plus rien.
-    expect(portantUnCode.length).toBeGreaterThanOrEqual(9);
+    // Plancher-témoin : le § 11 en nomme neuf, et l'étape 0 du § 23 en porte
+    // une dixième. Si ce compte tombe à zéro, la garde ne regarde plus rien.
+    expect(portantUnCode.length).toBeGreaterThanOrEqual(10);
     expect(inconnus.map((etape) => etape.cle)).toEqual([]);
   });
 
@@ -191,7 +226,10 @@ describe("core/types — les énumérations fermées", () => {
       ["DATA_CLASSES (§ 09)", DATA_CLASSES, 4],
       ["POLICY_LEVELS (§ 20)", POLICY_LEVELS, 3],
       ["OPS_SCOPES (§ 19.2)", OPS_SCOPES, 5],
-      ["ERROR_CODES (§ 15)", ERROR_CODES, 13],
+      // 13 au § 15, PLUS `vault_locked` — écart du § 23 tranché au lot 1b
+      // (ADR 0005). Le plancher porte le compte réel, pas celui du tableau du
+      // CDC : c'est ici, et dans l'ADR, que l'écart se lit.
+      ["ERROR_CODES (§ 15 + vault_locked)", ERROR_CODES, 14],
     ];
 
     let total = 0;
@@ -204,7 +242,7 @@ describe("core/types — les énumérations fermées", () => {
     }
 
     console.info(`[garde énumération] ${String(total)} valeurs mesurées au total`);
-    expect(total).toBe(29);
+    expect(total).toBe(30);
   });
 });
 

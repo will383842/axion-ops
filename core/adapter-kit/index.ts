@@ -48,8 +48,23 @@ export type { AnalyseDefinition, Manifeste, ManifesteOutil } from "./manifest.js
 export { creerAdapterKit } from "./kit.js";
 export type { AdaptateurEcrit, AdapterKit } from "./kit.js";
 
-export { verifierEnumerationProfils } from "./profils.js";
-export type { ContratProfils } from "./profils.js";
+export { verifierEnumerationProfils, verifierFormeDuSceau } from "./profils.js";
+export type { ContratProfils, SceauProfils } from "./profils.js";
+
+export {
+  DIALECTES_FERMETURE,
+  PROFONDEUR_MAXIMALE,
+  analyserFermeture,
+  chercherChampsDAutorisation,
+  dialecteDeFermeture,
+  sousSchemas,
+} from "./fermeture.js";
+export type {
+  ChampDAutorisation,
+  DialecteFermeture,
+  VerdictControle7,
+  VerdictFermeture,
+} from "./fermeture.js";
 
 export {
   clesDAutorisationDepuisSource,

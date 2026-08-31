@@ -41,7 +41,7 @@ const MINUTE = 60 * 1000;
 const HEURE = 60 * MINUTE;
 const AN = 365 * 24 * HEURE;
 
-const OUTIL: ReferenceOutil = { adapterId: "zoho.mail", tool: "send" };
+const OUTIL: ReferenceOutil = { adapterId: "zoho", tool: "mail.send" };
 const SCOPE_OUTIL = "zoho.mail.send";
 
 /** Vecteur d'essai PUBLIÉ de la RFC 6238. Aucun secret réel dans ce dépôt. */
@@ -178,7 +178,7 @@ describe("épreuve — `resserrer` et la durée d'un `libre`", () => {
 
     // Deux portées mesurées : l'outil seul, ET L'ADAPTATEUR ENTIER. Tout scope
     // que la ligne large domine est atteignable de la même façon.
-    const portees = [SCOPE_OUTIL, "zoho.mail.*"] as const;
+    const portees = [SCOPE_OUTIL, "zoho.*"] as const;
     const appliques: string[] = [];
     for (const [rang, portee] of portees.entries()) {
       const resultat = await resserrer(

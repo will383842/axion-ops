@@ -277,3 +277,32 @@ export function empreinteProfils(
   );
   return createHash("sha256").update(canonique, "utf8").digest("hex");
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Le SCEAU — ce qu'un manifeste épingle de cette énumération
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * LE SCEAU DE L'ÉNUMÉRATION : sa version, et son empreinte.
+ *
+ * ⚠️ POURQUOI IL EXISTE, ET CE QU'IL RÉPARE (ADR 0004). Jusqu'au lot 1b,
+ *    `PROFILES_VERSION` et `empreinteProfils()` étaient une garde QUI NE
+ *    POUVAIT PAS ROUGIR : le commentaire d'`empreinteProfils` affirmait qu'« un
+ *    adaptateur fédéré épingle cette version dans son manifeste », alors que le
+ *    manifeste ne portait NI la version NI l'empreinte, et le verrou non plus.
+ *    Une garde qui décrit un mécanisme absent est pire qu'une garde manquante :
+ *    on la croit en service.
+ *
+ *    Le manifeste porte désormais les deux (`profilesVersion`, `profilesSha`),
+ *    `analyserDefinition()` les remplit depuis ce sceau, et le registre les
+ *    confronte au sceau du socle. C'est CE couple, et lui seul, qui voyage.
+ *
+ * ⚠️ CALCULÉ UNE FOIS, AU CHARGEMENT. `PROFILES` est figé (`as const`) : le
+ *    recalculer à chaque appel ne changerait rien d'autre que le temps passé.
+ */
+export const SCEAU_PROFILS = {
+  version: PROFILES_VERSION,
+  empreinte: empreinteProfils(),
+} as const;
+
+export type SceauProfils = { readonly version: string; readonly empreinte: string };

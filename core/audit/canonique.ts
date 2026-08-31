@@ -22,6 +22,7 @@
 
 import { createHash } from "node:crypto";
 
+import type { ScelleurJournal } from "./ports.js";
 import type { ContenuLigne } from "./vocabulaire.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -29,7 +30,7 @@ import type { ContenuLigne } from "./vocabulaire.js";
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * LES QUINZE CHAMPS COUVERTS, DANS L'ORDRE DÉCLARÉ PAR `ops_audit`.
+ * LES SEIZE CHAMPS COUVERTS, DANS L'ORDRE DÉCLARÉ PAR `ops_audit`.
  *
  * L'ordre n'a aucune incidence sur l'empreinte — `canonicalStringify` trie les
  * clés — mais il rend la confrontation au schéma lisible.
@@ -51,6 +52,7 @@ export const CHAMPS_COUVERTS = [
   "decision",
   "stepDenied",
   "argHash",
+  "argHashValidated",
   "recordIds",
   "partialSources",
   "durationMs",
@@ -177,15 +179,47 @@ export function champsCouverts(ligne: ContenuLigne): Record<ChampCouvert, JsonVa
 }
 
 /**
- * L'empreinte d'une ligne, chaînage compris.
+ * LE MESSAGE d'une ligne — chaînage compris, AVANT scellement.
  *
  * Le séparateur `|` entre le préfixe et le canonique n'est pas décoratif : sans
  * lui, `prevHash` étant de longueur fixe, la concaténation resterait certes non
  * ambiguë — mais la moindre évolution de format (préfixe tronqué, empreinte
  * d'un autre algorithme) rouvrirait la porte à deux couples différents donnant
  * la même chaîne. Le voisin le pose déjà ; on le garde.
+ *
+ * ⚠️ IL EST EXPOSÉ À DESSEIN, ET IL NE CONTIENT AUCUN SECRET. C'est ce qui
+ *    permet à une garde d'inspecter ce qui est scellé sans connaître la clé —
+ *    et de prouver, par exemple, qu'un champ modifié change bien le message.
  */
-export function calculerSelfHash(prevHash: string | null, ligne: ContenuLigne): string {
-  const canonique = canonicalStringify(champsCouverts(ligne));
-  return sha256Hex(`${prevHash ?? ""}|${canonique}`);
+export function messageDeLigne(prevHash: string | null, ligne: ContenuLigne): string {
+  return `${prevHash ?? ""}|${canonicalStringify(champsCouverts(ligne))}`;
+}
+
+/**
+ * L'empreinte d'une ligne, chaînage compris — SCELLÉE (ADR 0002).
+ *
+ * ═══ CE QUI A CHANGÉ AU LOT 1b, ET POURQUOI MAINTENANT ═══
+ *
+ * C'était un SHA-256 NU. Un chaînage par SHA nu ne rend une réécriture visible
+ * qu'à la condition que l'attaquant ne puisse pas RECALCULER la chaîne — et
+ * n'importe qui peut recalculer un SHA nu. Retirer une tranche puis recalculer
+ * chaque empreinte donnait un journal amputé sur lequel `verifierChaine`
+ * rendait `valide = true`.
+ *
+ * Le changement modifie TOUTES les empreintes du journal. Il ne pouvait donc se
+ * faire qu'AVANT le premier chaînage réel : aucune base ne tourne, aucune ligne
+ * n'existe. Après, il aurait fallu une clôture de rupture et deux régimes de
+ * vérification cohabitant dans le même journal.
+ *
+ * ⚠️ LE SCELLEUR EST LE PREMIER PARAMÈTRE, ET IL EST OBLIGATOIRE. Un paramètre
+ *    optionnel avec un repli — une clé par défaut, un SHA nu quand la clé
+ *    manque — annulerait toute la protection pour quiconque oublierait de le
+ *    passer, et personne ne le verrait. Le compilateur le réclame partout.
+ */
+export function calculerSelfHash(
+  scelleur: ScelleurJournal,
+  prevHash: string | null,
+  ligne: ContenuLigne,
+): string {
+  return scelleur.sceller(messageDeLigne(prevHash, ligne));
 }

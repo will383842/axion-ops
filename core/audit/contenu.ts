@@ -9,7 +9,7 @@
  * MÉTHODE — on ne cherche pas « du contenu » (impossible à définir), on exige
  * une FORME pour chaque champ couvert. Une phrase, un extrait d'e-mail, un nom
  * de personne : tous portent des espaces, ou dépassent une longueur d'identifiant.
- * Aucun des quinze champs couverts n'a de raison légitime d'en porter.
+ * Aucun des seize champs couverts n'a de raison légitime d'en porter.
  *
  * La table des formes est un `Record<ChampCouvert, Forme>` : ajouter un champ
  * couvert sans lui déclarer de forme est une ERREUR DE COMPILATION. C'est la
@@ -52,8 +52,27 @@ const FORME_IDENTIFIANT = /^[^\s\p{C}]+$/u;
  *
  * Six segments laissent passer un identifiant composite bavard
  * (`crm.contact.v2.fr.actif.42`) et crèvent une phrase, qui en tire une dizaine.
+ *
+ * ⚠️ EXPORTÉ, ET IL RESTE À UN SEUL ENDROIT. C'est l'une des quatre bornes que
+ *    Will a laissées en l'état le 2026-08-31, à revoir au lot 6 : elle doit donc
+ *    se changer en UNE ligne. `core/chaine/etape-14-execution.ts` la LIT pour
+ *    borner `failedSources[]` de la même façon — une recopie en ferait deux, et
+ *    la seconde ne suivrait pas.
  */
-const MAX_SEGMENTS_ALPHABETIQUES = 6;
+export const MAX_SEGMENTS_ALPHABETIQUES = 6;
+
+/**
+ * Combien de segments purement alphabétiques un nom porte-t-il ?
+ *
+ * ⚠️ LA DÉRIVATION, PAS LA RECOPIE. `FORME_SOURCE` (§ 13.2) avait besoin
+ *    exactement de ce comptage : son commentaire affirmait « une consigne
+ *    rédigée en français n'y entre pas », et c'était faux — la forme n'exclut
+ *    pas les phrases, elle exclut les ESPACES, et le tiret est un séparateur de
+ *    mots parfaitement lisible, pour un humain comme pour un modèle.
+ */
+export function compteSegmentsAlphabetiques(valeur: string): number {
+  return valeur.split(/[-_.]/u).filter((segment) => /^\p{L}+$/u.test(segment)).length;
+}
 
 type Forme =
   | { readonly genre: "énumération"; readonly valeurs: readonly string[] }
@@ -66,6 +85,7 @@ type Forme =
     }
   | { readonly genre: "entier-positif"; readonly max: number }
   | { readonly genre: "horodatage" }
+  | { readonly genre: "booléen" }
   | { readonly genre: "étape-ou-null" };
 
 /**
@@ -91,6 +111,11 @@ const FORMES: Record<ChampCouvert, Forme> = {
   outcome: { genre: "énumération", valeurs: OUTCOMES },
   stepDenied: { genre: "étape-ou-null" },
   argHash: { genre: "empreinte" },
+  // Un booléen ne peut pas transporter de contenu — mais il peut transporter
+  // un `undefined`, une chaîne « false », un `0`. Le vérifier n'est donc pas
+  // décoratif : ce champ entre dans l'empreinte chaînée, et une valeur non
+  // booléenne y produirait un canonique stable et faux.
+  argHashValidated: { genre: "booléen" },
   // § 12, règle 3 — pseudonymes, donc bornés et sans texte libre. 512 identifiants
   // au maximum : au-delà, ce n'est plus une trace d'appel, c'est un export.
   // 64 caractères, pas 128 : un pseudonyme du § 12, règle 3, y tient largement
@@ -133,6 +158,57 @@ export class ErreurContenuJournal extends Error {
   }
 }
 
+/**
+ * LES BORNES D'UNE COLONNE DE LISTE DU JOURNAL, DÉRIVÉES DE `FORMES`.
+ *
+ * ⚠️ POURQUOI CETTE FONCTION EST EXPORTÉE, ET CE QU'ELLE A FERMÉ. `recordIds`
+ *    traversait tout le socle SANS AUCUNE NORMALISATION : étape 14 →
+ *    `ExecutionEtablie` → `Succes` → `avecJournal` → `journaliser`, où
+ *    {@link verifierAucunContenu} REFUSAIT la ligne. L'écriture levait alors
+ *    HORS du `try` de `journaliser`, donc sans même l'habillage
+ *    `ErreurJournalIndisponible` : ZÉRO ligne d'`ops_audit`, effet extérieur
+ *    déjà parti. Un adaptateur pouvait ainsi faire perdre la trace d'un appel
+ *    dont l'effet était irréversible, de façon RÉPÉTABLE, à chaque appel — il
+ *    suffisait d'un `recordIds` portant un espace, un « @ », plus de 64
+ *    caractères, plus de six segments alphabétiques, ou plus de 512 éléments.
+ *
+ *    Ce n'était PAS la borne déclarée en tête d'`orchestrateur.ts` (« borné par
+ *    la disponibilité du journal ») : le journal était disponible et
+ *    fonctionnait — c'est l'adaptateur qui décidait.
+ *
+ * L'étape 14 normalise désormais en amont, et elle DÉRIVE la règle d'ici plutôt
+ * que de la recopier : deux copies d'une règle de forme divergent au premier
+ * ajustement, et la garde devient muette du côté qui n'a pas suivi.
+ */
+export function bornesDeListeDuJournal(champ: "recordIds" | "partialSources"): {
+  readonly maxCar: number;
+  readonly maxElements: number;
+} {
+  const forme = FORMES[champ];
+  // Le genre est VÉRIFIÉ ici plutôt que supposé : un changement de genre chez
+  // `FORMES` doit rougir, pas rendre des bornes fantaisistes.
+  if (forme.genre !== "liste-identifiants") {
+    throw new Error(
+      `core/audit/contenu : « ${champ} » n'est plus une liste d'identifiants mais ` +
+        `« ${forme.genre} » — la normalisation de l'étape 14 dérivait de ce genre.`,
+    );
+  }
+  return { maxCar: forme.maxCar, maxElements: forme.maxElements };
+}
+
+/**
+ * Un identifiant est-il admissible dans une colonne de liste du journal ?
+ *
+ * C'est {@link verifierIdentifiant}, réduit à son verdict. Les deux passent par
+ * le MÊME code : il n'y a donc pas deux règles, il y en a une, lue à deux
+ * endroits. Une divergence est impossible plutôt qu'improbable.
+ */
+export function estIdentifiantDeJournal(valeur: unknown, maxCar: number): boolean {
+  const anomalies: string[] = [];
+  verifierIdentifiant("témoin", valeur, maxCar, anomalies);
+  return anomalies.length === 0;
+}
+
 function verifierIdentifiant(
   champ: string,
   valeur: unknown,
@@ -167,7 +243,7 @@ function verifierIdentifiant(
     );
     return;
   }
-  const segments = valeur.split(/[-_.]/u).filter((segment) => /^\p{L}+$/u.test(segment));
+  const segments = { length: compteSegmentsAlphabetiques(valeur) };
   if (segments.length > MAX_SEGMENTS_ALPHABETIQUES) {
     anomalies.push(
       `${champ} : ${String(segments.length)} segments alphabétiques séparés par « - », « _ » ou ` +
@@ -256,6 +332,13 @@ export function verifierAucunContenu(ligne: ContenuLigne): VerdictContenu {
           anomalies.push(`${champ} : attendu un entier positif`);
         } else if (valeur > forme.max) {
           anomalies.push(`${champ} : ${String(valeur)} au-delà de ${String(forme.max)}`);
+        }
+        break;
+      }
+      case "booléen": {
+        valeursInspectees += 1;
+        if (typeof valeur !== "boolean") {
+          anomalies.push(`${champ} : attendu un booléen, reçu ${typeof valeur}`);
         }
         break;
       }

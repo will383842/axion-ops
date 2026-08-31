@@ -46,6 +46,7 @@ import { construireManifeste, empreinteDuManifeste, texteDuManifeste } from "./m
 import type { Manifeste } from "./manifest.js";
 import { definirOutil } from "./types.js";
 import type { DefinitionAdaptateur, DefinitionOutil, SpecOutil } from "./types.js";
+import type { SceauProfils } from "./profils.js";
 import type { ZodType } from "zod/v4";
 
 /**
@@ -76,16 +77,29 @@ export interface AdapterKit<TProfile extends string> {
   ): DefinitionOutil<TProfile>;
   /** L'énumération reçue, re-exposée pour le harnais. */
   readonly profilsConnus: readonly TProfile[];
+  /** Le sceau reçu, re-exposé pour le harnais (ADR 0004). */
+  readonly sceauProfils: SceauProfils;
 }
 
 /**
  * Crée le kit d'écriture d'un adaptateur.
  *
+ * ```ts
+ * import { PROFILE_NAMES, SCEAU_PROFILS } from "../../core/profiles/index.js";
+ * const { defineAdapter } = creerAdapterKit(PROFILE_NAMES, SCEAU_PROFILS);
+ * ```
+ *
  * @param profilsConnus l'énumération FERMÉE de `core/profiles/`. C'est le seul
  *        endroit où elle entre : ce module n'en garde aucune copie.
+ * @param sceauProfils le SCEAU de cette énumération — version et empreinte
+ *        (ADR 0004). Il entre dans le manifeste produit, et le registre le
+ *        confronte au sceau du socle : c'est ce qui rend visible qu'un
+ *        adaptateur fédéré a été construit contre une énumération périmée.
+ *        Il est REÇU et non recalculé, pour la même raison que l'énumération.
  */
 export function creerAdapterKit<TProfile extends string>(
   profilsConnus: readonly TProfile[],
+  sceauProfils: SceauProfils,
 ): AdapterKit<TProfile> {
   if (profilsConnus.length === 0) {
     // Un kit sans profil accepterait `profiles: []` partout et la garde du
@@ -98,11 +112,12 @@ export function creerAdapterKit<TProfile extends string>(
 
   return {
     profilsConnus,
+    sceauProfils,
     definirOutil,
     defineAdapter(definition) {
       let cache: Manifeste | null = null;
       const produire = (): Manifeste => {
-        cache ??= construireManifeste(definition, profilsConnus);
+        cache ??= construireManifeste(definition, profilsConnus, sceauProfils);
         return cache;
       };
       return {

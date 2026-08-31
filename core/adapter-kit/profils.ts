@@ -30,6 +30,51 @@ export interface ContratProfils<TProfile extends string> {
    * chez le fournisseur : `type ProfileName = (typeof PROFILE_NAMES)[number]`.
    */
   readonly PROFILE_NAMES: readonly TProfile[];
+  /**
+   * LE SCEAU de l'énumération — version et empreinte (ADR 0004).
+   *
+   * ⚠️ IL NE SE DÉDUIT PAS DE `PROFILE_NAMES`. Deux énumérations peuvent porter
+   *    les mêmes noms et n'être pas la même : un profil retiré puis rendu,
+   *    un `depuis` corrigé. C'est le fournisseur qui décide de ce que
+   *    l'empreinte couvre — `core/profiles` en exclut nommément `libelle`,
+   *    parce qu'une reformulation d'écran ne doit pas invalider les manifestes
+   *    de tout le monde. Le recalculer ici serait décider à sa place.
+   */
+  readonly SCEAU_PROFILS: SceauProfils;
+}
+
+/**
+ * Ce qu'un manifeste ÉPINGLE de l'énumération contre laquelle il a été produit.
+ *
+ * Deux champs, et pas un de plus : la version dit CE QUE l'auteur croyait
+ * viser, l'empreinte dit ce qu'il visait VRAIMENT. Garder les deux n'est pas
+ * une redondance — une version inchangée avec une empreinte changée est le cas
+ * exact qu'on veut voir : quelqu'un a modifié l'énumération sans en changer la
+ * version.
+ */
+export interface SceauProfils {
+  readonly version: string;
+  readonly empreinte: string;
+}
+
+/**
+ * Vérifie qu'un sceau reçu a la forme d'un sceau. Rend les anomalies.
+ *
+ * ⚠️ ELLE NE COMPARE RIEN. La confrontation au sceau du socle appartient au
+ *    REGISTRE : c'est lui qui détient la vérité du socle, et c'est chez lui que
+ *    le refus doit être prononcé et journalisé.
+ */
+export function verifierFormeDuSceau(sceau: SceauProfils): readonly string[] {
+  const anomalies: string[] = [];
+  if (sceau.version.trim() === "") {
+    anomalies.push("le sceau des profils porte une version vide.");
+  }
+  if (!/^[0-9a-f]{64}$/.test(sceau.empreinte)) {
+    anomalies.push(
+      "le sceau des profils porte une empreinte hors forme — attendu 64 hexadécimaux minuscules.",
+    );
+  }
+  return anomalies;
 }
 
 /**

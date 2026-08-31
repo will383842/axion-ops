@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { avecJournal, ErreurJournalIndisponible, Journal } from "./journal.js";
 import type { EnteteAppel } from "./journal.js";
 import { ErreurContenuJournal } from "./contenu.js";
-import { HorlogeFigee } from "./fixtures.js";
+import { SCELLEUR_TEMOIN, HorlogeFigee } from "./fixtures.js";
 import { JournalMemoire } from "./memoire.js";
 import type { JournalStore } from "./ports.js";
 import type { LigneAAjouter, LigneEcrite, Terminaison } from "./vocabulaire.js";
@@ -54,7 +54,7 @@ class StoreEnPanne implements JournalStore {
 describe("TÉMOIN — § 11 : l'invariant de sortie sait-il rougir ?", () => {
   it("écrit UNE ligne pour CHACUNE des quatorze étapes de refus — compte DÉRIVÉ d'APPEL_STEPS", async () => {
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
     let refusEprouves = 0;
     for (const etape of APPEL_STEPS) {
@@ -84,7 +84,7 @@ describe("TÉMOIN — § 11 : l'invariant de sortie sait-il rougir ?", () => {
 
   it("une EXCEPTION du corps écrit une ligne `interrompu`, PUIS l'exception repart telle quelle", async () => {
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
     const panne = new Error("l'amont a coupé");
 
     await expect(avecJournal(journal, ENTETE, () => Promise.reject(panne))).rejects.toBe(panne);
@@ -104,7 +104,7 @@ describe("TÉMOIN — § 11 : l'invariant de sortie sait-il rougir ?", () => {
 
   it("REFUSE l'écriture d'une ligne portant du contenu, au lieu d'écrire en avertissant", async () => {
     const store = new JournalMemoire();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
     await expect(
       avecJournal(journal, ENTETE, () =>
@@ -126,7 +126,7 @@ describe("TÉMOIN — § 11 : l'invariant de sortie sait-il rougir ?", () => {
 
   it("FAIL-CLOSED : une panne du journal fait échouer l'appel, elle n'est jamais avalée", async () => {
     const store = new StoreEnPanne();
-    const journal = new Journal(store, new HorlogeFigee());
+    const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
 
     await expect(
       avecJournal(journal, ENTETE, () =>
@@ -159,7 +159,7 @@ describe("TÉMOIN — § 11 : l'invariant de sortie sait-il rougir ?", () => {
       // La règle tenue : l'indisponibilité du journal S'AJOUTE à la panne
       // applicative, elle ne la remplace jamais.
       const store = new StoreEnPanne();
-      const journal = new Journal(store, new HorlogeFigee());
+      const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
       const causeReelle = new Error("Zoho a rendu 500 sur l'envoi");
 
       const erreur = await avecJournal(journal, ENTETE, () => Promise.reject(causeReelle)).catch(
@@ -215,7 +215,7 @@ describe("TÉMOIN — § 11 : l'invariant de sortie sait-il rougir ?", () => {
       // pour l'appelant — mais l'effet, lui, a bien eu lieu, et rien ne
       // l'atteste.
       const store = new StoreEnPanne();
-      const journal = new Journal(store, new HorlogeFigee());
+      const journal = new Journal(SCELLEUR_TEMOIN, store, new HorlogeFigee());
       let effetProduit = false;
 
       const erreur = await avecJournal(journal, ENTETE, () => {

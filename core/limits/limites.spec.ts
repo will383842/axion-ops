@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { APPEL_STEPS } from "../types.js";
 import { creerCalculArgHash, type CoffreArgHash } from "./arg-hash.js";
 import { LIMITES_DE_DEPART, TOUT_OUTIL, fenetreCanonique } from "./config.js";
-import type { DepotIdempotence, LigneIdempotence, StatutIdempotence } from "./idempotency.js";
+import type { DepotIdempotence } from "./idempotency.js";
+import { DepotIdempotenceEnMemoire, DepotQuotaEnMemoire } from "./memoire.js";
 import { ETAPES_LIMITES, appliquerLimites, type ResultatValidation } from "./limites.js";
-import type { DemandeIncrement, DepotQuota, EtatCompteur } from "./quota.js";
+import type { DepotQuota } from "./quota.js";
 
 /**
  * Gardes de `core/limits/` — L'ORDRE des étapes 8, 12 et 13 (§ 11).
@@ -25,103 +26,6 @@ const coffre: CoffreArgHash = {
     return Promise.resolve("cle-de-test-0123456789abcdef0123456789ab");
   },
 };
-
-class DepotQuotaEnMemoire implements DepotQuota {
-  readonly compteurs = new Map<string, number>();
-  /** Nombre TOTAL d'unités consommées, toutes fenêtres confondues. */
-  get totalConsomme(): number {
-    let total = 0;
-    for (const valeur of this.compteurs.values()) total += valeur;
-    return total;
-  }
-
-  private static cle(d: Pick<DemandeIncrement, "window" | "tool" | "principal">): string {
-    return `${d.window}::${d.tool}::${d.principal}`;
-  }
-
-  valeur(d: Pick<DemandeIncrement, "window" | "tool" | "principal">): number {
-    return this.compteurs.get(DepotQuotaEnMemoire.cle(d)) ?? 0;
-  }
-
-  incrementerSiSousLePlafond(demande: DemandeIncrement): Promise<EtatCompteur> {
-    const cle = DepotQuotaEnMemoire.cle(demande);
-    const courant = this.compteurs.get(cle) ?? 0;
-    const accepte = courant + 1 <= demande.limit;
-    if (accepte) this.compteurs.set(cle, courant + 1);
-    return Promise.resolve({
-      accepte,
-      count: accepte ? courant + 1 : courant,
-      limit: demande.limit,
-      warnAt: demande.warnAt,
-      resetAt: demande.resetAt,
-    });
-  }
-
-  decrementer(cle: Pick<DemandeIncrement, "window" | "tool" | "principal">): Promise<void> {
-    const k = DepotQuotaEnMemoire.cle(cle);
-    this.compteurs.set(k, Math.max(0, (this.compteurs.get(k) ?? 0) - 1));
-    return Promise.resolve();
-  }
-}
-
-class DepotIdemEnMemoire implements DepotIdempotence {
-  readonly lignes = new Map<string, LigneIdempotence>();
-
-  private static cle(tool: string, key: string): string {
-    return `${tool}::${key}`;
-  }
-
-  poser(ligne: LigneIdempotence): void {
-    this.lignes.set(DepotIdemEnMemoire.cle(ligne.tool, ligne.key), ligne);
-  }
-
-  insererSiAbsente(ligne: LigneIdempotence): Promise<boolean> {
-    const cle = DepotIdemEnMemoire.cle(ligne.tool, ligne.key);
-    if (this.lignes.has(cle)) return Promise.resolve(false);
-    this.lignes.set(cle, ligne);
-    return Promise.resolve(true);
-  }
-
-  lire(tool: string, key: string): Promise<LigneIdempotence | null> {
-    return Promise.resolve(this.lignes.get(DepotIdemEnMemoire.cle(tool, key)) ?? null);
-  }
-
-  remplacerSiPerimee(ligne: LigneIdempotence, maintenant: Date): Promise<boolean> {
-    const existante = this.lignes.get(DepotIdemEnMemoire.cle(ligne.tool, ligne.key));
-    if (existante === undefined || existante.expiresAt.getTime() > maintenant.getTime()) {
-      return Promise.resolve(false);
-    }
-    this.lignes.set(DepotIdemEnMemoire.cle(ligne.tool, ligne.key), ligne);
-    return Promise.resolve(true);
-  }
-
-  reprendreSiEchouee(ligne: LigneIdempotence): Promise<boolean> {
-    const existante = this.lignes.get(DepotIdemEnMemoire.cle(ligne.tool, ligne.key));
-    if (existante === undefined || existante.status !== "failed") return Promise.resolve(false);
-    this.lignes.set(DepotIdemEnMemoire.cle(ligne.tool, ligne.key), ligne);
-    return Promise.resolve(true);
-  }
-
-  cloturer(params: {
-    readonly tool: string;
-    readonly key: string;
-    readonly status: Extract<StatutIdempotence, "done" | "failed">;
-    readonly resultRef: string | null;
-    readonly completedAt: Date;
-  }): Promise<void> {
-    const cle = DepotIdemEnMemoire.cle(params.tool, params.key);
-    const existante = this.lignes.get(cle);
-    if (existante !== undefined) {
-      this.lignes.set(cle, {
-        ...existante,
-        status: params.status,
-        resultRef: params.resultRef,
-        completedAt: params.completedAt,
-      });
-    }
-    return Promise.resolve();
-  }
-}
 
 interface Charge {
   readonly id: string;
@@ -214,7 +118,7 @@ describe("core/limits — l'ordre des étapes", () => {
 describe("core/limits — un appel malformé ne consomme rien", () => {
   it("laisse TOUS les compteurs intacts, et affiche le compteur avant/après", async () => {
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
 
     const fenetreRafale = fenetreCanonique(
       "rafale",
@@ -252,7 +156,7 @@ describe("core/limits — un appel malformé ne consomme rien", () => {
     // Témoin inverse : sans lui, la garde précédente serait verte même si la
     // fonction ne comptait JAMAIS rien.
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
 
     const verdict = await appliquerLimites(parametres(quota, idem, validateurQuiAccepte));
 
@@ -269,7 +173,7 @@ describe("core/limits — un appel malformé ne consomme rien", () => {
 
   it("nomme le champ fautif et la valeur attendue (§ 15)", async () => {
     const verdict = await appliquerLimites(
-      parametres(new DepotQuotaEnMemoire(), new DepotIdemEnMemoire(), validateurQuiRefuse),
+      parametres(new DepotQuotaEnMemoire(), new DepotIdempotenceEnMemoire(), validateurQuiRefuse),
     );
     if (verdict.ok) throw new Error("inatteignable");
     if (verdict.etape !== 8) throw new Error("inatteignable");
@@ -288,7 +192,7 @@ describe("core/limits — la chaîne complète", () => {
     // Décision du constructeur, signalée en écart : le motif du § 11 (« le
     // modèle attend et rejoue le même appel invalide ») vaut ici aussi.
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
 
     // Premier appel : accepté, réservation posée, puis close.
     const premier = await appliquerLimites(parametres(quota, idem, validateurQuiAccepte));
@@ -320,7 +224,7 @@ describe("core/limits — la chaîne complète", () => {
 
   it("ne rend PAS le quota sur un `conflict` — l'appel était légitime", async () => {
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
 
     // Un appel identique est déjà EN COURS sous la même clé.
     const premier = await appliquerLimites(parametres(quota, idem, validateurQuiAccepte));
@@ -345,7 +249,7 @@ describe("core/limits — la chaîne complète", () => {
 
   it("refuse en 429 avant d'atteindre l'idempotence quand la rafale mord", async () => {
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
     const plafond = LIMITES_DE_DEPART.rafale.limite;
 
     // Des clés d'idempotence distinctes, pour n'éprouver QUE le quota.
@@ -380,7 +284,7 @@ describe("core/limits — la chaîne complète", () => {
 
   it("sert le rejeu mémorisé sans réexécuter, une fois la réservation close", async () => {
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
 
     const premier = await appliquerLimites(parametres(quota, idem, validateurQuiAccepte));
     if (!premier.ok) throw new Error("inatteignable");
@@ -408,7 +312,7 @@ describe("core/limits — la chaîne complète", () => {
 
   it("porte le même argHash pour le refus que pour le succès — le journal doit pouvoir l'écrire", async () => {
     const quota = new DepotQuotaEnMemoire();
-    const idem = new DepotIdemEnMemoire();
+    const idem = new DepotIdempotenceEnMemoire();
 
     const succes = await appliquerLimites(parametres(quota, idem, validateurQuiAccepte));
     if (!succes.ok) throw new Error("inatteignable");

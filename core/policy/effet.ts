@@ -17,11 +17,16 @@
 import {
   APPEL_STEPS,
   EFFECTS,
+  POLICY_LEVELS,
   type AppelStep,
   type Effect,
   type ErrorCode,
   type PolicyLevel,
 } from "../types.js";
+// `NIVEAU_DE_REPLI` est DÉRIVÉ de la tête de `POLICY_LEVELS` chez son
+// propriétaire. Le recopier ici en ferait une seconde vérité — celle qui, le
+// jour où le § 20 réordonne ses niveaux, replierait vers le mauvais.
+import { NIVEAU_DE_REPLI } from "./niveau.js";
 
 /** Le compilateur ne doit jamais laisser passer un `Effect` non traité. */
 function jamais(valeur: never): never {
@@ -176,6 +181,52 @@ export function deciderEtape10(demande: DemandeEtape10): DecisionPolitique {
   if (!estEffetExterieur(effet)) {
     // `read` et `write-draft` passent à tous les niveaux, `brouillon` compris.
     return { decision: "autorise" };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  UN NIVEAU HORS ÉNUMÉRATION REPLIE SUR LE PLUS STRICT. IL PROMOUVAIT.
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ CE QUE CETTE FONCTION FAISAIT, ET POURQUOI C'ÉTAIT L'INVERSE DU § 20.
+  //    Elle testait `niveau === "brouillon"`, puis `niveau === "confirmé"`.
+  //    Toute AUTRE valeur — donc toute valeur corrompue — retombait dans la
+  //    branche « ni l'un ni l'autre », qui est la branche PERMISSIVE : elle
+  //    valait `libre`, et un `send` partait sans confirmation. Six formes de
+  //    corruption ordinaires ont été mesurées, et les six autorisaient l'envoi :
+  //    un espace de fin (remplissage d'un `char(n)`), une casse changée, un
+  //    octet nul (troncature d'encodage), une colonne vide, une valeur d'une
+  //    autre énumération, un accent perdu à l'import.
+  //
+  //    Le § 20 dit l'exact inverse : `brouillon` est le « niveau de repli en cas
+  //    de panne, CORRUPTION ou redémarrage ». Une corruption doit REPLIER vers
+  //    le plus strict, jamais PROMOUVOIR vers le plus permissif.
+  //
+  // ⚠️ POURQUOI UN REFUS ET NON UNE LEVÉE. `jamais()` — l'idiome exhaustif que
+  //    ce fichier emploie trois lignes plus haut pour `Effect` — est le bon
+  //    outil quand l'union est close à la compilation ET à l'exécution. Ici la
+  //    valeur vient d'une COLONNE DE BASE : elle arrive corrompue sans qu'aucun
+  //    type ne bronche. Une levée à cet endroit ferait échouer l'appel AVANT que
+  //    le journal ne soit écrit, et l'objectif O6 exige une ligne. On replie
+  //    donc, on refuse, et le MESSAGE dit que la politique est ILLISIBLE — ce
+  //    n'est pas la même panne qu'un refus de politique ordinaire, et les deux
+  //    ne se réparent pas du même geste.
+  if (!(POLICY_LEVELS as readonly string[]).includes(niveau)) {
+    return {
+      decision: "refuse",
+      code: "policy_denied",
+      etape: ETAPE_POLITIQUE,
+      // Le niveau RENDU est celui qui a servi à décider — le repli —, jamais la
+      // valeur corrompue : elle n'est pas un `PolicyLevel`, et `ops_audit`
+      // refuserait la ligne qui la porterait (§ 31).
+      niveau: NIVEAU_DE_REPLI,
+      cible,
+      message:
+        `Politique ILLISIBLE : le niveau enregistré n'est aucun de ceux du § 20 ` +
+        `(${POLICY_LEVELS.join(", ")}). Repli sur « ${NIVEAU_DE_REPLI} » : aucun effet ` +
+        `extérieur. L'outil « ${cible.tool} » porte l'effet « ${effet} ». Ce n'est PAS un ` +
+        `refus de politique — c'est une politique qu'on ne sait pas lire : vérifiez la ligne ` +
+        `de politique dans la console, puis réappliquez le niveau voulu.`,
+    };
   }
 
   if (niveau === "brouillon") {

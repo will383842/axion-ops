@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { construireJournal, reecrireSansRecalculer } from "./fixtures.js";
+import { SCELLEUR_TEMOIN, construireJournal, reecrireSansRecalculer } from "./fixtures.js";
 import type { LigneAudit } from "./vocabulaire.js";
 import { verifierChaine } from "./verification.js";
 
@@ -23,7 +23,7 @@ function genres(anomalies: readonly { readonly genre: string }[]): readonly stri
 describe("core/audit — la vérification d'un journal intact", () => {
   it("annonce COMBIEN de lignes elle a vérifiées, jamais un booléen seul", async () => {
     const store = await construireJournal(TAILLE);
-    const rapport = verifierChaine(store.toutes());
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, store.toutes());
 
     console.info(`[garde chaîne] ${String(rapport.lignesVerifiees)} lignes vérifiées`);
 
@@ -37,7 +37,7 @@ describe("core/audit — la vérification d'un journal intact", () => {
   });
 
   it("rend un compte de ZÉRO sur un journal vide — le pire des verts, mais annoncé", () => {
-    const rapport = verifierChaine([]);
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, []);
 
     console.info(`[garde chaîne · vide] ${String(rapport.lignesVerifiees)} lignes vérifiées`);
 
@@ -57,7 +57,7 @@ describe("core/audit — une ligne retirée AU MILIEU casse la vérification", (
     store.supprimerIntervalle(milieu.seq, milieu.seq);
 
     const restant = store.toutes();
-    const rapport = verifierChaine(restant);
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, restant);
 
     console.info(
       `[garde retrait milieu] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -100,7 +100,7 @@ describe("core/audit — une TRONCATURE DE TÊTE casse la vérification aussi", 
     expect(verdictDuVoisin.valid).toBe(true); // c'est bien le défaut annoncé
 
     // 2) Le nôtre le voit.
-    const rapport = verifierChaine(restant);
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, restant);
     console.info(
       `[garde troncature de tête] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
         `genres : ${genres(rapport.anomalies).join(", ")}`,
@@ -139,7 +139,7 @@ describe("core/audit — une ligne RÉÉCRITE casse la vérification", () => {
     const store = await construireJournal(TAILLE);
     const reecrit = reecrireSansRecalculer(store.toutes(), 7, { principal: "usurpateur" });
 
-    const rapport = verifierChaine(reecrit);
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, reecrit);
 
     console.info(
       `[garde réécriture] ${String(rapport.lignesVerifiees)} lignes vérifiées, ` +
@@ -154,7 +154,7 @@ describe("core/audit — une ligne RÉÉCRITE casse la vérification", () => {
   it("voit aussi un `recordIds` réordonné — un tableau n'est pas un ensemble", async () => {
     const store = await construireJournal(3);
     const avec = reecrireSansRecalculer(store.toutes(), 0, { recordIds: ["a", "b"] });
-    expect(verifierChaine(avec).valide).toBe(false);
+    expect(verifierChaine(SCELLEUR_TEMOIN, avec).valide).toBe(false);
   });
 });
 
@@ -170,7 +170,7 @@ describe("core/audit — ordonner par `seq`, JAMAIS par `at` (§ 12)", () => {
     );
 
     const parAt = [...horlogeCassee].sort((a, b) => a.at.getTime() - b.at.getTime());
-    const rapportParAt = verifierChaine(parAt);
+    const rapportParAt = verifierChaine(SCELLEUR_TEMOIN, parAt);
 
     console.info(
       `[garde ordre] tri par « at » : ${String(rapportParAt.lignesVerifiees)} lignes, ` +
@@ -183,7 +183,7 @@ describe("core/audit — ordonner par `seq`, JAMAIS par `at` (§ 12)", () => {
 
     // Le même journal, lu par `seq`, n'a que l'anomalie du champ `at` réécrit —
     // et surtout aucun désordre.
-    const rapportParSeq = verifierChaine(horlogeCassee);
+    const rapportParSeq = verifierChaine(SCELLEUR_TEMOIN, horlogeCassee);
     expect(genres(rapportParSeq.anomalies)).not.toContain("ordre-non-croissant");
   });
 });
@@ -195,8 +195,10 @@ describe("core/audit — la vérification par tranches", () => {
     const premiere = toutes.slice(0, 5);
     const seconde = toutes.slice(5);
 
-    const rapportA = verifierChaine(premiere);
-    const rapportB = verifierChaine(seconde, { prevHashAttendu: rapportA.derniereEmpreinte });
+    const rapportA = verifierChaine(SCELLEUR_TEMOIN, premiere);
+    const rapportB = verifierChaine(SCELLEUR_TEMOIN, seconde, {
+      prevHashAttendu: rapportA.derniereEmpreinte,
+    });
 
     const total = rapportA.lignesVerifiees + rapportB.lignesVerifiees;
     console.info(`[garde tranches] ${String(total)} lignes vérifiées en deux tranches`);
@@ -212,7 +214,7 @@ describe("core/audit — la vérification par tranches", () => {
 
     // Le défaut par défaut : lire une tranche du milieu comme si c'était le
     // début du journal. C'est exactement une troncature de tête.
-    const rapport = verifierChaine(seconde);
+    const rapport = verifierChaine(SCELLEUR_TEMOIN, seconde);
     expect(rapport.valide).toBe(false);
     expect(genres(rapport.anomalies)).toContain("tête-non-ancrée");
   });

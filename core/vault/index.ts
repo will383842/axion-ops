@@ -40,8 +40,10 @@ export type {
 export {
   Coffre,
   NOM_CLE_ARG_HASH,
+  NOM_CLE_SCEAU_JOURNAL,
   NOM_DU_SCEAU,
   VERSION_CLE_ARG_HASH,
+  VERSION_CLE_SCEAU_JOURNAL,
   VERSION_DU_SCEAU,
 } from "./coffre.js";
 export type {
@@ -70,6 +72,7 @@ export type {
 
 export {
   CODE_COFFRE_VERROUILLE,
+  ETAPE_COFFRE,
   ErreurDeCoffre,
   RAISONS_DE_COFFRE,
   estErreurDeCoffre,

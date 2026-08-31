@@ -24,7 +24,19 @@ import {
   type AnomalieLigne,
   type LignePolitique,
 } from "./ligne.js";
-import { scopeCouvre, scopeDomine, type ReferenceOutil } from "./scope.js";
+import { analyserReference, scopeCouvre, scopeDomine, type ReferenceOutil } from "./scope.js";
+
+/**
+ * Comment une référence d'outil est NOMMÉE dans une anomalie.
+ *
+ * Ce n'est pas `nomQualifie()` : la référence est justement celle dont le nom
+ * qualifié est ambigu, et l'écrire tel quel donnerait à lire un nom d'outil
+ * plausible là où c'est la DÉCOUPE qui est en cause. Le séparateur explicite
+ * montre où l'appelant a coupé.
+ */
+function nomDeLaReference(reference: ReferenceOutil): string {
+  return `${reference.adapterId}//${reference.tool}`;
+}
 
 /** Le niveau de repli, DÉRIVÉ de la tête de `POLICY_LEVELS`. */
 export const NIVEAU_DE_REPLI: PolicyLevel = POLICY_LEVELS[0];
@@ -41,6 +53,16 @@ export const RAISONS_NIVEAU = [
   "lignes-couvrantes",
   /** Une ligne en vigueur est illisible → repli fail-closed, et on le DIT. */
   "politique-illisible",
+  /**
+   * L'OUTIL n'est nommable par aucun scope → repli fail-closed.
+   *
+   * C'est le cas d'un `adapterId` à points, qu'aucun scope de la grammaire du
+   * § 12 ne sait désigner sans ambiguïté. Sans cette raison, le calcul rendait
+   * « aucune-ligne-couvrante » : le bon niveau — le plus strict — pour la
+   * MAUVAISE raison, donc un écran qui affirme qu'aucune politique ne vise cet
+   * outil alors que c'est son NOM qu'on ne sait pas lire.
+   */
+  "référence-illisible",
 ] as const;
 
 export type RaisonNiveau = (typeof RAISONS_NIVEAU)[number];
@@ -79,6 +101,23 @@ export function niveauApplique(
   maintenant: Date,
 ): NiveauApplique {
   const anomalies: AnomalieLigne[] = [];
+
+  // 0 · LE NOM DE L'OUTIL AVANT TOUT. Une référence hors grammaire n'est
+  //     couverte par AUCUN scope — `scopeCouvre` rendrait `false` partout, et
+  //     le calcul conclurait « aucune ligne ne couvre cet outil ». Le niveau
+  //     serait juste, la raison fausse, et le RETRAIT de plancher passerait
+  //     pour une absence de plancher. On le dit au lieu de le déduire.
+  const nom = analyserReference(reference);
+  if (!nom.valide) {
+    return {
+      niveau: NIVEAU_DE_REPLI,
+      raison: "référence-illisible",
+      mesures: lignes.length,
+      enVigueur: 0,
+      retenues: [],
+      anomalies: [{ id: nomDeLaReference(reference), motif: nom.motif }],
+    };
+  }
 
   // 1 · Structure d'abord : on ne peut pas savoir qu'une ligne est expirée sans
   //     avoir pu lire sa date d'expiration.
