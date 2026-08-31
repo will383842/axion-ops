@@ -203,6 +203,100 @@ export function bornesDeListeDuJournal(champ: "recordIds" | "partialSources"): {
 }
 
 /**
+ * LA FAMILLE DES COLONNES D'IDENTIFIANT DU JOURNAL, **ÉNUMÉRÉE PAR DÉRIVATION.**
+ *
+ * ⚠️ **C'EST CETTE LISTE-CI QUI EMPÊCHE LE TROISIÈME CHAMP D'ÊTRE OUBLIÉ**, et
+ *    c'est sa seule raison d'être. L'ADR 0029 nomme le mode de défaillance :
+ *    corriger `tool` seul, puis découvrir `principal` six mois plus tard. Elle
+ *    est donc DÉRIVÉE de {@link FORMES} par le genre, jamais écrite — le jour
+ *    où une colonne devient un identifiant, elle entre ici sans qu'on l'écrive,
+ *    et toute garde qui annonce son cardinal change de compte.
+ *
+ * Elle vaut aujourd'hui `principal`, `sessionId`, `tool`, `toolVersion`,
+ * `adapterVersion`. Cette phrase est une OBSERVATION, jamais la source : la
+ * source est le genre déclaré dans `FORMES`.
+ */
+export const CHAMPS_IDENTIFIANTS_DU_JOURNAL: readonly ChampCouvert[] = CHAMPS_COUVERTS.filter(
+  (champ) => FORMES[champ].genre === "identifiant",
+);
+
+/**
+ * LA BORNE D'UNE COLONNE D'IDENTIFIANT DU JOURNAL, DÉRIVÉE DE `FORMES`.
+ *
+ * Fonction SŒUR de {@link bornesDeListeDuJournal} — **ADR 0029, point 4.** Elle
+ * porte la moitié « borne » du défaut BLOQUANT du lot 1d.
+ *
+ * `verifierAucunContenu()` (§ 31) borne six colonnes dont la valeur ne vient pas
+ * du socle : deux sont normalisées en amont par l'étape 14 (la fonction sœur),
+ * deux sont bornées à l'admission par le registre (`toolVersion`,
+ * `adapterVersion`), et **deux ne l'étaient par rien** — `tool`, qui vient
+ * d'`AppelEntrant.nomComplet`, et `principal`, qui vient d'`IdentiteAppelante`.
+ *
+ * Ce qu'il en coûtait : l'en-tête vivant les posait VERBATIM, la garde du § 31
+ * refusait la ligne, et l'écriture levait HORS du `try` de `journaliser` —
+ * **zéro ligne d'`ops_audit`**. Rien ne sortait : c'est la TRACE qui était
+ * perdue, et avec elle l'invariant du § 11 (« toute terminaison écrit une ligne
+ * portant le numéro de l'étape qui a refusé »), la métrique de refus du § 24 et
+ * l'objectif O6.
+ *
+ * ⚠️ **LE GENRE EST VÉRIFIÉ, PAS SUPPOSÉ**, exactement comme chez la sœur : une
+ *    colonne qui cesse d'être un identifiant doit faire LEVER, jamais rendre une
+ *    borne fantaisiste dont l'amont se servirait sans le savoir.
+ *
+ * ⚠️ **NE PAS ASSOUPLIR `verifierAucunContenu()`** pour fermer ce défaut : elle
+ *    a raison, c'est l'amont qui était faux.
+ */
+export function bornesDIdentifiantDuJournal(champ: ChampCouvert): { readonly maxCar: number } {
+  const forme = FORMES[champ];
+  if (forme.genre !== "identifiant") {
+    throw new Error(
+      `core/audit/contenu : « ${champ} » n'est plus un identifiant mais « ${forme.genre} » — ` +
+        "la normalisation en amont dérivait de ce genre. La famille dérivée compte " +
+        `${String(CHAMPS_IDENTIFIANTS_DU_JOURNAL.length)} colonne(s).`,
+    );
+  }
+  return { maxCar: forme.maxCar };
+}
+
+/**
+ * BORNE UNE VALEUR D'IDENTIFIANT AVANT QU'ELLE N'ATTEIGNE LE JOURNAL.
+ *
+ * C'est l'UNIQUE expression de la règle : les étapes qui posent `tool` et
+ * `principal` l'APPELLENT (ADR 0029, points 2 et 3). Une seconde expression
+ * écrite à la main est nommément ce que cet ADR interdit — c'est ainsi que le
+ * troisième champ de la famille serait oublié.
+ *
+ * @param champ la colonne visée. Sa borne est LUE dans `FORMES`, jamais reçue.
+ * @param valeur ce que l'amont a reçu de l'appelant, quel qu'en soit le type.
+ * @param repli la valeur RÉSERVÉE à écrire quand la valeur reçue ne passe pas.
+ *
+ * ⚠️ **LE REPLI EST LUI-MÊME CONFRONTÉ, ET C'EST LE POINT.** Une valeur choisie
+ *    pour réparer la perte de ligne pourrait, elle-même, ne pas passer la garde
+ *    du § 31 : la ligne serait alors perdue PAR LE CORRECTIF, et personne ne le
+ *    saurait. On lève donc ici, sur le chemin, plutôt qu'à l'écriture.
+ *
+ * ⚠️ **CE QU'ELLE NE FAIT PAS, ÉCRIT AVEC LA MESURE.** Elle ne juge pas si la
+ *    valeur est LÉGITIME — l'étape 6 refuse un outil inconnu, l'étape 4 refuse
+ *    un principal malformé (ADR 0029, point 2). Elle garantit une seule chose :
+ *    que la ligne d'audit puisse être ÉCRITE. Les confondre ferait croire qu'un
+ *    appel borné est un appel autorisé.
+ */
+export function bornerIdentifiantDuJournal(
+  champ: ChampCouvert,
+  valeur: unknown,
+  repli: string,
+): string {
+  const { maxCar } = bornesDIdentifiantDuJournal(champ);
+  if (!estIdentifiantDeJournal(repli, maxCar)) {
+    throw new Error(
+      `core/audit/contenu : le repli proposé pour « ${champ} » ne passe pas lui-même la garde ` +
+        "du § 31. Un repli refusé perdrait la ligne que ce mécanisme existe pour sauver.",
+    );
+  }
+  return estIdentifiantDeJournal(valeur, maxCar) ? (valeur as string) : repli;
+}
+
+/**
  * Un identifiant est-il admissible dans une colonne de liste du journal ?
  *
  * C'est {@link verifierIdentifiant}, réduit à son verdict. Les deux passent par

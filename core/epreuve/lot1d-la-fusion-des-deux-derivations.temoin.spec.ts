@@ -243,25 +243,38 @@ describe("② un désaccord reste-t-il ATTEIGNABLE après la fusion ?", () => {
 
 describe("③ la dette que ce fichier ouvre", () => {
   /**
-   * 🔴 DETTE — **LA CONFRONTATION N'A PAS DE TÉMOIN QUI LA FASSE ROUGIR.**
+   * ✅ **DETTE FERMÉE AU LOT 2 — `it.fails` BASCULÉ EN `it()`.**
    *
-   * `core/adapter-kit/champs-declares.temoin.spec.ts` porte l'assertion
-   * `desaccords == []` et son compte. Il porte aussi trois gardes du CORPUS —
-   * chaque format contraignant couvert, chaque témoin de prose isolé, la borne
-   * de profondeur encadrée — et elles sont bonnes. Il ne porte AUCUN test qui
-   * exige un désaccord NON VIDE, c'est-à-dire aucune preuve que l'assertion
-   * puisse échouer.
+   * ═══ CE QUI MANQUAIT ═══
    *
-   * ⚠️ **CE TEST NE JUGE PAS LA GARDE ÉPROUVÉE, IL COMPTE UNE PROPRIÉTÉ.** La
-   *    forme cherchée est annoncée : une assertion qui exige un désaccord non
-   *    vide. Un `grep` ne prouve que l'absence de la FORME écrite — une preuve
-   *    rédigée autrement lui échapperait, et il faudrait alors la lire.
+   * `core/adapter-kit/champs-declares.temoin.spec.ts` portait l'assertion
+   * `desaccords == []` et son compte, plus trois gardes du CORPUS — chaque
+   * format contraignant couvert, chaque témoin de prose isolé, la borne de
+   * profondeur encadrée — toutes bonnes. Il ne portait AUCUN test exigeant un
+   * désaccord NON VIDE : depuis la fusion du lot 1d, ses deux côtés appellent la
+   * même fonction, et f(x) === f(x) est vrai quel que soit f.
    *
-   * Le remède est celui du bloc ② ci-dessus, déplacé chez la garde : une
-   * dérivation fabriquée, un compte de divergences, et l'assertion que ce compte
-   * n'est pas nul.
+   * ═══ CE QUI A ÉTÉ ÉCRIT ═══
+   *
+   * Le remède est celui du bloc ② ci-dessus, **déplacé chez la garde et non
+   * recopié** : une seconde dérivation FABRIQUÉE
+   * (`libreSelonUneDerivationTropGenereuse`), un compte de divergences, et
+   * l'exigence que ce compte ne soit pas nul — avec sa contre-épreuve, qu'elle
+   * s'accorde sur une partie du corpus.
+   *
+   * ⚠️ **ELLE TOURNE SUR LE CORPUS DE LA GARDE, PAS SUR CELUI D'ICI**, et c'est
+   *    ce qui fait la différence entre les deux mesures : celle du bloc ② dit
+   *    qu'un désaccord est atteignable EN PRINCIPE (5 formes sur 10 écrites ici) ;
+   *    celle de la garde dit combien de ses PROPRES formes basculeraient — c'est
+   *    donc elle, et elle seule, qui mesure ce que la confrontation attraperait.
+   *
+   * ⚠️ **CE TEST NE JUGE TOUJOURS PAS LA GARDE ÉPROUVÉE, IL COMPTE UNE
+   *    PROPRIÉTÉ.** Les formes cherchées sont annoncées. Un `grep` ne prouve que
+   *    la présence de la FORME écrite — il ne dit pas que la preuve trouvée est
+   *    bonne, seulement qu'elle existe. C'est la borne de ce test, et elle vaut
+   *    dans les deux sens : il aurait manqué une preuve rédigée autrement.
    */
-  it.fails("🔴 la confrontation kit / étape 11 porte un témoin qui exige un DÉSACCORD", () => {
+  it("la confrontation kit / étape 11 porte un témoin qui exige un DÉSACCORD", () => {
     const net = sansCommentaires(SOURCE_CONFRONTATION);
     const formesDePreuve = [
       /expect\(\s*desaccords[\s\S]{0,200}?not\.toEqual\(\s*\[\s*\]/u,
@@ -283,7 +296,7 @@ describe("③ la dette que ce fichier ouvre", () => {
     expect(SOURCE_CONFRONTATION.length, "la garde a été lue").toBeGreaterThan(5_000);
     expect(assertionsDAccord, "elle assure bien l'accord").toBeGreaterThanOrEqual(1);
 
-    // L'ATTENTE, celle qui échoue aujourd'hui.
+    // L'ATTENTE, DÉSORMAIS TENUE.
     expect(trouvees, "et elle doit prouver qu'un désaccord est atteignable").toBeGreaterThanOrEqual(
       1,
     );

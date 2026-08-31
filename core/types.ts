@@ -278,9 +278,35 @@ export interface ToolContext<TProfile extends string = string> {
   /**
    * § 20 — l'EMPREINTE de la clé d'idempotence. **JAMAIS LA CLÉ — ADR 0020.**
    *
-   * `null` quand l'outil déclare `idempotency: "n/a"`, ou quand l'appel n'en
-   * porte aucune. Sinon soixante-quatre caractères hexadécimaux minuscules,
-   * calculés par `empreinteDeCleDIdempotence` (`core/limits/idempotency.ts`).
+   * `null` quand l'appel ne porte AUCUNE clé. Sinon soixante-quatre caractères
+   * hexadécimaux minuscules, calculés par `empreinteDeCleDIdempotence`
+   * (`core/limits/idempotency.ts`).
+   *
+   * 🔴 **NE PAS EN DÉDUIRE QUE L'OUTIL DÉDUPLIQUE — LA PHRASE PRÉCÉDENTE LE
+   *    LAISSAIT CROIRE, ET C'ÉTAIT FAUX.** Elle écrivait « `null` quand l'outil
+   *    déclare `idempotency: "n/a"` » ; l'orchestrateur pose l'empreinte
+   *    INCONDITIONNELLEMENT, sans jamais consulter le mode. Un champ non nul
+   *    n'atteste donc RIEN du mode déclaré, et un adaptateur qui écrirait « si
+   *    `idempotencyRef` n'est pas nul, je déduplique » dédupliquerait sur un
+   *    outil que le socle a déclaré NON déduplicable.
+   *
+   *    Le risque est réel plutôt que théorique, et c'est ce qui rendait la
+   *    phrase coûteuse : l'ADR 0020 justifie l'existence même de ce champ par ce
+   *    besoin exact — « un adaptateur qui relaie vers une API tierce a besoin
+   *    d'un jeton STABLE par appel ». Une prose fausse sur un champ dont la
+   *    raison d'être est d'être LU par un tiers coûte plus que sa taille.
+   *
+   *    **Le mode de l'outil se lit dans son manifeste (`idempotency`, § 09), pas
+   *    dans ce champ.** Aucune fuite dans les deux cas : c'est une empreinte.
+   *
+   * ⚠️ BORNE, ÉCRITE AVEC LA CORRECTION. Le lot 1d proposait deux voies : (a)
+   *    dériver le `null` du mode à la construction du `ctx`, (b) corriger la
+   *    phrase. (a) touche la ligne que l'ADR 0020 désigne comme « LA couture, et
+   *    elle n'est pas délégable » — `core/chaine/orchestrateur.ts` —, hors du
+   *    périmètre de ce lot-ci. C'est donc (b) qui est faite, et l'`it.fails` de
+   *    `core/epreuve/lot1d-canaux-du-contexte.temoin.spec.ts` (section N4) reste
+   *    OUVERT : il porte désormais (a), qui reste souhaitable. Corriger la prose
+   *    supprime le mensonge ; cela ne rend pas le champ incapable de mentir.
    *
    * ⚠️ **CE CHAMP A PORTÉ LA CLÉ BRUTE, ET C'ÉTAIT UN CANAL.** L'anti-exfiltration
    *    du § 20 (étape 11) dérive « cet appel porte-t-il un argument libre ? » du
@@ -343,6 +369,19 @@ export interface ToolContext<TProfile extends string = string> {
   /** § 19 bis — calculé PAR LE SOCLE. Un handler ne le reconstitue jamais. */
   readonly habilitations: Habilitations;
 }
+
+// ⚠️ IMPORT DE TYPE SEUL, ET C'EST UNE DÉCISION — ADR 0031.
+//
+//    Les deux formes que l'appelant remplit (`AppelEntrant`) et que les étapes 1
+//    à 4 établissent (`IdentiteAppelante`) sont DÉCLARÉES chez l'orchestrateur,
+//    qui les consomme. Les recopier ici pour éviter l'import reproduirait très
+//    exactement la couverture par HOMONYMIE que l'ADR 0031 existe pour faire
+//    cesser : deux listes qui se ressemblent jusqu'au jour où l'une bouge.
+//
+//    `import type` est effacé à la compilation (`verbatimModuleSyntax`) : il n'y
+//    a donc AUCUN cycle à l'exécution, seulement une dépendance de types — et
+//    c'est elle, précisément, qui fait que `keyof` tient la totalité.
+import type { AppelEntrant, IdentiteAppelante } from "./chaine/orchestrateur.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Les noms que `ToolContext` ne porte PLUS — ADR 0020
@@ -411,9 +450,68 @@ export const REGIMES_DE_CANAL = [
 
 export type RegimeDeCanal = (typeof REGIMES_DE_CANAL)[number];
 
-/** Le régime d'un champ, et le MOTIF qui le justifie. Le motif est obligatoire. */
+/**
+ * OÙ VA CE CHAMP QUAND IL VA AU JOURNAL — **ADR 0031, point 2.**
+ *
+ * ═══ POURQUOI UNE SECONDE DÉCLARATION, ET PAS UN QUATRIÈME RÉGIME ═══
+ *
+ * {@link RegimeDeCanal} répond à « comment ce champ atteint-il l'ADAPTATEUR ».
+ * C'était la seule destination que l'ADR 0020 avait à considérer. Le lot 1d a
+ * mesuré qu'il en existe une SECONDE, et que le défaut bloquant y vivait :
+ * `nomComplet` et `principal` atteignent `ops_audit` VERBATIM, la garde du § 31
+ * refuse la ligne, et l'écriture lève hors du `try` de `journaliser` — zéro
+ * ligne, donc invariant du § 11 tombé.
+ *
+ * Un quatrième régime n'aurait pas répondu : un même champ peut être FERMÉ vers
+ * l'une des deux destinations et OUVERT vers l'autre. `nomComplet` en est
+ * l'exemple exact — confronté au catalogue côté adaptateur, verbatim côté
+ * journal. Deux destinations, donc deux déclarations.
+ *
+ * ═══ CE QUE CHAQUE VALEUR VEUT DIRE ═══
+ *
+ *  · `jamais`     — la valeur de ce champ n'atteint aucune colonne d'`ops_audit` ;
+ *  · `borné-par`  — elle l'atteint, et la borne est **NOMMÉE**. Une borne qu'on
+ *    ne peut pas nommer est une borne qu'on croit avoir : c'est pour cela que la
+ *    forme porte le champ `borne` et que le compilateur l'exige ;
+ *  · `verbatim`   — elle l'atteint telle quelle.
+ *
+ * ⚠️ **`verbatim` EST UNE ANOMALIE, PAS UN ÉTAT TOLÉRÉ.** C'est exactement le
+ *    défaut bloquant du lot 1d. Le déclarer sans le refuser reviendrait à
+ *    l'inscrire au registre des choses normales — la garde de
+ *    `core/canaux-du-contexte.temoin.spec.ts` le COMPTE, le NOMME, et tient un
+ *    cliquet daté : un troisième `verbatim` ne peut pas s'ajouter en silence.
+ *
+ * ⚠️ **ELLE PORTE SUR LA VALEUR, PAS SUR LE CHEMIN.** `ToolContext.principal` et
+ *    `IdentiteAppelante.principal` portent LA MÊME valeur et reçoivent donc la
+ *    MÊME déclaration, même si c'est l'en-tête vivant — donc l'identité — qui
+ *    écrit la colonne. Deux dérivations d'un même fait finiraient par se
+ *    contredire : la garde CONFRONTE les homonymes plutôt que de les laisser
+ *    diverger, et c'est ce qui fait cesser la « couverture par homonymie ».
+ */
+export const DESTINATIONS_AU_JOURNAL = ["jamais", "borné-par", "verbatim"] as const;
+
+export type DestinationAuJournal = (typeof DESTINATIONS_AU_JOURNAL)[number];
+
+/**
+ * La destination JOURNAL d'un champ. `borné-par` NOMME sa borne — le
+ * compilateur refuse de la laisser implicite, ce qui est tout l'intérêt.
+ */
+export type VersLeJournal =
+  | { readonly atteint: "jamais" }
+  | { readonly atteint: "borné-par"; readonly borne: string }
+  | { readonly atteint: "verbatim" };
+
+/**
+ * Le régime d'un champ, sa destination au JOURNAL, et le MOTIF qui les justifie.
+ *
+ * ⚠️ `versLeJournal` EST OBLIGATOIRE ET SANS DÉFAUT — ADR 0031, conséquence
+ *    acceptée. Un champ optionnel avec une valeur implicite reproduirait très
+ *    exactement l'implicite qu'on retire : personne n'aurait à ÉCRIRE où va son
+ *    champ, et seul ce qui est écrit se relit en revue.
+ */
 export interface StatutDeCanal {
   readonly regime: RegimeDeCanal;
+  readonly versLeJournal: VersLeJournal;
   /** Pourquoi. Une garde refuse un motif vide : un régime sans motif est une opinion. */
   readonly motif: string;
 }
@@ -437,30 +535,54 @@ export interface StatutDeCanal {
 export const STATUT_DES_CANAUX_DE_CONTEXTE: Readonly<Record<keyof ToolContext, StatutDeCanal>> = {
   principal: {
     regime: "ouvert-signalé",
+    versLeJournal: { atteint: "verbatim" },
     motif:
-      "Sa forme n'est bornée par rien, parce que rien ne l'émet : l'émetteur de jetons est " +
-      "l'ADR 0001, et `core/auth/` n'existe pas. Un principal est une valeur d'annuaire et " +
-      "non une chaîne libre, mais cela n'est écrit nulle part et aucune garde ne le tient. " +
-      "À trancher AVEC l'émetteur, pas avant : une borne posée ici serait devinée.",
+      "⚠️ ÉCART DATÉ, ET SA SORTIE EST DÉCIDÉE. L'ADR 0029 tranche les deux arbitrages que " +
+      "le lot 1d avait laissés ouverts : le principal est borné À LA SOURCE par l'émetteur " +
+      "(`PrincipalEmis`, marque non fabricable), et un principal malformé rencontré malgré " +
+      "tout REFUSE l'appel à l'étape 4 — parce qu'il ancre `ops_quota` et `ops_runtime`, et " +
+      "qu'un repli fusionnerait deux principaux dans un même compteur. Le régime reste " +
+      "`ouvert-signalé` ET la destination reste `verbatim` TANT QUE L'ÉMETTEUR N'EXISTE PAS : " +
+      "écrire `fermé-par-le-socle` aujourd'hui serait une prose qui ment sur un champ dont la " +
+      "raison d'être est d'être lu par un tiers — le défaut exact que ce lot ferme ailleurs. " +
+      "La borne, elle, EXISTE déjà et porte un nom : `bornerIdentifiantDuJournal` " +
+      "(`core/audit/contenu.ts`), dérivée de `FORMES` et non réécrite.",
   },
   sessionId: {
     regime: "fermé-par-construction",
+    versLeJournal: {
+      atteint: "borné-par",
+      borne: "la fabrique de `core/identite/session.ts`, puis `FORMES.sessionId` à l'écriture",
+    },
     motif:
       "`SessionId` est un type MARQUÉ (ADR 0014) : une chaîne venue du réseau ne compile pas " +
-      "à cette place. Le socle la frappe, il ne l'accepte jamais du client.",
+      "à cette place. Le socle la frappe, il ne l'accepte jamais du client. Elle atteint " +
+      "`ops_audit.sessionId`, mais sous une valeur que le socle a ÉCRITE — d'où une borne " +
+      "nommable, contrairement à `principal`.",
   },
   scopes: {
     regime: "fermé-par-construction",
-    motif: "`readonly OpsScope[]` — énumération FERMÉE du § 19.2. Aucun texte ne s'y encode.",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "`readonly OpsScope[]` — énumération FERMÉE du § 19.2. Aucun texte ne s'y encode. " +
+      "`ops_audit` ne porte aucune colonne de scopes : le § 12 journalise la DÉCISION et " +
+      "l'étape qui a refusé, jamais ce que le jeton portait — qui est une information sur le " +
+      "porteur (§ 15, première règle).",
   },
   policyLevel: {
     regime: "fermé-par-construction",
+    versLeJournal: {
+      atteint: "borné-par",
+      borne: "`FORMES.policyLevel`, dérivée de `POLICY_LEVELS` — énumération fermée",
+    },
     motif:
       "`PolicyLevel` — trois valeurs, et c'est le socle qui les CALCULE à l'étape 10 (§ 12, " +
-      "règle 1). Un niveau hors énumération replie sur le plus strict.",
+      "règle 1). Un niveau hors énumération replie sur le plus strict. Il atteint " +
+      "`ops_audit.policyLevel`, et la garde du § 31 le confronte à l'énumération SOURCE.",
   },
   profile: {
     regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
     motif:
       "Resserré en `ProfileName` par `core/profiles/` — énumération fermée, lue dans " +
       "`ops_runtime` à l'étape 7. Le paramètre reste ouvert ICI pour que la Fondation ne " +
@@ -469,6 +591,7 @@ export const STATUT_DES_CANAUX_DE_CONTEXTE: Readonly<Record<keyof ToolContext, S
   },
   idempotencyRef: {
     regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "jamais" },
     motif:
       "Le champ porte bien une chaîne, mais c'est un CONDENSAT SHA-256 que le socle calcule : " +
       "l'appelant choisit le préimage, jamais le condensat. Aucun extrait marqué ne survit à " +
@@ -476,6 +599,7 @@ export const STATUT_DES_CANAUX_DE_CONTEXTE: Readonly<Record<keyof ToolContext, S
   },
   requestId: {
     regime: "à-fermer-au-transport",
+    versLeJournal: { atteint: "jamais" },
     motif:
       "FRAPPÉ par le socle, jamais recopié d'un en-tête client ni de l'`id` d'une enveloppe " +
       "JSON-RPC. La règle est posée ; les étapes 1 à 4 (« HTTP seul ») se passent dans " +
@@ -484,6 +608,7 @@ export const STATUT_DES_CANAUX_DE_CONTEXTE: Readonly<Record<keyof ToolContext, S
   },
   deadline: {
     regime: "à-fermer-au-transport",
+    versLeJournal: { atteint: "jamais" },
     motif:
       "CALCULÉE par le socle — `maintenant()` plus un budget borné par l'outil —, jamais un " +
       "horodatage reçu recopié tel quel : un `Date` recopié est une valeur de plusieurs " +
@@ -492,10 +617,193 @@ export const STATUT_DES_CANAUX_DE_CONTEXTE: Readonly<Record<keyof ToolContext, S
   },
   habilitations: {
     regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
     motif:
       "Un objet de booléens CALCULÉS par le socle (§ 19 bis). Un drapeau nouveau s'ajoute " +
       "dans `Habilitations`, jamais dans un `input` — et le contrôle 7 en dérive aussi ses " +
       "noms interdits.",
+  },
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  LES DEUX INVENTAIRES JUMEAUX — ADR 0031
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * L'INVENTAIRE DES CANAUX QUE L'APPELANT CHOISIT — `AppelEntrant`.
+ *
+ * ═══ CE QUE L'INVENTAIRE DU `ctx` NE POUVAIT PAS TENIR ═══
+ *
+ * {@link STATUT_DES_CANAUX_DE_CONTEXTE} tient sa totalité par le compilateur, et
+ * c'est solide — **pour la destination « adaptateur »**. La question posée par
+ * les épreuves des lots 1c et 1d est plus large : _un champ qui atteint
+ * l'adaptateur **ou le journal** sans passer par le schéma_.
+ *
+ * Or `AppelEntrant` porte les CINQ valeurs que l'appelant choisit, et aucune
+ * n'était classée. Mesuré au lot 1d :
+ *
+ * > `11 champ(s) de SOURCE confronté(s) à 9 champ(s) classé(s) · 6 couvert(s)
+ * par HOMONYMIE · 5 classé(s) par RIEN : AppelEntrant.nomComplet, .input,
+ * .idempotencyKey, .curseur, .jetonDeConfirmation`
+ *
+ * Et ce n'était pas théorique : `nomComplet` atteint `ops_audit.tool` VERBATIM,
+ * et une ligne refusée par la garde du § 31 fait perdre la trace ENTIÈRE.
+ *
+ * ⚠️ **C'EST `keyof AppelEntrant` QUI FAIT LA TOTALITÉ**, comme chez le `ctx` :
+ *    un champ ajouté à l'enveloppe d'appel **ne compile plus** tant qu'il n'est
+ *    pas classé. C'est le coût recherché, et le seul qui ne dépende pas de la
+ *    vigilance.
+ *
+ * ⚠️ **CE QUE CET INVENTAIRE NE PRÉTEND PAS FERMER — ADR 0031, point 4.** Il
+ *    CLASSE les canaux ; il ne BORNE aucune valeur. Les bornes sont l'objet de
+ *    l'ADR 0029 pour `principal` et `tool`, et de l'étape 8 pour `input`. Un
+ *    inventaire complet et juste n'empêche rien tout seul : il rend obligatoire
+ *    de DÉCIDER, et c'est tout ce qu'il fait. Le confondre avec une protection
+ *    serait la même erreur que lire une couleur de garde au lieu de son compte.
+ */
+export const STATUT_DES_CANAUX_D_APPEL: Readonly<Record<keyof AppelEntrant, StatutDeCanal>> = {
+  nomComplet: {
+    regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "verbatim" },
+    motif:
+      "Vers l'ADAPTATEUR : fermé — l'étape 6 confronte le nom au catalogue `ops_tool` et " +
+      "refuse tout nom qui n'y est pas ; la chaîne reçue ne franchit pas ce point. Vers le " +
+      "JOURNAL : ⚠️ VERBATIM, et c'est la MOITIÉ DE L'ANOMALIE BLOQUANTE du lot 1d — " +
+      "l'en-tête vivant pose `appel.nomComplet` tel quel dans `ops_audit.tool`, la garde du " +
+      "§ 31 refuse la ligne, et l'écriture lève hors du `try` de `journaliser`. L'ADR 0029, " +
+      "point 3, tranche : le nom est BORNÉ (et non refusé comme `principal`) à l'étape 6, " +
+      "AVANT la recherche au catalogue, parce qu'aucun compteur n'est ancré sur `tool` pour " +
+      "un outil qui n'existe pas — il n'y a donc rien à fusionner, et perdre la trace est " +
+      "strictement pire que la borner. La borne existe et porte un nom : " +
+      "`bornerIdentifiantDuJournal` (`core/audit/contenu.ts`), dérivée de `FORMES`. Son " +
+      "APPLICATION appartient à l'étape 6.",
+  },
+  input: {
+    regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "La charge utile BRUTE, validée à l'étape 8 contre un schéma FERMÉ " +
+      "(`additionalProperties: false`) : l'adaptateur ne reçoit que l'entrée VALIDÉE, jamais " +
+      "celle-ci. ⚠️ CE QUI RESTE DE LIBRE À L'INTÉRIEUR DU SCHÉMA EST LE PÉRIMÈTRE MÊME DU " +
+      "§ 20, et l'étape 11 le mesure (`porteUnArgumentLibre`) — ce n'est pas un canal " +
+      "invisible, c'est LE canal, et c'est celui que le socle voit. Vers le journal : rien, " +
+      "seule l'EMPREINTE `argHash` y entre (§ 12, règle 2).",
+  },
+  idempotencyKey: {
+    regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "ADR 0020 — sa FORME est fermée (`FORME_CLE_IDEMPOTENCE`) et jugée AVANT le tri par " +
+      "mode, et seule son EMPREINTE atteint l'adaptateur (`ctx.idempotencyRef`). C'est la " +
+      "contrepartie de SOURCE du champ que l'inventaire du `ctx` classe en DESTINATION : les " +
+      "deux inventaires nomment le même canal aux deux bouts, et c'est précisément ce qu'un " +
+      "inventaire unique ne pouvait pas dire. Vers le journal : `ops_idempotency.key` porte " +
+      "l'empreinte, et ce n'est pas une colonne d'`ops_audit`.",
+  },
+  curseur: {
+    regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "§ 13.1 — le jeton de pagination est SIGNÉ par le socle et son `filtersHash` est " +
+      "confronté à l'étape 9 : un curseur non vérifié est refusé (`cursor_invalid`), jamais " +
+      "relayé. Un curseur réutilisé avec d'autres filtres rendrait une fenêtre " +
+      "SILENCIEUSEMENT fausse, et c'est ce refus-là qui l'empêche.",
+  },
+  jetonDeConfirmation: {
+    regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "§ 20 — confronté à l'`argHash` de l'appel EXACT à l'étape 10 ; il n'atteint jamais " +
+      "l'adaptateur. ⚠️ ET IL NE SORT JAMAIS DANS UNE RÉPONSE D'ERREUR (§ 15, " +
+      "`confirmation_required` dit la cible, jamais le jeton) : le canal de délivrance est " +
+      "celui du desserrage, et l'asymétrie est le point.",
+  },
+};
+
+/**
+ * L'INVENTAIRE DES CANAUX DE L'IDENTITÉ — `IdentiteAppelante`.
+ *
+ * ⚠️ **CE QU'IL FAIT CESSER : LA COUVERTURE PAR HOMONYMIE.** Les six champs de
+ *    ce type portent aujourd'hui les mêmes noms que six champs du `ctx`, si bien
+ *    qu'ils PARAISSAIENT classés. Le jour où l'un des deux types en gagne un que
+ *    l'autre n'a pas, la coïncidence cesse — **et rien ne le dit**. C'est la
+ *    forme de défaut la plus coûteuse qu'on connaisse ici : une garde qui
+ *    rétrécit sans changer de couleur.
+ *
+ * ⚠️ **LE COMPTE « PAR HOMONYMIE » NE DISPARAÎT PAS DE L'ANNONCE QUAND IL TOMBE
+ *    À ZÉRO** (ADR 0031, point 3). Un compte qu'on retire est un compte qu'on ne
+ *    peut plus voir remonter. La garde le publie donc toujours.
+ *
+ * ⚠️ **ET LES HOMONYMES SONT CONFRONTÉS, PAS SEULEMENT COMPTÉS.** Deux
+ *    dérivations d'un même fait finissent par se contredire : `principal` ne
+ *    peut pas être `verbatim` ici et `borné-par` là-bas. La garde de
+ *    `core/canaux-du-contexte.temoin.spec.ts` le vérifie et l'annonce.
+ */
+export const STATUT_DES_CANAUX_D_IDENTITE: Readonly<
+  Record<keyof IdentiteAppelante, StatutDeCanal>
+> = {
+  principal: {
+    regime: "ouvert-signalé",
+    versLeJournal: { atteint: "verbatim" },
+    motif:
+      "⚠️ LA SECONDE MOITIÉ DE L'ANOMALIE BLOQUANTE DU LOT 1d, et la SOURCE de la valeur que " +
+      "`ToolContext.principal` reporte — les deux entrées disent donc la même chose, " +
+      "délibérément, et une garde les confronte. L'ADR 0029 tranche autrement que pour " +
+      "`tool`, et le motif de la différence doit être écrit ici sans quoi la prochaine revue " +
+      "uniformisera les deux : `principal` ANCRE `ops_quota` (unicité " +
+      "`(window, tool, principal)`) et `ops_runtime` (un profil actif par principal). Un " +
+      "repli — quelle que soit la valeur choisie — FUSIONNERAIT deux principaux distincts " +
+      "dans un même compteur de quota et leur donnerait le même profil actif : ce n'est pas " +
+      "une perte de trace, c'est un DÉSARMEMENT DE LIMITE. Le refus est donc la seule " +
+      "réponse, et il est prononcé à l'étape 4, là où la ligne `ops_token` est relue. " +
+      "L'émetteur n'existe pas encore : le régime reste `ouvert-signalé` jusque-là.",
+  },
+  sessionId: {
+    regime: "fermé-par-construction",
+    versLeJournal: {
+      atteint: "borné-par",
+      borne: "la fabrique de `core/identite/session.ts`, puis `FORMES.sessionId` à l'écriture",
+    },
+    motif:
+      "ADR 0014 — `SessionId` est un type MARQUÉ dont la marque est un `unique symbol` NON " +
+      "exporté : un transport qui poserait ici une chaîne venue du réseau ne compile pas. " +
+      "C'est la seule forme d'interdit qui n'arrive pas trop tard. Borne écrite avec la " +
+      "mesure : `as unknown as SessionId` reste écrivable — ce que le type garantit n'est pas " +
+      "l'impossibilité mais la VISIBILITÉ, et c'est le graphe d'imports qui porte la garantie.",
+  },
+  scopes: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "`readonly OpsScope[]` — énumération FERMÉE du § 19.2, établie par l'étape 4 en HTTP et " +
+      "par `SCOPES_PAR_DEFAUT_STDIO` en stdio. Aucune colonne d'`ops_audit` ne les porte : ce " +
+      "que le jeton portait est une information sur le PORTEUR (§ 15, première règle).",
+  },
+  habilitations: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "§ 19 bis — un objet de booléens CALCULÉS par le socle. Même dérivation que le champ " +
+      "homonyme du `ctx`, et le contrôle 7 du § 09 en tire aussi ses noms interdits.",
+  },
+  requestId: {
+    regime: "à-fermer-au-transport",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "ADR 0020 — FRAPPÉ par le socle, jamais recopié d'un en-tête client ni de l'`id` d'une " +
+      "enveloppe JSON-RPC. ⚠️ C'EST ICI QUE LA RÈGLE SE JOUE, PAS DANS LE `ctx` : l'identité " +
+      "est établie par les étapes 1 à 4, donc par le transport, et c'est de ce type-ci que " +
+      "l'orchestrateur recopie la valeur. Le registre des coutures la surveille sous " +
+      "l'ADR 0001, `core/transport/contrat.ts`.",
+  },
+  deadline: {
+    regime: "à-fermer-au-transport",
+    versLeJournal: { atteint: "jamais" },
+    motif:
+      "ADR 0020 — CALCULÉE par le socle (`maintenant()` plus un budget borné par l'outil), " +
+      "jamais un horodatage reçu recopié tel quel : un `Date` recopié est une valeur de " +
+      "plusieurs dizaines de bits choisie par l'appelant. Même borne et même couture que " +
+      "`requestId`.",
   },
 };
 

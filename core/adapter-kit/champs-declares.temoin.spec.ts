@@ -32,6 +32,20 @@ import type { ObjetJson, ValeurJson } from "./json.js";
  *    qui rebrancherait la branche sur autre chose, ou qui réécrirait une
  *    dérivation locale, ferait diverger au moins une forme.
  *
+ * 🔴 **ET LE GESTE, QUI ÉTAIT BON, AVAIT PRIVÉ CETTE GARDE DE SON TÉMOIN —
+ *    FERMÉ AU LOT 2.** Depuis la fusion, les deux côtés de la confrontation
+ *    appellent LA MÊME fonction : le côté « étape 11 » ne fait plus que
+ *    traverser le schéma jusqu'à l'unique ligne `estValeurLibre(sousSchema)`.
+ *    **Une assertion qui compare f(x) à f(x) est verte quel que soit f**, et
+ *    rien n'exigeait plus un désaccord NON VIDE : « 0 désaccord » ne se
+ *    distinguait pas de « rien à trouver ».
+ *
+ *    Le témoin manquant est écrit ci-dessous ({@link libreSelonUneDerivationTropGenereuse}) :
+ *    une SECONDE dérivation plausible, un COMPTE de divergences, et l'exigence
+ *    que ce compte ne soit pas nul. Il est fabriqué ici, il ne remplace personne
+ *    dans le code servi, et il porte les trois règles que le dépôt reproche
+ *    NOMMÉMENT à la dérivation retirée.
+ *
  * ⚠️ IL PASSE PAR LA PORTE PUBLIQUE, et c'est ce qui en fait une garde de couture
  *    plutôt qu'un test de fonction. On n'appelle pas la fonction dans l'étape 11 :
  *    on interroge `analyserArgumentsDuSchema()`, qui la gouverne. Pour un schéma
@@ -218,6 +232,47 @@ const FORMES: readonly { readonly nom: string; readonly schema: ObjetJson }[] = 
   },
 ];
 
+/**
+ * LA SECONDE DÉRIVATION, **FABRIQUÉE — ET ELLE N'EST SERVIE PAR PERSONNE.**
+ *
+ * ═══ POURQUOI ELLE EXISTE ═══
+ *
+ * La confrontation ci-dessous exige `desaccords == []`. Depuis que le lot 1d a
+ * fusionné les deux écritures, ses deux côtés appellent la MÊME fonction : rien
+ * ne prouvait plus qu'un désaccord fût seulement ATTEIGNABLE. Une garde qui ne
+ * peut pas échouer n'existe pas.
+ *
+ * ═══ CE QU'ELLE EST, ET CE QU'ELLE N'EST PAS ═══
+ *
+ * Ce n'est **pas une copie du code retiré**, et elle n'a pas à l'être : ce qu'on
+ * mesure est « un second verdict plausible ferait-il diverger la confrontation »,
+ * jamais « l'ancien code exact rendait-il ceci ». Elle porte les TROIS règles
+ * trop généreuses que le dépôt reproche nommément à la dérivation locale du
+ * lot 1c :
+ *
+ *  1. un `pattern` NON VIDE referme — sans exiger qu'il soit ancré ni qu'il
+ *     rejette les témoins de prose ;
+ *  2. un `format` QUELCONQUE referme — sans distinguer les contraignants ;
+ *  3. un `{"type":"object"}` NU referme — alors qu'il n'a rien fermé du tout.
+ *
+ * ⚠️ **ELLE N'EST APPELÉE QUE PAR LE TÉMOIN.** Aucun module de production ne
+ *    l'importe, et `tsconfig.build.json` exclut les `*.spec.ts` : le critère de
+ *    « module de production » du registre des coutures (ADR 0019) n'en voit rien.
+ *    La faire servir serait exactement le défaut que la fusion a supprimé.
+ */
+function libreSelonUneDerivationTropGenereuse(schema: ObjetJson): boolean {
+  if ("enum" in schema || "const" in schema) return false;
+  const motif: unknown = schema["pattern"];
+  if (typeof motif === "string" && motif.length > 0) return false;
+  if (typeof schema["format"] === "string") return false;
+  const type: unknown = schema["type"];
+  if (type === "object") return false;
+  if (type === "integer" || type === "number" || type === "boolean" || type === "null") {
+    return false;
+  }
+  return true;
+}
+
 /** Ce que l'ÉTAPE 11 conclut d'une forme, vu par sa porte publique. */
 function libreSelonEtape11(schema: ObjetJson): boolean {
   const analyse = analyserArgumentsDuSchema(
@@ -261,6 +316,57 @@ describe("TÉMOIN — les deux dérivations de « ce schéma referme la valeur �
       "les deux dérivations de « ce schéma referme la valeur » ont divergé — voir " +
         "l'en-tête de `core/adapter-kit/champs-declares.ts`",
     ).toEqual([]);
+  });
+
+  /**
+   * 🔴 **LE TÉMOIN QUE LA FUSION AVAIT EMPORTÉ — IL PROUVE QUE LE TEST CI-DESSUS
+   * PEUT ROUGIR.**
+   *
+   * Sans lui, « 0 désaccord » ne se distingue pas de « rien à trouver » : les
+   * deux côtés de la confrontation appellent la même fonction depuis le lot 1d,
+   * et f(x) === f(x) est vrai quel que soit f.
+   *
+   * ⚠️ **IL TOURNE SUR LE CORPUS DE CETTE GARDE, ET C'EST LE POINT.** Une
+   *    seconde source de formes ferait mesurer autre chose : une divergence entre
+   *    deux CORPUS passerait pour une divergence entre deux DÉRIVATIONS. Ce
+   *    compte-ci dit combien de formes ÉCRITES ICI un second verdict plausible
+   *    ferait basculer — donc combien la confrontation attraperait vraiment.
+   *
+   * ⚠️ **ET LA CONTRE-ÉPREUVE EST DANS LE MÊME TEST.** « Ça diverge » ne
+   *    prouve rien si la fonction fabriquée répond n'importe quoi : on exige donc
+   *    aussi qu'elle s'ACCORDE sur une partie du corpus. Deux comptes, deux
+   *    planchers, une seule mesure utile.
+   */
+  it("SAIT ROUGIR — un second verdict plausible fait DIVERGER le corpus, et on le compte", () => {
+    let divergentes = 0;
+    let accords = 0;
+    const noms: string[] = [];
+
+    for (const forme of FORMES) {
+      const kit = estValeurLibre(forme.schema);
+      const fabriquee = libreSelonUneDerivationTropGenereuse(forme.schema);
+      if (kit === fabriquee) accords += 1;
+      else {
+        divergentes += 1;
+        noms.push(forme.nom);
+      }
+    }
+
+    console.log(
+      `[témoin atteignabilité] ${String(FORMES.length)} forme(s) soumise(s) à une seconde ` +
+        `dérivation FABRIQUÉE · ${String(divergentes)} divergence(s) · ` +
+        `${String(accords)} accord(s) · divergent : ${noms.join(", ") || "aucune"}`,
+    );
+
+    // Plancher : le corpus n'a pas été vidé sous le témoin.
+    expect(FORMES.length, "plancher-témoin").toBeGreaterThanOrEqual(45);
+    expect(divergentes + accords, "chaque forme a bien été tranchée").toBe(FORMES.length);
+
+    // 🔴 LA MESURE QUI MANQUAIT : un désaccord est ATTEIGNABLE. C'est elle qui
+    //    distingue « 0 désaccord » de « rien à trouver ».
+    expect(divergentes, "un second verdict plausible diverge bel et bien").toBeGreaterThan(3);
+    // La contre-épreuve : la dérivation fabriquée n'est pas divergente PARTOUT.
+    expect(accords, "et elle s'accorde sur une partie du corpus").toBeGreaterThan(3);
   });
 
   /**

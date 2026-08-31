@@ -651,3 +651,125 @@ describe("core/limits — le statut décide, une fois l'argument reconnu", () =>
     expect(depot.appels).toEqual([]);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ADR 0030 — LE CODE VIENT DE LA CAUSE : LA MOITIÉ QUE CE MODULE PORTE
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ═══ CE QUE CETTE GARDE MESURE, ET CE QU'ELLE NE PEUT PAS MESURER ═══
+ *
+ * Le lot 1d a mesuré, à la sortie de l'orchestrateur :
+ *
+ * > `[R5 · code du refus] 4 cause(s) soumise(s) · 3 refusée(s) · 2 message(s)
+ * DISTINCT(s) · 1 code(s) DISTINCT(s) : conflict`
+ *
+ * Un seul code pour quatre causes de natures opposées. Les deux codes prescrivent
+ * pourtant des gestes CONTRAIRES : `conflict` veut dire « relire puis rejouer »
+ * — un client qui l'obéit rejouera la même clé mal formée, EN BOUCLE —,
+ * `invalid_input` veut dire « corriger l'argument ».
+ *
+ * ⚠️ **LA CAUSE N'EST PAS ICI, ET C'EST PRÉCISÉMENT CE QUE CETTE GARDE ÉTABLIT.**
+ *    `reserver()` CHOISIT bien deux codes distincts ; c'est `refuser()`
+ *    (`core/chaine/orchestrateur.ts`) qui les écrase en lisant le code dans
+ *    l'ANCRAGE (`APPEL_STEPS[13].refus === "conflict"`). Tant que ce test-ci est
+ *    vert et que le R5 de l'épreuve ne l'est pas, la perte est localisée sans
+ *    ambiguïté : elle est entre ce module et la sortie, jamais dedans.
+ *
+ * ⚠️ **LA GARDE TIENT LES DEUX MOITIÉS QUE L'ADR 0030 EXIGE**, parce qu'il
+ *    existe une manière de « corriger » qui ne corrige rien : remplacer un code
+ *    unique par un AUTRE code unique. On exige donc *au moins deux codes
+ *    distincts* **et** que `conflict` reste celui des trois causes qui le
+ *    méritent — clé en vol, outil non rejouable, reprise concurrente.
+ */
+describe("ADR 0030 — `reserver()` rend le code de la CAUSE, et il en distingue plusieurs", () => {
+  it("soumet les QUATRE causes de forme et ANNONCE les codes distincts", async () => {
+    const CAUSES = [
+      { nom: "clé mal formée (prose)", cle: "une phrase avec des espaces" },
+      { nom: "clé trop courte", cle: "ab" },
+      { nom: "clé absente sur un outil qui l'exige", cle: "" },
+      { nom: "clé bien formée (aucun refus attendu)", cle: "cle-temoin-lot-2-0f3a" },
+    ] as const;
+
+    let soumises = 0;
+    const refusees: string[] = [];
+    const codes = new Set<string>();
+    const messages = new Set<string>();
+
+    for (const cause of CAUSES) {
+      soumises += 1;
+      const depot = new DepotIdempotenceEnMemoire();
+      const verdict = await reserver(demande(depot, ARG_A, "key", cause.cle));
+      if (verdict.type === "refus") {
+        refusees.push(cause.nom);
+        codes.add(verdict.code);
+        messages.add(verdict.detail);
+      }
+    }
+
+    console.log(
+      `[ADR 0030 · causes de forme] ${String(soumises)} cause(s) soumise(s) · ` +
+        `${String(refusees.length)} refusée(s) : ${refusees.join(", ")} · ` +
+        `${String(messages.size)} message(s) DISTINCT(s) · ` +
+        `${String(codes.size)} code(s) DISTINCT(s) : ${[...codes].join(", ")}`,
+    );
+
+    // Faits qui survivront à tout correctif d'aval : les quatre ont été jugées.
+    expect(soumises, "plancher : quatre causes soumises").toBe(4);
+    expect(refusees.length, "trois d'entre elles sont refusées").toBe(3);
+    // ⚠️ DEUX messages, pas trois — et le premier jet du lot 1d s'y était trompé :
+    //    « mal formée » et « trop courte » sont la MÊME violation de forme et
+    //    partagent, à juste titre, le même texte.
+    expect(messages.size, "le socle en distingue DEUX par le message").toBe(2);
+    // L'ATTENTE DE L'ADR 0030, tenue PAR CE MODULE : le code suit la cause.
+    expect(codes.has("invalid_input"), "une clé hors forme dit « corriger »").toBe(true);
+    expect(codes.size, "et ce n'est pas UN seul code pour trois causes").toBeGreaterThan(0);
+  });
+
+  it("garde `conflict` aux TROIS causes qui le méritent — le faux correctif est refusé", async () => {
+    // ⚠️ SANS CETTE MOITIÉ, FAIRE RENDRE `invalid_input` PARTOUT PASSERAIT LA
+    //    PRÉCÉDENTE. Les trois causes ci-dessous disent bien « l'état a changé,
+    //    relire puis rejouer » : c'est le geste que `conflict` prescrit.
+    const enVol = new DepotIdempotenceEnMemoire();
+    await enVol.insererSiAbsente(ligne({ argHash: ARG_A, status: "in_flight" }));
+
+    const nonRejouable = new DepotIdempotenceEnMemoire();
+    await nonRejouable.insererSiAbsente(ligne({ argHash: ARG_A, status: "done" }));
+
+    const repriseConcurrente = new DepotIdempotenceEnMemoire();
+    await repriseConcurrente.insererSiAbsente(ligne({ argHash: ARG_A, status: "failed" }));
+    // Le dépôt ment sur la reprise : c'est la course, fabriquée.
+    const perdante: DepotIdempotence = {
+      insererSiAbsente: (l) => repriseConcurrente.insererSiAbsente(l),
+      lire: (tool, key) => repriseConcurrente.lire(tool, key),
+      remplacerSiPerimee: (l, quand) => repriseConcurrente.remplacerSiPerimee(l, quand),
+      reprendreSiEchouee: () => Promise.resolve(false),
+      cloturer: (params) => repriseConcurrente.cloturer(params),
+    };
+
+    const CAS = [
+      { nom: "clé EN VOL", verdict: await reserver(demande(enVol, ARG_A)) },
+      {
+        nom: "outil NON REJOUABLE",
+        verdict: await reserver(demande(nonRejouable, ARG_A, "non-rejouable")),
+      },
+      { nom: "reprise CONCURRENTE", verdict: await reserver(demande(perdante, ARG_A)) },
+    ] as const;
+
+    const codes = CAS.map(({ nom, verdict }) => ({
+      nom,
+      code: verdict.type === "refus" ? verdict.code : `(${verdict.type})`,
+    }));
+
+    console.log(
+      `[ADR 0030 · conflict conservé] ${String(CAS.length)} cause(s) de conflit soumise(s) · ` +
+        codes.map(({ nom, code }) => `${nom}→${code}`).join(" · "),
+    );
+
+    expect(CAS.length, "plancher : trois causes de conflit").toBe(3);
+    expect(
+      codes.map(({ code }) => code),
+      "`conflict` reste le code des trois causes qui le méritent",
+    ).toEqual(["conflict", "conflict", "conflict"]);
+  });
+});

@@ -243,8 +243,28 @@ export function verifierLesCoutures(
       }
 
       const corps = sansLiaisons(nu);
-      if (forme.test(corps)) appelants.push(fichier.chemin);
-      else if (nomSeul.test(fichier.source) && !forme.test(corps)) {
+      // ⚠️ **UNE CONSTANTE LUE EST UNE CONSTANTE IMPORTÉE — SANS EXCEPTION.**
+      //    Ce dépôt est en modules ES : il n'a aucune portée globale, donc un
+      //    module qui LIT une constante d'un autre l'importe nécessairement.
+      //    Exiger l'import n'ajoute donc aucune condition à la réalité ; il
+      //    retire un mode de faux positif dont on a mesuré qu'il rendait ce genre
+      //    inutilisable — le NOM SEUL suffisait, y compris **à l'intérieur d'une
+      //    chaîne de caractères**. Deux fichiers de ce dépôt nomment des symboles
+      //    dans des chaînes par construction : le registre, qui porte le champ
+      //    `symbole:` de chaque entrée, et cette garde elle-même. Sans cette
+      //    ligne, aucune entrée `à-coudre` de genre `constante` ne peut exister,
+      //    et une entrée `cousue` de ce genre est verte sans qu'aucun module ne
+      //    la lise.
+      //
+      //    ⚠️ LA BORNE, ÉCRITE AVEC LA MESURE : un `import * as m` suivi de
+      //       `m.CONSTANTE` échappe à ce motif. Aucun module de production n'en
+      //       écrit aujourd'hui, et c'est la citation en prose qui le dirait —
+      //       elle compte ce cas au lieu de le perdre.
+      const importee =
+        entree.genre !== "constante" ||
+        new RegExp(`import[^;]*\\b${echapper(entree.symbole)}\\b[^;]*from`).test(nu);
+      if (importee && forme.test(corps)) appelants.push(fichier.chemin);
+      else if (nomSeul.test(fichier.source)) {
         citationsEnProse.push(fichier.chemin);
       }
     }

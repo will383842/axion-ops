@@ -55,3 +55,32 @@ export type { DemarrageMonoInstance, LectureDeProvenance } from "./demarrage.js"
  */
 export { MagasinDeVerrousEnMemoire, VerrouEnMemoire, VerrouReentrantTemoin } from "./memoire.js";
 export type { OptionsVerrouEnMemoire } from "./memoire.js";
+
+/**
+ * L'ADAPTATION POSTGRES — la moitié que l'ADR 0018 demandait et que le lot 1d
+ * avait laissée ouverte en nommant sa cause : « le verrou consultatif de session
+ * attend `core/transport/` ». Voir **ADR 0024**.
+ *
+ * ⚠️ ELLE N'OUVRE AUCUNE CONNEXION ELLE-MÊME. La session DÉDIÉE lui est donnée
+ *    par un port, et c'est ce qui permet d'éprouver ses trois propriétés — hors
+ *    du pool, même session à la relecture, aucune reconnexion — sans base et
+ *    sans réseau.
+ */
+export {
+  APPLICATION_NAME_DU_VERROU,
+  BITS_RETENUS_DE_LA_CLE,
+  HOTE_SANS_MAGASIN_PARTAGE,
+  REQUETES_DU_VERROU,
+  VerrouPostgres,
+  choisirImplementationDuVerrou,
+  cleDuVerrouPostgres,
+} from "./postgres.js";
+export type {
+  ChoixDuVerrou,
+  CleDuVerrou,
+  LigneDuMagasin,
+  OptionsVerrouPostgres,
+  OuvertureDeSessionDediee,
+  RequeteDuVerrou,
+  SessionDeVerrou,
+} from "./postgres.js";

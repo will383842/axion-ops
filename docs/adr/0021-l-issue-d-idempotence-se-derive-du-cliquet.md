@@ -230,6 +230,51 @@ dangereuse.
 
 ---
 
+## Borne d'éprouvabilité — la première branche ne décide d'aucun cas atteignable
+
+**Ajoutée au lot 2, sur la mesure du lot 1d. Ce n'est pas un défaut : c'est une
+propriété de la décision, et elle doit être écrite là où la décision vit.**
+
+`issueDeReservation()` a trois branches. La première lit le cliquet de
+l'ADR 0017 (`effetExterieurSurvenu`) ; elle est la bonne, et **elle n'est
+décisive nulle part aujourd'hui** :
+
+- le cliquet n'est levé que sous `estEffetExterieur(outil.effect)` ;
+- or la troisième branche rend déjà `done` sous exactement cette condition.
+
+Mesuré :
+
+> `[N6 · décision] 4 couple(s) ATTEIGNABLE(s) confronté(s) · 4 écarté(s) · 0 cas
+où la LECTURE du cliquet change l'issue`
+
+avec son témoin de capacité apparié — `16 cellule(s) parcourue(s) sur 4 effet(s)
+· 2 issue(s) DISTINCTE(s)` — sans lequel « 0 cas » se lirait « cette table ne
+mesure rien ».
+
+### Ce qui a réellement refermé le défaut du lot 1c
+
+**`terminaisonRendue`**, la deuxième branche, posée juste après le retour de
+l'étape 14. C'est elle qui empêche qu'un courrier parti reparte quand la panne
+est POSTÉRIEURE au retour de l'adaptateur. L'écrire importe : attribuer ce
+mérite au cliquet ferait déplacer le mauvais garde-fou le jour où quelqu'un
+voudrait en retirer un.
+
+### Pourquoi la première branche reste
+
+Elle est la **provision** du jour où la troisième cessera d'être aussi
+franchement fail-closed — si l'on distinguait, par exemple, un `send` dont on
+SAIT que l'adaptateur n'a pas été atteint. Ce jour-là, la lecture du cliquet sera
+la seule à savoir que quelque chose EST sorti.
+
+⚠️ **Et ce jour-là, écrire D'ABORD le témoin de bout en bout qui distingue les
+deux branches — il n'en existe AUCUN.** Les mutations M3 et M6 du lot 1d ne font
+rougir aucun test de l'épreuve ; la seule garde du dépôt qui rougit sur M3 appelle
+la fonction PURE avec un couple que la chaîne ne produit pas. Affiner la
+troisième branche sans ce témoin, ce serait rendre décisive une branche que rien
+n'éprouve — c'est-à-dire refaire, à l'envers, la panne du lot 1c.
+
+---
+
 ## Ce qui reste OUVERT
 
 - **La panne entre la réservation et l'appel de l'adaptateur** — écart assumé

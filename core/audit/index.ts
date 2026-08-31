@@ -96,6 +96,14 @@ export {
   compteSegmentsAlphabetiques,
   estIdentifiantDeJournal,
   verifierAucunContenu,
+  // ── ADR 0029, point 4 — LA FAMILLE DES IDENTIFIANTS, ET SA BORNE UNIQUE.
+  //    `bornerIdentifiantDuJournal` est ce que les étapes 4 et 6 APPELLENT pour
+  //    que `principal` et `tool` cessent d'atteindre le journal VERBATIM. La
+  //    famille est ÉNUMÉRÉE par dérivation du genre : c'est elle qui empêche le
+  //    troisième champ d'être oublié comme `principal` l'a été.
+  CHAMPS_IDENTIFIANTS_DU_JOURNAL,
+  bornerIdentifiantDuJournal,
+  bornesDIdentifiantDuJournal,
 } from "./contenu.js";
 export type { VerdictContenu } from "./contenu.js";
 

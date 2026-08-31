@@ -46,6 +46,7 @@ import { construireManifeste, empreinteDuManifeste, texteDuManifeste } from "./m
 import type { Manifeste } from "./manifest.js";
 import { definirOutil } from "./types.js";
 import type { DefinitionAdaptateur, DefinitionOutil, SpecOutil } from "./types.js";
+import { verifierEnumerationProfils } from "./profils.js";
 import type { SceauProfils } from "./profils.js";
 import type { ZodType } from "zod/v4";
 
@@ -101,12 +102,24 @@ export function creerAdapterKit<TProfile extends string>(
   profilsConnus: readonly TProfile[],
   sceauProfils: SceauProfils,
 ): AdapterKit<TProfile> {
-  if (profilsConnus.length === 0) {
-    // Un kit sans profil accepterait `profiles: []` partout et la garde du
-    // § 14 mesurerait zéro en restant verte. On refuse à la construction.
+  // ⚠️ LE REFUS DÉRIVE, IL NE RECOPIE PLUS — ADR 0004, jumeau cousu au lot 2.
+  //    Ces trois lignes portaient leur propre comparaison (`length === 0`) alors
+  //    que `verifierEnumerationProfils` existait à côté, sans aucun appelant de
+  //    production. Deux écritures d'une même règle, dont l'une était plus
+  //    ÉTROITE : un profil au nom VIDE ou un profil EN DOUBLE traversait ici sans
+  //    un mot, et la garde du § 14 comptait ensuite un profil de plus qu'il n'en
+  //    existe. On refuse désormais sur la même règle que l'analyse de manifeste.
+  //
+  //    Un kit sans profil accepterait `profiles: []` partout et la garde du § 14
+  //    mesurerait zéro en restant verte : le refus est à la CONSTRUCTION, avant
+  //    qu'un seul adaptateur ait pu s'écrire contre lui.
+  const anomalies = verifierEnumerationProfils(profilsConnus);
+  if (anomalies.length > 0) {
     throw new Error(
-      "creerAdapterKit : l'énumération des profils est vide. La garde du § 14 " +
-        "n'aurait plus rien à fermer, et un profil inconnu passerait sans un mot.",
+      `creerAdapterKit : l'énumération des profils est inutilisable — ` +
+        `${String(anomalies.length)} anomalie(s) : ${anomalies.join(" ")} ` +
+        "La garde du § 14 n'aurait plus rien à fermer, et un profil inconnu " +
+        "passerait sans un mot.",
     );
   }
 

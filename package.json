@@ -9,7 +9,11 @@
     "node": ">=22"
   },
   "packageManager": "pnpm@10.33.4",
+  "bin": {
+    "axion-ops": "./dist/ops/index.js"
+  },
   "scripts": {
+    "start": "node dist/ops/index.js",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

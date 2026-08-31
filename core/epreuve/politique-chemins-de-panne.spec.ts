@@ -574,21 +574,111 @@ describe("épreuve — redémarrage pendant un desserrage en cours", () => {
   });
 
   /**
-   * LA GARDE DU RACCORDEMENT — et elle rougit aujourd'hui, à dessein.
+   * ✅ **LA GARDE DU RACCORDEMENT — `it.todo` BASCULÉ EN `it()` AU LOT 2.**
    *
-   * `demarrerPolitique` existe désormais, mais l'ENTRÉE DU CONTENEUR qui doit
-   * l'appeler n'existe pas encore (lot 1 : ni serveur HTTP, ni transport stdio,
-   * ni racine de composition). Cette garde DÉRIVE la liste des appelants de
-   * production en lisant les sources — elle n'en porte aucune — et annonce
-   * combien de fichiers elle a lus.
+   * Elle attendait « le lot où `ops/` reçoit son point d'entrée ». Ce lot est
+   * arrivé : `ops/main.ts` appelle `demarrerPolitique` à l'étage 4 de l'échelle
+   * du démarrage (ADR 0023). L'ADR 0024 nomme cette bascule comme l'un des trois
+   * gestes qui ferment le point 4 du lot 1d — « les trois du même mouvement, un
+   * seul suffirait à donner du vert sans rien fermer ».
    *
-   * ⚠️ MARQUÉE `.todo` : elle ne peut pas verdir tant que la racine de
-   *    composition n'est pas écrite. La RETIRER la ferait disparaître le jour
-   *    où elle deviendrait utile ; la laisser rouge masquerait les vraies
-   *    régressions. Elle attend le lot où `ops/` reçoit son point d'entrée.
-   *    Voir `docs/ETAT.md`.
+   * Elle DÉRIVE la liste des appelants de production en lisant les sources —
+   * elle n'en porte aucune — et annonce combien de fichiers elle a lus.
+   *
+   * ⚠️ **UNE BORNE DE LA GARDE, MESURÉE ICI PLUTÔT QU'ÉCRITE.**
+   *    `verifierLeCablageDuDemarrage` écarte tout chemin qui se termine par
+   *    `demarrage.ts`, pour ne pas compter le DÉFINISSEUR
+   *    (`core/policy/demarrage.ts`) comme son propre appelant. L'exclusion porte
+   *    sur le SUFFIXE, pas sur le chemin exact : `ops/demarrage.ts`,
+   *    `core/vault/demarrage.ts` et `core/instance/demarrage.ts` y échappent
+   *    donc aussi, et un appel logé dans l'un d'eux resterait invisible. Le
+   *    compte ci-dessous ANNONCE les fichiers écartés, pour que la borne se voie
+   *    au lieu de rester dans ce commentaire.
    */
-  it.todo("est appelée par l'entrée du conteneur — à câbler quand `ops/` aura son point d'entrée");
+  it("✅ est appelée par la RACINE DE COMPOSITION — mesuré sur les sources", async () => {
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { verifierLeCablageDuDemarrage } = await import("../policy/demarrage.js");
+
+    const racineDuDepot = new URL("../../", import.meta.url);
+    const fichiers = new Map<string, string>();
+    const ecartesParLeSuffixe: string[] = [];
+    const parcourir = (relatif: string): void => {
+      for (const entree of readdirSync(fileURLToPath(new URL(relatif, racineDuDepot)), {
+        withFileTypes: true,
+      })) {
+        const chemin = `${relatif}${entree.name}`;
+        if (entree.isDirectory()) parcourir(`${chemin}/`);
+        else if (entree.name.endsWith(".ts")) {
+          fichiers.set(chemin, readFileSync(fileURLToPath(new URL(chemin, racineDuDepot)), "utf8"));
+          if (!chemin.endsWith(".spec.ts") && chemin.endsWith("demarrage.ts")) {
+            ecartesParLeSuffixe.push(chemin);
+          }
+        }
+      }
+    };
+    for (const dossier of ["core", "ops", "adapters", "console", "voice"]) {
+      try {
+        parcourir(`${dossier}/`);
+      } catch {
+        // Un dossier absent n'est pas une panne : le plancher ci-dessous dit si
+        // l'ensemble réellement balayé est resté suffisant.
+      }
+    }
+
+    const cablage = verifierLeCablageDuDemarrage(fichiers);
+
+    // ── LA PREMIÈRE BORNE EST FERMÉE, ET ON LE PROUVE SUR UN CORPUS FABRIQUÉ ─
+    // `verifierLeCablageDuDemarrage` cherchait `demarrerPolitique(` par un
+    // `String.includes` sur le source BRUT : un module qui NOMMAIT la fonction
+    // dans un bloc JSDoc comptait pour un appelant. Le lot 2 lui fait retirer
+    // prose et chaînes — et cette garde EXIGEAIT le contraire, en assurant
+    // qu'au moins une citation en prose subsiste. Un cliquet à l'envers : le
+    // jour de la correction, il aurait rendu « expected 0 to be >= 1 ».
+    //
+    // ⚠️ **CE QUI REMPLACE L'EXIGENCE : UN TÉMOIN.** Annoncer un compte ne
+    //    prouve rien tant que l'instrument n'a pas montré qu'il sait dire NON.
+    //    Trois modules fabriqués, trois régimes, et le verdict attendu de
+    //    chacun.
+    const corpusFabrique = new Map<string, string>([
+      ["faux/appelle.ts", "await demarrerPolitique(depot, maintenant, motif);\n"],
+      ["faux/en-prose.ts", "/** on appelle demarrerPolitique( ailleurs */\nexport const x = 1;\n"],
+      ["faux/en-chaine.ts", 'const m = "demarrerPolitique(depot)";\nexport const y = 2;\n'],
+    ]);
+    const surLeFabrique = verifierLeCablageDuDemarrage(corpusFabrique);
+
+    console.info(
+      `[raccordement § 20] ${String(cablage.fichiersLus)} fichier(s) lus · ` +
+        `${String(cablage.appelantsDeProduction.length)} appelant(s) de PRODUCTION ` +
+        `[${cablage.appelantsDeProduction.join(", ") || "aucun"}] · ` +
+        `${String(cablage.citationsEnProse.length)} citation(s) en prose, ANNONCÉE(S) et ` +
+        `jamais comptée(s) pour un appel [${cablage.citationsEnProse.join(", ") || "aucune"}] · ` +
+        `témoin fabriqué : ${String(corpusFabrique.size)} module(s) soumis → ` +
+        `${String(surLeFabrique.appelantsDeProduction.length)} appelant(s) ` +
+        `[${surLeFabrique.appelantsDeProduction.join(", ")}] et ` +
+        `${String(surLeFabrique.citationsEnProse.length)} citation(s) ` +
+        `[${surLeFabrique.citationsEnProse.join(", ")}] · ` +
+        `${String(ecartesParLeSuffixe.length)} fichier(s) écarté(s) par le suffixe ` +
+        `« demarrage.ts » [${ecartesParLeSuffixe.join(", ")}] — BORNE RESTANTE`,
+    );
+
+    // Plancher : le balayage a réellement eu lieu. À zéro fichier lu, « zéro
+    // appelant » serait vrai pour la pire des raisons.
+    expect(cablage.fichiersLus).toBeGreaterThanOrEqual(100);
+
+    // LE TÉMOIN : l'instrument distingue les trois régimes. Sans lui, « zéro
+    // citation en prose » serait vrai parce que l'instrument ne regarde rien.
+    expect(surLeFabrique.appelantsDeProduction).toEqual(["faux/appelle.ts"]);
+    expect(surLeFabrique.citationsEnProse).toEqual(["faux/en-prose.ts", "faux/en-chaine.ts"]);
+
+    // ⚠️ LA MESURE DU LOT : la protection 4 du § 20 a enfin un mécanisme.
+    //    Débrancher l'appel dans `ops/main.ts` ramène ce compte à zéro, et le
+    //    retrait de la prose garantit que ce n'est pas une citation.
+    expect(cablage.appelantsDeProduction).toContain("ops/main.ts");
+    // La borne est ANNONCÉE, jamais EXIGÉE : un compte à zéro est le résultat
+    // souhaité, pas une régression.
+    expect(cablage.citationsEnProse.length).toBeGreaterThanOrEqual(0);
+  });
 
   /**
    * Le corollaire rassurant : le TTL est bien évalué PARESSEUSEMENT, donc un

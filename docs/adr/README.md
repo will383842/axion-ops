@@ -19,7 +19,7 @@ et la garde le DIT, au lieu de devenir muette.
 
 ## La plage 0006 → 0009 est LIBRE — elle n'a jamais été attribuée
 
-Les numéros vont de 0001 à 0005, puis de 0010 à 0022. **Le trou est réel, et il
+Les numéros vont de 0001 à 0005, puis de 0010 à 0031. **Le trou est réel, et il
 ne cache rien** :
 
 - aucun fichier `0006-*` à `0009-*` n'a jamais existé — vérifié sur l'historique

@@ -284,8 +284,23 @@ function mesurerLesCoutures(
         continue;
       }
       const corps = sansLiaisons(nu);
-      if (forme.test(corps)) appelants.push(fichier.chemin);
-      else if (nomSeul.test(fichier.source) && !nomSeul.test(corps)) citations.push(fichier.chemin);
+      // ⚠️ **UNE CONSTANTE LUE EST UNE CONSTANTE IMPORTÉE.** Ce dépôt est en
+      //    modules ES : il n'a aucune portée globale. Exiger l'import n'ajoute
+      //    donc rien à la réalité, et retire un faux positif MESURÉ au lot 2 —
+      //    le nom seul suffisait, **y compris à l'intérieur d'une chaîne de
+      //    caractères**, et le registre porte le nom de chaque symbole dans son
+      //    champ `symbole:` par construction. Sans cette condition, aucune entrée
+      //    `à-coudre` de genre `constante` ne peut exister.
+      //
+      //    ⚠️ CETTE SECONDE DÉRIVATION SUIT LA PREMIÈRE À DESSEIN, ET C'EST UNE
+      //       TENSION ASSUMÉE : deux dérivations d'un même fait finissent par se
+      //       contredire. Celle-ci reste indépendante pour rester un témoin ; la
+      //       règle, elle, ne peut pas différer sans que l'une des deux mente.
+      const importee =
+        entree.genre !== "constante" ||
+        new RegExp(`import[^;]*\\b${echapper(entree.symbole)}\\b[^;]*from`).test(nu);
+      if (importee && forme.test(corps)) appelants.push(fichier.chemin);
+      else if (nomSeul.test(fichier.source)) citations.push(fichier.chemin);
     }
 
     // Le symbole est-il DÉFINI là où le registre le dit ?

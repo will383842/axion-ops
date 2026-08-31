@@ -86,6 +86,38 @@ import { APPEL_STEPS, NOMS_RESERVES_HORS_CONTEXTE } from "../types.js";
  *    garde de SÉCURITÉ du lot ne dépend plus du tout de ce filtre.
  */
 export function sansCommentaires(source: string): string {
+  return balayerLeSource(source, false);
+}
+
+/**
+ * LE MÊME BALAYAGE, MAIS LES LITTÉRAUX DE CHAÎNE SONT BLANCHIS EUX AUSSI.
+ *
+ * ═══ POURQUOI CETTE SECONDE SORTIE EXISTE ═══
+ *
+ * Certaines gardes cherchent un GESTE — « ce fichier appelle-t-il X ? », « ce
+ * fichier convertit-il vers `SessionId` ? ». Un nom cité dans un message
+ * d'erreur ou dans un champ `motif:` est une PHRASE, et la confondre avec un
+ * geste rend la garde ROUGE sur de la prose. La garde G3 de l'ADR 0014 l'a payé
+ * d'un lot entier de rouge : `core/types.ts` NOMMAIT la conversion forcée dans
+ * le motif d'une entrée de registre. Une garde de sûreté rouge pour une
+ * mauvaise raison s'apprend à ignorer, puis se désactive.
+ *
+ * ⚠️ **LES DEUX SORTIES ONT DEUX CLIENTS, ET IL NE FAUT PAS LES CONFONDRE.** Une
+ *    garde qui lit des clauses d'`import` a besoin des chaînes : le
+ *    spécificateur d'un import EST une chaîne. Lui donner cette sortie-ci lui
+ *    ferait rendre ZÉRO import, c'est-à-dire une garde verte parce qu'elle ne
+ *    regarde plus rien.
+ *
+ * ⚠️ **LES DÉLIMITEURS RESTENT, SEUL LE CONTENU EST BLANCHI**, et le CODE d'une
+ *    substitution `${…}` de gabarit reste VISIBLE — c'est du code, et un geste
+ *    écrit là doit rester vu. Les sauts de ligne sont conservés : les numéros de
+ *    ligne tiennent.
+ */
+export function sansCommentairesNiChaines(source: string): string {
+  return balayerLeSource(source, true);
+}
+
+function balayerLeSource(source: string, blanchirLesChaines: boolean): string {
   /** Le `/` qui suit ces caractères ouvre une expression régulière, pas une division. */
   const AVANT_UNE_REGEX = new Set([
     "(",
@@ -152,6 +184,17 @@ export function sansCommentaires(source: string): string {
     i = fin;
   };
 
+  /**
+   * Le CONTENU d'un littéral, écrit tel quel ou blanchi selon le client.
+   *
+   * ⚠️ Les sauts de ligne survivent dans les deux régimes : sans eux, les
+   *    numéros de ligne d'un gabarit multiligne se décaleraient, et un message
+   *    de garde désignerait la mauvaise ligne.
+   */
+  const emettreContenu = (texte: string): void => {
+    sortie += blanchirLesChaines ? texte.replace(/[^\n]/gu, " ") : texte;
+  };
+
   /** Avale une chaîne ou un gabarit à partir de son guillemet ouvrant. */
   const avalerChaine = (ouvrant: string): void => {
     sortie += ouvrant;
@@ -159,7 +202,7 @@ export function sansCommentaires(source: string): string {
     while (i < source.length) {
       const d = source[i];
       if (d === ANTISLASH) {
-        sortie += source.slice(i, i + 2);
+        emettreContenu(source.slice(i, i + 2));
         i += 2;
         continue;
       }
@@ -171,9 +214,13 @@ export function sansCommentaires(source: string): string {
         i += 2;
         return;
       }
-      sortie += d;
+      if (d === ouvrant) {
+        sortie += d;
+        i += 1;
+        return;
+      }
+      emettreContenu(d ?? "");
       i += 1;
-      if (d === ouvrant) return;
       // Une chaîne simple ou double ne franchit pas la fin de ligne.
       if (ouvrant !== ACCENT && d === "\n") return;
     }
@@ -215,7 +262,7 @@ export function sansCommentaires(source: string): string {
       while (i < source.length) {
         const d = source[i];
         if (d === ANTISLASH) {
-          sortie += source.slice(i, i + 2);
+          emettreContenu(source.slice(i, i + 2));
           i += 2;
           continue;
         }
@@ -225,9 +272,13 @@ export function sansCommentaires(source: string): string {
           i += 2;
           break;
         }
-        sortie += d;
+        if (d === ACCENT) {
+          sortie += d;
+          i += 1;
+          break;
+        }
+        emettreContenu(d ?? "");
         i += 1;
-        if (d === ACCENT) break;
       }
       dernierSignificatif = ACCENT;
       continue;

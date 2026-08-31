@@ -49,9 +49,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  DESTINATIONS_AU_JOURNAL,
   NOMS_RESERVES_HORS_CONTEXTE,
   REGIMES_DE_CANAL,
   STATUT_DES_CANAUX_DE_CONTEXTE,
+  STATUT_DES_CANAUX_D_APPEL,
+  STATUT_DES_CANAUX_D_IDENTITE,
   type StatutDeCanal,
 } from "./types.js";
 // ⚠️ ON EMPRUNTE LE LECTEUR DU CONTRÔLE 7, ON N'EN ÉCRIT PAS UN SECOND.
@@ -253,15 +256,47 @@ const PROPRIETES_SAINES = [
 ];
 
 const STATUTS_SAINS: Readonly<Record<string, StatutDeCanal>> = {
-  principal: { regime: "ouvert-signalé", motif: "témoin" },
-  sessionId: { regime: "fermé-par-construction", motif: "témoin" },
-  scopes: { regime: "fermé-par-construction", motif: "témoin" },
-  policyLevel: { regime: "fermé-par-construction", motif: "témoin" },
-  profile: { regime: "fermé-par-construction", motif: "témoin" },
-  idempotencyRef: { regime: "fermé-par-le-socle", motif: "témoin" },
-  requestId: { regime: "à-fermer-au-transport", motif: "témoin" },
-  deadline: { regime: "à-fermer-au-transport", motif: "témoin" },
-  habilitations: { regime: "fermé-par-construction", motif: "témoin" },
+  principal: { regime: "ouvert-signalé", versLeJournal: { atteint: "jamais" }, motif: "témoin" },
+  sessionId: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  scopes: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  policyLevel: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  profile: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  idempotencyRef: {
+    regime: "fermé-par-le-socle",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  requestId: {
+    regime: "à-fermer-au-transport",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  deadline: {
+    regime: "à-fermer-au-transport",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
+  habilitations: {
+    regime: "fermé-par-construction",
+    versLeJournal: { atteint: "jamais" },
+    motif: "témoin",
+  },
 };
 
 describe("ADR 0020 — l'analyse des canaux SAIT DIRE NON", () => {
@@ -273,7 +308,14 @@ describe("ADR 0020 — l'analyse des canaux SAIT DIRE NON", () => {
     //    ajout inattentif, et c'est celle qu'aucune relecture n'attrape.
     const analyse = analyserCanaux(
       sourceFabrique([...PROPRIETES_SAINES, "idempotencyKey: string | null;"]),
-      { ...STATUTS_SAINS, idempotencyKey: { regime: "fermé-par-construction", motif: "témoin" } },
+      {
+        ...STATUTS_SAINS,
+        idempotencyKey: {
+          regime: "fermé-par-construction",
+          versLeJournal: { atteint: "jamais" },
+          motif: "témoin",
+        },
+      },
     );
 
     console.info(
@@ -307,7 +349,11 @@ describe("ADR 0020 — l'analyse des canaux SAIT DIRE NON", () => {
   it("rougit sur un statut FANTÔME — un champ retiré du type, son statut resté", () => {
     const analyse = analyserCanaux(sourceFabrique(PROPRIETES_SAINES), {
       ...STATUTS_SAINS,
-      champDisparu: { regime: "fermé-par-construction", motif: "témoin" },
+      champDisparu: {
+        regime: "fermé-par-construction",
+        versLeJournal: { atteint: "jamais" },
+        motif: "témoin",
+      },
     });
 
     console.info(
@@ -321,7 +367,11 @@ describe("ADR 0020 — l'analyse des canaux SAIT DIRE NON", () => {
   it("rougit sur un MOTIF vide — un régime sans motif n'est qu'une opinion", () => {
     const analyse = analyserCanaux(sourceFabrique(PROPRIETES_SAINES), {
       ...STATUTS_SAINS,
-      requestId: { regime: "à-fermer-au-transport", motif: "   " },
+      requestId: {
+        regime: "à-fermer-au-transport",
+        versLeJournal: { atteint: "jamais" },
+        motif: "   ",
+      },
     });
 
     console.info(
@@ -492,5 +542,254 @@ describe("ADR 0020 — un nom RETIRÉ du `ctx` reste interdit dans un schéma d'
 
     expect(leve, "une liste vide doit LEVER, jamais rendre une garde plus étroite").toBe(true);
     expect(message, "et le message dit ce qui se serait passé").toContain("schéma d'entrée");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ADR 0031 — LES TROIS INVENTAIRES, ET LA DESTINATION JOURNAL
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * LES TROIS INVENTAIRES, VUS COMME UN SEUL CORPUS.
+ *
+ * ⚠️ LA TOTALITÉ DE CHACUN EST TENUE PAR LE COMPILATEUR, ET AUCUN TEST NE
+ *    PEUT FAIRE MIEUX : `Record<keyof T, StatutDeCanal>` refuse de compiler dès
+ *    qu'un champ manque ou qu'un statut désigne un champ inexistant. Ce que les
+ *    gardes ci-dessous mesurent est ce que le compilateur NE dit PAS : que les
+ *    trois records se tiennent entre eux, et que ce qu'ils déclarent est
+ *    exploitable.
+ */
+const INVENTAIRES = [
+  ["ToolContext", STATUT_DES_CANAUX_DE_CONTEXTE],
+  ["AppelEntrant", STATUT_DES_CANAUX_D_APPEL],
+  ["IdentiteAppelante", STATUT_DES_CANAUX_D_IDENTITE],
+] as const satisfies readonly (readonly [string, Readonly<Record<string, StatutDeCanal>>])[];
+
+/** Chaque entrée des trois records, aplatie et NOMMÉE par son type d'origine. */
+function toutesLesEntrees(): readonly {
+  readonly type: string;
+  readonly champ: string;
+  readonly statut: StatutDeCanal;
+}[] {
+  return INVENTAIRES.flatMap(([type, record]) =>
+    Object.entries(record).map(([champ, statut]) => ({ type, champ, statut })),
+  );
+}
+
+/**
+ * ⚠️ LE CLIQUET DATÉ DES `verbatim`, ET IL EST LE CŒUR DE CETTE GARDE.
+ *
+ * `verbatim` est une ANOMALIE, pas un état toléré : c'est le défaut BLOQUANT du
+ * lot 1d — une terminaison qui ne laisse AUCUNE ligne d'`ops_audit`. On ne peut
+ * pourtant pas exiger zéro aujourd'hui sans mentir : l'ADR 0029 borne `tool` à
+ * l'étape 6 et refuse `principal` à l'étape 4, et **ni l'une ni l'autre n'est
+ * appliquée tant que `core/transport/` et `core/auth/` n'ont pas atterri**.
+ *
+ * On écrit donc la liste EXACTE et DATÉE de ce qui est encore verbatim, comme le
+ * registre des coutures le fait de ses `à-coudre` :
+ *
+ *  · un TROISIÈME `verbatim` fait ROUGIR immédiatement — il ne peut plus
+ *    s'ajouter en silence, et c'est tout ce que le lot 1d demandait ;
+ *  · le jour où les deux bornes sont appliquées, cette liste doit tomber à vide
+ *    et **cette garde ROUGIT AUSSI** — un cliquet qu'on ne resserre pas est un
+ *    cliquet qui se périme. C'est voulu : le correctif oblige à revenir ici.
+ */
+const VERBATIM_ATTENDUS_AU_2026_08_31: readonly string[] = [
+  "ToolContext.principal",
+  "AppelEntrant.nomComplet",
+  "IdentiteAppelante.principal",
+];
+
+describe("ADR 0031 — les trois inventaires classent la SOURCE autant que la destination", () => {
+  it("COMPTE les entrées des trois records et ANNONCE la répartition des deux axes", () => {
+    const entrees = toutesLesEntrees();
+    const parRegime = new Map<string, number>();
+    const parDestination = new Map<string, number>();
+    for (const { statut } of entrees) {
+      parRegime.set(statut.regime, (parRegime.get(statut.regime) ?? 0) + 1);
+      const cle = statut.versLeJournal.atteint;
+      parDestination.set(cle, (parDestination.get(cle) ?? 0) + 1);
+    }
+
+    console.info(
+      `[ADR 0031 · répartition] ${String(INVENTAIRES.length)} inventaire(s) · ` +
+        `${String(entrees.length)} entrée(s) classée(s) · régimes : ` +
+        [...parRegime.entries()].map(([r, n]) => `${r}=${String(n)}`).join(", ") +
+        " · destinations : " +
+        [...parDestination.entries()].map(([d, n]) => `${d}=${String(n)}`).join(", "),
+    );
+
+    // Plancher-témoin : un record vidé rendrait toutes les gardes d'ici vertes.
+    expect(INVENTAIRES.length, "trois inventaires, pas un").toBe(3);
+    expect(entrees.length, "plancher-témoin").toBeGreaterThanOrEqual(20);
+    // Les deux axes TRANCHENT : un axe dont toutes les valeurs seraient
+    // identiques ne classerait rien, et serait vert pour cette raison-là.
+    expect(parRegime.size, "les régimes distinguent").toBeGreaterThanOrEqual(3);
+    expect(parDestination.size, "les destinations aussi").toBeGreaterThanOrEqual(2);
+    // Aucune destination hors de l'énumération déclarée.
+    expect(
+      [...parDestination.keys()].filter(
+        (cle) => !(DESTINATIONS_AU_JOURNAL as readonly string[]).includes(cle),
+      ),
+      "aucune destination hors énumération",
+    ).toEqual([]);
+  });
+
+  it("NOMME sa borne quand elle dit `borné-par` — une borne anonyme est une borne crue", () => {
+    const bornees = toutesLesEntrees().filter(
+      ({ statut }) => statut.versLeJournal.atteint === "borné-par",
+    );
+    const anonymes = bornees.filter(
+      ({ statut }) =>
+        statut.versLeJournal.atteint === "borné-par" && statut.versLeJournal.borne.trim() === "",
+    );
+
+    console.info(
+      `[ADR 0031 · bornes] ${String(bornees.length)} champ(s) « borné-par » : ` +
+        bornees.map(({ type, champ }) => `${type}.${champ}`).join(", ") +
+        ` · ${String(anonymes.length)} borne(s) anonyme(s)`,
+    );
+
+    // Plancher : sans borne déclarée nulle part, ce test serait vert en ne
+    // regardant rien.
+    expect(bornees.length, "plancher-témoin").toBeGreaterThanOrEqual(3);
+    expect(anonymes, "une borne qu'on ne peut pas nommer est une borne qu'on croit avoir").toEqual(
+      [],
+    );
+  });
+
+  it("tient le CLIQUET DATÉ des `verbatim` — le troisième ne peut plus s'ajouter", () => {
+    const verbatim = toutesLesEntrees()
+      .filter(({ statut }) => statut.versLeJournal.atteint === "verbatim")
+      .map(({ type, champ }) => `${type}.${champ}`);
+
+    const nouveaux = verbatim.filter((cle) => !VERBATIM_ATTENDUS_AU_2026_08_31.includes(cle));
+    const refermes = VERBATIM_ATTENDUS_AU_2026_08_31.filter((cle) => !verbatim.includes(cle));
+
+    console.info(
+      `[ADR 0031 · cliquet verbatim] ${String(verbatim.length)} champ(s) VERBATIM vers ` +
+        `\`ops_audit\` : ${verbatim.join(", ")} · ${String(nouveaux.length)} NOUVEAU(x) : ` +
+        `${nouveaux.join(", ") || "aucun"} · ${String(refermes.length)} refermé(s) depuis ` +
+        `le 2026-08-31 : ${refermes.join(", ") || "aucun"}`,
+    );
+
+    // Le plancher du cliquet lui-même : une liste datée vidée rendrait
+    // « zéro nouveau » vrai pour la pire des raisons.
+    expect(VERBATIM_ATTENDUS_AU_2026_08_31.length, "le cliquet porte bien sa liste").toBe(3);
+    // L'ATTENTE : aucun verbatim NEUF. C'est ce que la garde empêche.
+    expect(nouveaux, "un troisième `verbatim` ne s'ajoute pas en silence").toEqual([]);
+    // ⚠️ ET L'AUTRE SENS : le jour où l'ADR 0029 est appliquée (étape 4 refuse,
+    //    étape 6 borne), ces trois entrées passent à `borné-par` — ce test rougit
+    //    alors, et il FAUT revenir ici resserrer le cliquet. Un cliquet qu'on ne
+    //    resserre pas se périme, et personne ne le voit se périmer.
+    expect(refermes, "le cliquet se resserre quand la borne atterrit").toEqual([]);
+  });
+
+  it("CONFRONTE les homonymes des trois records — l'homonymie cesse d'être une couverture", () => {
+    // ⚠️ C'EST LA MOITIÉ QUI TRANSFORME LE DÉFAUT EN GARDE. Avant l'ADR 0031, les
+    //    six champs d'`IdentiteAppelante` étaient réputés classes parce qu'ils
+    //    portaient les mêmes NOMS que six champs du `ctx`. Maintenant qu'ils ont
+    //    leur propre entrée, l'homonymie devient une CONFRONTATION : deux
+    //    dérivations d'un même fait ne doivent pas se contredire.
+    const parChamp = new Map<string, { type: string; statut: StatutDeCanal }[]>();
+    for (const { type, champ, statut } of toutesLesEntrees()) {
+      const vus = parChamp.get(champ) ?? [];
+      vus.push({ type, statut });
+      parChamp.set(champ, vus);
+    }
+
+    const homonymes = [...parChamp.entries()].filter(([, vus]) => vus.length > 1);
+    const contradictions: string[] = [];
+    for (const [champ, vus] of homonymes) {
+      const destinations = new Set(vus.map(({ statut }) => statut.versLeJournal.atteint));
+      if (destinations.size > 1) {
+        contradictions.push(
+          `${champ} : ${vus
+            .map(({ type, statut }) => `${type}=${statut.versLeJournal.atteint}`)
+            .join(" vs ")}`,
+        );
+      }
+    }
+
+    console.info(
+      `[ADR 0031 · homonymie] ${String(parChamp.size)} nom(s) distinct(s) · ` +
+        `${String(homonymes.length)} porté(s) par plusieurs inventaires : ` +
+        homonymes.map(([champ, vus]) => `${champ}×${String(vus.length)}`).join(", ") +
+        ` · ${String(contradictions.length)} contradiction(s) : ` +
+        `${contradictions.join(" | ") || "aucune"}`,
+    );
+
+    // Plancher : sans homonyme, la confrontation ne mesurerait rien — et c'est
+    // précisément le compte que l'ADR 0031 refuse de retirer de l'annonce, même
+    // le jour où il cesse d'être une couverture.
+    expect(
+      homonymes.length,
+      "plancher-témoin : des homonymes existent bien",
+    ).toBeGreaterThanOrEqual(4);
+    expect(contradictions, "deux dérivations d'un même fait ne se contredisent pas").toEqual([]);
+  });
+
+  it("SAIT DIRE NON — témoins fabriqués sur les trois attentes ci-dessus", () => {
+    // Sans ce bloc, les quatre gardes précédentes seraient vertes sans qu'on
+    // sache si elles PEUVENT rougir. Chaque défaut est planté dans un corpus
+    // FABRIQUÉ — jamais dans les records réels — et l'analyse est refaite.
+    const fabrique: readonly (readonly [string, Readonly<Record<string, StatutDeCanal>>])[] = [
+      [
+        "TypeA",
+        {
+          alpha: { regime: "ouvert-signalé", versLeJournal: { atteint: "verbatim" }, motif: "t" },
+          beta: {
+            regime: "fermé-par-le-socle",
+            versLeJournal: { atteint: "borné-par", borne: "   " },
+            motif: "t",
+          },
+        },
+      ],
+      [
+        "TypeB",
+        {
+          alpha: { regime: "ouvert-signalé", versLeJournal: { atteint: "jamais" }, motif: "t" },
+        },
+      ],
+    ];
+
+    const entrees = fabrique.flatMap(([type, record]) =>
+      Object.entries(record).map(([champ, statut]) => ({ type, champ, statut })),
+    );
+
+    const verbatimNeufs = entrees
+      .filter(({ statut }) => statut.versLeJournal.atteint === "verbatim")
+      .map(({ type, champ }) => `${type}.${champ}`)
+      .filter((cle) => !VERBATIM_ATTENDUS_AU_2026_08_31.includes(cle));
+
+    const bornesAnonymes = entrees.filter(
+      ({ statut }) =>
+        statut.versLeJournal.atteint === "borné-par" && statut.versLeJournal.borne.trim() === "",
+    );
+
+    const parChamp = new Map<string, string[]>();
+    for (const { champ, statut } of entrees) {
+      const vus = parChamp.get(champ) ?? [];
+      vus.push(statut.versLeJournal.atteint);
+      parChamp.set(champ, vus);
+    }
+    const contradictions = [...parChamp.entries()].filter(
+      ([, atteints]) => new Set(atteints).size > 1,
+    );
+
+    console.info(
+      `[ADR 0031 · témoin] ${String(entrees.length)} entrée(s) fabriquée(s) · ` +
+        `${String(verbatimNeufs.length)} verbatim NEUF(s) détecté(s) · ` +
+        `${String(bornesAnonymes.length)} borne(s) anonyme(s) détectée(s) · ` +
+        `${String(contradictions.length)} contradiction(s) d'homonyme détectée(s)`,
+    );
+
+    expect(entrees.length, "plancher : le corpus fabriqué n'est pas vide").toBe(3);
+    expect(verbatimNeufs, "un verbatim hors cliquet est VU").toEqual(["TypeA.alpha"]);
+    expect(bornesAnonymes.length, "une borne anonyme est VUE").toBe(1);
+    expect(
+      contradictions.map(([champ]) => champ),
+      "un homonyme qui diverge est VU",
+    ).toEqual(["alpha"]);
   });
 });

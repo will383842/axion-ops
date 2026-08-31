@@ -315,6 +315,29 @@ function doitEtreFerme(schema: ObjetJson): boolean {
  * quoi qu'en dise le validateur JSON Schema. **Le CDC ne tranche pas
  * `patternProperties` — c'est une décision de ce module, prise fail-closed, et
  * signalée au rapport.**
+ *
+ * 🔴 **ET QUELQU'UN D'AUTRE EN DÉPEND SANS QUE PERSONNE L'AIT ÉCRIT — LOT 1d,
+ *    point 10. CE REFUS-CI EST CE QUI FERME LE § 20 SUR `patternProperties`.**
+ *
+ *    `analyserArgumentsDuSchema()` (`core/chaine/etape-11-provenance.ts`) ne
+ *    consomme que les `properties` de chaque sous-schéma : un champ déclaré par
+ *    `patternProperties` n'est pas une propriété au sens de cette boucle. Le
+ *    § 20 en voit donc ZÉRO, et `porteUnArgumentLibre` reste `false` sur un
+ *    schéma qui accepte pourtant du texte libre sous un nom quelconque. Mesuré
+ *    au lot 1d : « § 20 : 2 sous-schéma(s) visité(s) · 0 propriété(s)
+ *    inspectée(s) · 0 champ(s) libre(s) · porteUnArgumentLibre : false — § 09 :
+ *    fermé = false · 1 ouvert(s) signalé(s) ».
+ *
+ *    **Ce qui sauve le cas est ce refus d'admission, et lui seul.** Le § 20 est
+ *    FAIL-OPEN sur les noms non énumérables ; le § 09 ferme la porte en amont.
+ *
+ * ⚠️ **CONSÉQUENCE, ET ELLE EST LA RAISON D'ÊTRE DE CE PARAGRAPHE : ASSOUPLIR CE
+ *    REFUS ROUVRE LE § 20, SANS QU'AUCUNE GARDE NE CHANGE DE COULEUR.** Le jour
+ *    où l'on voudra admettre une forme BORNÉE de `patternProperties` — un motif
+ *    dont l'ensemble des noms est fini, par exemple —, il faudra D'ABORD faire
+ *    entrer la VALEUR d'une entrée de `patternProperties` dans les `libres` de
+ *    l'étape 11. Dans l'autre ordre, le § 20 redevient aveugle en silence, et
+ *    c'est le mode de défaillance que ce dépôt paie le plus cher.
  */
 function ouvertureResiduelle(schema: ObjetJson): string | null {
   if (commeObjet(schema["patternProperties"]) !== null) {

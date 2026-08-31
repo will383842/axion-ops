@@ -35,7 +35,7 @@ import type { AdapterMode, DataClass, Effect } from "../types.js";
 import { canoniser, empreinteCanonique, octetsCanoniques, versValeurJson } from "./json.js";
 import { analyserFermeture } from "./fermeture.js";
 import { analyserChampsDeclares, motifGovernanceFieldIntrouvable } from "./champs-declares.js";
-import { verifierFormeDuSceau } from "./profils.js";
+import { verifierEnumerationProfils, verifierFormeDuSceau } from "./profils.js";
 import type { SceauProfils } from "./profils.js";
 import type { ObjetJson, ValeurJson } from "./json.js";
 import { IDEMPOTENCIES, PAGINATIONS } from "./types.js";
@@ -287,6 +287,13 @@ export function analyserDefinition<TProfile extends string>(
   // REGISTRE. Un sceau malformé produirait un manifeste qu'aucun registre ne
   // pourrait admettre, et l'auteur ne l'apprendrait qu'au déploiement.
   anomalies.push(...verifierFormeDuSceau(sceauProfils));
+  // ⚠️ ET SON JUMEAU, QUI N'AVAIT AUCUN APPELANT DE PRODUCTION — ADR 0004.
+  //    Les deux sont écrites dans le même fichier et par la même décision ; une
+  //    seule était cousue. Le sceau des profils était donc confronté dans sa
+  //    FORME, et l'énumération qu'il scelle JAMAIS dans la sienne : un manifeste
+  //    pouvait être analysé contre une énumération vide, à noms vides ou à
+  //    doublons, et l'appartenance d'un profil s'y vérifiait sur du sable.
+  anomalies.push(...verifierEnumerationProfils(profilsConnus));
 
   if (!MOTIF_ID.test(definition.id)) {
     anomalies.push(

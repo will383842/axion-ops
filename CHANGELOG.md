@@ -5,6 +5,145 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 2 — le socle démarre et répond — 2026-09-01
+
+Le lot 1d s'était terminé sur un manque nommé en toutes lettres : **rien
+n'appelait le socle.** Le cœur était écrit et prouvé, et personne ne pouvait
+l'atteindre. Le lot 2 devait fermer ce manque.
+
+**Il l'a fermé d'un cran, et rouvert au cran du dessus.** Il a livré les deux
+transports — HTTP streamable et stdio —, l'émetteur de jetons, la politique
+d'accès chemin par chemin, la racine de composition et ses sept étages. Et, à la
+recette, mesuré sur les 128 modules que `pnpm build` émettait :
+
+| symbole              | appelants de production |
+| -------------------- | ----------------------- |
+| `creerServeurHttp`   | 0                       |
+| `creerTransportHttp` | 0                       |
+| `creerServeurStdio`  | 0                       |
+| `brancherSurLesFlux` | 0                       |
+| `demarrerLeSocle`    | 0                       |
+
+Aucun `bin` dans `package.json`, aucune garde `import.meta.url` / `process.argv`,
+aucun shebang — alors que `ops/main.ts` titrait déjà une section « L'ENTRÉE DU
+PROCESSUS » au-dessus de trois fabriques d'aide. **« Le socle démarre » ne
+désignait aucun geste possible.**
+
+### Ce que la recette a écrit
+
+| Fichier               | Ce qu'il fait                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `ops/index.ts`        | **le point d'entrée du processus** — lit l'environnement, appelle la racine, monte    |
+| `ops/service.ts`      | **le montage** — construit les transports, ou NOMME ce qui l'en empêche               |
+| `ops/service.spec.ts` | la seule garde du dépôt qui mesure **un octet qui revient** : socket réelle, fil réel |
+| `docs/adr/0034`       | la décision, ses six points et ses conséquences acceptées                             |
+
+**ADR 0034.** Trois fichiers, trois responsabilités : `ops/main.ts` SÉQUENCE,
+`ops/service.ts` MONTE, `ops/index.ts` RELIE. La séparation n'est pas une
+coquetterie — c'est ce qui rend le montage éprouvable sans lire `process.env`, et
+ce qui permet à `ops/service.spec.ts` de lier une socket éphémère sur
+`127.0.0.1`, d'envoyer un `tools/call` et de lire un `result`.
+
+### Les quatre défauts que la recette a fermés, et un qu'elle n'a pas pu fermer
+
+**1 · L'étage 3 était écrit et débranché.**
+`verifierLaConfigurationDAuthentification` existait, exportée, gardée — et la
+racine ne l'appelait pas ; son port valait `null`, donc l'étage 3 REFUSAIT, donc
+**la racine livrée ne démarrait sur AUCUNE configuration**. Le seul démarrage
+vert du dépôt était celui que sa propre garde s'accordait, en fabriquant un
+verdict qui annonçait `reglagesConfrontes: 5` là où le décideur réel en confronte
+**4**. Deux dérivations d'un même fait, dans le même lot, qui se contredisaient —
+et c'était la fabriquée qui était verte, précisément parce qu'elle ne dérivait de
+rien.
+
+**2 · La garde G3 de l'ADR 0014 était ROUGE, et sur une PHRASE.** Le motif de
+l'entrée `sessionId` de `core/types.ts` NOMMAIT la conversion forcée en prose ;
+G3 retirait les commentaires, jamais les chaînes. Une garde de sûreté rouge pour
+une mauvaise raison s'apprend à ignorer, puis se désactive. Le nettoyage vit
+désormais dans **un seul symbole partagé** (`sansCommentairesNiChaines`, un
+balayage à états), et G3 a gagné le **cinquième témoin qui manquait** — plus un
+sixième, en sens inverse : une conversion écrite dans la substitution d'un
+gabarit est du CODE et doit rester vue.
+
+**3 · Une garde EXIGEAIT la persistance du défaut qu'elle mesurait.** La garde du
+raccordement de `demarrerPolitique` assurait `citationsEnProse.length >= 1` —
+c'est-à-dire qu'au moins un module continue d'être compté pour un appelant alors
+qu'il ne nomme la fonction que dans un commentaire. Un cliquet à l'envers, qui
+aurait rougi le jour de la correction. `verifierLeCablageDuDemarrage` retire
+désormais prose et chaînes ; l'assertion est remplacée par un **témoin fabriqué à
+trois régimes**, et la borne est ANNONCÉE au lieu d'être exigée.
+
+**4 · La garde de l'appelant unique du cliquet promettait « tout le code de
+production » et ne lisait que `core/`.** Le lot 2 avait porté `ops/` à douze
+modules livrés, dont la racine de composition : **aucun n'était regardé**, et son
+plancher-témoin (« plus de cinquante fichiers ») était franchi sans peine par un
+périmètre amputé. Elle lisait en outre cinq fichiers que `pnpm build` n'émet pas.
+Le périmètre « de production » est maintenant **dérivé une seule fois**, dans
+`core/epreuve/perimetre-de-production.ts`, et la garde lit 128 fichiers.
+
+**5 · Ce que la recette n'a PAS pu fermer, et qui est écrit plutôt que tu.**
+`ops/index.ts` remet `noyau: null`, et `monterLeService` COMPTE l'empêchement :
+« la chaîne des quatorze étapes n'est pas composée ». Les quatorze étapes exigent
+un journal SCELLÉ par une clé du coffre (ADR 0002), des dépôts de quota et
+d'idempotence, un catalogue épinglé — **aucun n'est câblé dans ce dépôt**. Un
+noyau de fortune ferait servir des appels qu'aucune ligne d'`ops_audit`
+n'atteste. **Le socle démarre et se tait, plutôt que de servir sans journal.**
+
+### `appelsDOutilsAcceptes` DÉCIDE enfin
+
+Le § 23 écrit que sous coffre verrouillé « tout appel d'outil est refusé ». Ce
+drapeau était calculé par `core/vault/demarrage.ts`, relayé par
+`ops/demarrage.ts`, republié par le healthcheck — et **lu par personne**. Le
+critère de recette du § 32 était donc éprouvé sur des ÉTIQUETTES
+(« `routesServies` contient la chaîne `console` ») et non sur un comportement.
+`monterLeService` le LIT, et ne monte aucun transport d'outils quand il vaut
+`false`.
+
+### Le socle a été LANCÉ, et voici ce qu'il fait
+
+Quatre exécutions réelles, en local, sur `stub.invalid` (RFC 2606), avec des
+valeurs factices :
+
+| Ce qu'on lui donne                                | Ce qu'il fait                                                                     |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| rien                                              | refuse **4 réglages**, code de sortie **1**, aucun verrou pris                    |
+| réglages complets, base factice                   | refuse à l'**étage 2** — coffre absent —, code **2**, message nommant la commande |
+| coffre local provisionné, aucune authentification | refuse à l'**étage 3**, code **3**, « le § 19 pose une règle absolue »            |
+| tout, coffre local provisionné                    | **7 étages franchis**, healthcheck **200**, `vaultLocked: false`, code **0**      |
+
+Et sur le fil, mesuré par `ops/service.spec.ts` : une socket liée sur
+`127.0.0.1`, un `POST /api/mcp` qui rend **200** et un corps portant `result`
+(jamais `error`) ; trois `tools/list` poussés sur le flux stdio, **3 réponses
+écrites, 0 levée**, et les trois comptes de relecture du catalogue qui coïncident.
+
+### La mesure du lot
+
+- **Les quatre gates** : `typecheck`, `lint`, `format:check`, `test` — **vertes**.
+- **Tests** : **1 418 verts, 0 rouge**, contre **1 409 verts et 9 ROUGES** à
+  l'ouverture de la recette.
+- **Dettes nommées** : **24 `it.fails`**, contre 28 — **quatre fermées**, toutes
+  par le point d'entrée : « un point d'entrée doit APPELER la racine », « la
+  racine doit MONTER un transport », « le drapeau des appels d'outils doit
+  atteindre un refus », « les quatre montages ont ZÉRO appelant ».
+- **Registre des coutures** : **52 symboles cousus sur 67 confrontés**, contre
+  48 sur 65 — deux entrées basculées
+  (`verifierLaConfigurationDAuthentification`, `brancherSurLesFlux`) et deux
+  entrées neuves (ADR 0034).
+- **Gardes sans compte annoncé** : **0 sur 124**. Aucune régression.
+- **Périmètre** : 260 fichiers TypeScript, **130 émis** par `pnpm build`.
+
+### Les témoins des coutures neuves
+
+Cinq mutilations fabriquées, cinq gardes qui rougissent, toutes restaurées :
+
+| Témoin                                           | Ce qui rougit                                           |
+| ------------------------------------------------ | ------------------------------------------------------- |
+| `brancherSurLesFlux` débranché                   | `ops/service.spec.ts` (2), registre G1                  |
+| l'étage 3 n'appelle plus le décideur du § 19     | couverture des étages, registre G1, épreuve étage 3 (4) |
+| `monterLeService` ignore `appelsDOutilsAcceptes` | `ops/service.spec.ts`, épreuve du démarrage (2)         |
+| `ops/index.ts` n'appelle plus `monterLeService`  | épreuve « rien n'écoute »                               |
+| `creerServeurHttp` débranché                     | `ops/service.spec.ts`, épreuve du transport (3)         |
+
 ## Lot 1d — brancher les décisions, fermer le canal `idempotencyKey` et le rejeu après panne — 2026-08-31
 
 Le lot 1c s'est terminé sur un mode de défaillance que personne n'avait

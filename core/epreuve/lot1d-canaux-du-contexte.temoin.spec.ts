@@ -120,6 +120,8 @@ import type { ProfileName } from "../profiles/index.js";
 import {
   EFFECTS,
   STATUT_DES_CANAUX_DE_CONTEXTE,
+  STATUT_DES_CANAUX_D_APPEL,
+  STATUT_DES_CANAUX_D_IDENTITE,
   type Habilitations,
   type OpsScope,
   type ToolContext,
@@ -1321,78 +1323,88 @@ describe("N2 · la totalité de l'inventaire, attaquée par sa méthode", () => 
   });
 
   /**
-   * 🔴 **NOUVEAU CONSTAT — L'INVENTAIRE DES CANAUX A UNE TOTALITÉ, ET CE N'EST
-   * PAS CELLE QUE SA MÉTHODE ANNONCE.**
+   * ✅ **CONSTAT FERMÉ AU LOT 2 — `it.fails` BASCULÉ EN `it()`. ADR 0031.**
+   *
+   * ═══ CE QUE LE LOT 1d AVAIT MESURÉ ═══
    *
    * `STATUT_DES_CANAUX_DE_CONTEXTE` est `Record<keyof ToolContext, …>` : ajouter
-   * un champ au `ctx` sans le classer ne compile pas. C'est solide, et cela ferme
-   * la DESTINATION « adaptateur ».
+   * un champ au `ctx` sans le classer ne compile pas. C'était solide, et cela
+   * fermait la DESTINATION « adaptateur ». Mais la question posée par les deux
+   * épreuves précédentes était plus large — *un champ qui atteint l'adaptateur
+   * **ou le journal** sans passer par le schéma* —, et la mesure disait :
    *
-   * Mais la question posée par les deux épreuves précédentes est plus large :
-   * *un champ qui atteint l'adaptateur **ou le journal** sans passer par le
-   * schéma*. Or :
+   * > `11 champ(s) de SOURCE confronté(s) à 9 champ(s) classé(s) · 6 couvert(s)
+   * par HOMONYMIE · 5 classé(s) par RIEN`
    *
-   *  · `AppelEntrant` porte les valeurs que l'APPELANT choisit, et aucune n'est
-   *    classée par quoi que ce soit. `idempotencyKey` — le canal que l'ADR 0020
-   *    vient de refermer — est l'un de ses champs, et il n'entre dans cet
-   *    inventaire-ci par AUCUNE clé : c'est `idempotencyRef`, sa contrepartie de
-   *    DESTINATION, qui y figure ;
-   *  · `nomComplet`, autre champ d'`AppelEntrant`, atteint `ops_audit.tool`
-   *    VERBATIM — la section N3 mesure ce qu'il en coûte —, et il n'est classé
-   *    nulle part ;
-   *  · `IdentiteAppelante` n'est couverte que par HOMONYMIE : ses six champs
-   *    portent les mêmes noms que six champs du `ctx`. Le jour où l'un des deux
-   *    types en gagne un que l'autre n'a pas, la coïncidence cesse — et rien ne
-   *    le dira.
+   * ═══ CE QUI A CHANGÉ, ET POURQUOI CE TEST-CI EST CELUI QUI LE PROUVE ═══
    *
-   * **Un inventaire qui se ferme sur la destination la plus étroite laisse la
-   * source ouverte.** C'est le mode de défaillance d'`idempotencyKey`, décalé
-   * d'un cran : la garde est exacte sur son périmètre, et son périmètre n'est pas
-   * celui qu'on croit.
+   * L'ADR 0031 pose deux inventaires de plus, tenus par le compilateur de la
+   * même façon : `STATUT_DES_CANAUX_D_APPEL` et `STATUT_DES_CANAUX_D_IDENTITE`.
+   * Ce test est **passé de `it.fails` à `it()` sans que son ATTENTE change** —
+   * `nonClasses` doit être vide — : seule sa SOURCE de vérité s'élargit, des
+   * clés d'un record à celles des trois. Un test écrit après le correctif ne
+   * prouverait que le correctif.
    *
-   * ⚠️ CE QUE LE CORRECTIF DEMANDE, ET IL N'EST PAS DE MON RESSORT : un second
-   *    inventaire du même genre — `Record<keyof AppelEntrant, …>` et
-   *    `Record<keyof IdentiteAppelante, …>` — pour que la TOTALITÉ soit tenue par
-   *    le compilateur des DEUX côtés. Ce test devra alors être pointé sur lui.
+   * ⚠️ **LE COMPTE « PAR HOMONYMIE » RESTE DANS L'ANNONCE, ET C'EST UNE RÈGLE
+   *    DE L'ADR 0031** : un compte qu'on retire est un compte qu'on ne peut plus
+   *    voir remonter. Il doit désormais valoir ZÉRO — chaque champ est classé
+   *    par l'inventaire de SON PROPRE type, jamais par la coïncidence des noms.
+   *
+   * ⚠️ **CE QUE CE TEST NE PROUVE TOUJOURS PAS.** Il classe ; il ne borne rien.
+   *    `AppelEntrant.nomComplet` et `IdentiteAppelante.principal` sont désormais
+   *    classés — et classés `verbatim`, ce qui est le défaut BLOQUANT de la
+   *    section N3, encore ouvert. Un inventaire complet et juste n'empêche rien
+   *    tout seul : il rend obligatoire de DÉCIDER. Le confondre avec une
+   *    protection serait lire une couleur au lieu d'un compte.
    */
-  it.fails(
-    "🔴 ADR 0020 — tout champ que l'APPELANT choisit doit être classé par un inventaire",
-    () => {
-      const classes = new Set(Object.keys(STATUT_DES_CANAUX_DE_CONTEXTE));
-      const sources: readonly (readonly [string, readonly string[]])[] = [
-        ["AppelEntrant", proprietesDInterface(SOURCE_ORCHESTRATEUR, "AppelEntrant")],
-        ["IdentiteAppelante", proprietesDInterface(SOURCE_ORCHESTRATEUR, "IdentiteAppelante")],
-      ];
+  it("ADR 0031 — tout champ que l'APPELANT choisit est classé par un inventaire", () => {
+    // ⚠️ LES TROIS RECORDS SONT LA SOURCE, ET CHACUN EST APPARIÉ À SON TYPE.
+    //    Unir leurs clés en un seul ensemble reproduirait la couverture par
+    //    HOMONYMIE qu'on vient de faire cesser : `AppelEntrant.principal`
+    //    passerait pour classé parce qu'`IdentiteAppelante` a un `principal`.
+    const inventaires: readonly (readonly [string, ReadonlySet<string>])[] = [
+      ["AppelEntrant", new Set(Object.keys(STATUT_DES_CANAUX_D_APPEL))],
+      ["IdentiteAppelante", new Set(Object.keys(STATUT_DES_CANAUX_D_IDENTITE))],
+    ];
+    const clesDuContexte = new Set(Object.keys(STATUT_DES_CANAUX_DE_CONTEXTE));
 
-      let confrontes = 0;
-      const nonClasses: string[] = [];
-      const parHomonymie: string[] = [];
+    let confrontes = 0;
+    const nonClasses: string[] = [];
+    const parHomonymie: string[] = [];
+    const parSonPropreInventaire: string[] = [];
 
-      for (const [type, champs] of sources) {
-        for (const champ of champs) {
-          confrontes += 1;
-          if (classes.has(champ)) parHomonymie.push(`${type}.${champ}`);
-          else nonClasses.push(`${type}.${champ}`);
-        }
+    for (const [type, propre] of inventaires) {
+      for (const champ of proprietesDInterface(SOURCE_ORCHESTRATEUR, type)) {
+        confrontes += 1;
+        if (propre.has(champ)) parSonPropreInventaire.push(`${type}.${champ}`);
+        else if (clesDuContexte.has(champ)) parHomonymie.push(`${type}.${champ}`);
+        else nonClasses.push(`${type}.${champ}`);
       }
+    }
 
-      console.info(
-        `[N2 · totalité] ${String(confrontes)} champ(s) de SOURCE confronté(s) à ` +
-          `${String(classes.size)} champ(s) classé(s) · ` +
-          `${String(parHomonymie.length)} couvert(s) par HOMONYMIE : ` +
-          `${parHomonymie.join(", ")} · ` +
-          `${String(nonClasses.length)} classé(s) par RIEN : ${nonClasses.join(", ")}`,
-      );
+    console.info(
+      `[N2 · totalité] ${String(confrontes)} champ(s) de SOURCE confronté(s) à ` +
+        `${String(clesDuContexte.size)} champ(s) classé(s) par l'inventaire du \`ctx\` · ` +
+        `${String(parSonPropreInventaire.length)} classé(s) par LEUR PROPRE inventaire · ` +
+        `${String(parHomonymie.length)} couvert(s) par HOMONYMIE : ` +
+        `${parHomonymie.join(", ") || "aucun"} · ` +
+        `${String(nonClasses.length)} classé(s) par RIEN : ${nonClasses.join(", ") || "aucun"}`,
+    );
 
-      // Faits qui survivront au correctif : la lecture a bien eu lieu, et les
-      // deux types portent bien des champs.
-      expect(confrontes, "plancher : des champs de source ont été confrontés").toBeGreaterThan(0);
-      expect(classes.size, "et l'inventaire du `ctx` n'est pas vide").toBeGreaterThan(0);
+    // Faits qui survivent au correctif : la lecture du SOURCE a bien eu lieu.
+    expect(confrontes, "plancher : des champs de source ont été confrontés").toBeGreaterThan(0);
+    expect(clesDuContexte.size, "et l'inventaire du `ctx` n'est pas vide").toBeGreaterThan(0);
 
-      // L'ATTENTE, celle qui échoue aujourd'hui.
-      expect(nonClasses, "aucun champ choisi par l'appelant n'échappe à un inventaire").toEqual([]);
-    },
-  );
+    // L'ATTENTE, INCHANGÉE DEPUIS LE LOT 1d — et désormais tenue.
+    expect(nonClasses, "aucun champ choisi par l'appelant n'échappe à un inventaire").toEqual([]);
+    // ET LA MOITIÉ QUE L'ADR 0031 AJOUTE : la coïncidence des noms ne couvre
+    // plus personne. Sans elle, trois records dont l'un serait vide passeraient.
+    expect(parHomonymie, "l'homonymie ne couvre plus aucun champ").toEqual([]);
+    expect(
+      parSonPropreInventaire.length,
+      "chaque champ est classé par l'inventaire de SON type",
+    ).toBe(confrontes);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1458,6 +1470,31 @@ describe("N3 · la terminaison qui ne laisse aucune ligne", () => {
    *    « normaliser `nomComplet` » seul — ce serait refermer un champ d'une
    *    famille de deux, et découvrir le second dans six mois. Ce que la mesure
    *    ci-dessous rend lisible, c'est le PÉRIMÈTRE du correctif.
+   *
+   * ✅ **LA MOITIÉ « BORNE » EXISTE DEPUIS LE LOT 2, ET ELLE PORTE UN NOM —
+   *    ADR 0029, point 4.** `bornerIdentifiantDuJournal(champ, valeur, repli)`
+   *    (`core/audit/contenu.ts`) DÉRIVE la borne de `FORMES`, lève si le genre de
+   *    la colonne change, et REFUSE un repli qui ne passerait pas lui-même la
+   *    garde du § 31 — sans quoi le correctif perdrait la ligne qu'il prétend
+   *    sauver. La famille est ÉNUMÉRABLE (`CHAMPS_IDENTIFIANTS_DU_JOURNAL`,
+   *    cinq colonnes), ce qui est la seule défense contre le troisième champ
+   *    oublié. Ses témoins vivent dans `core/audit/contenu.temoin.spec.ts`.
+   *
+   * 🔴 **ET CE TEST RESTE OUVERT, PARCE QU'ÉCRIRE LA FONCTION N'EST PAS LE
+   *    TRAVAIL — LA BRANCHER L'EST.** `bornerIdentifiantDuJournal` compte
+   *    aujourd'hui ZÉRO appelant de production, et le registre des coutures
+   *    l'inscrit en `à-coudre` pour que l'oubli soit impossible à commettre en
+   *    silence. Les deux appels manquants, nommés par l'ADR 0029 :
+   *
+   *     · **étape 6** — borner `appel.nomComplet` AVANT la recherche au
+   *       catalogue. Aucun compteur n'étant ancré sur `tool` pour un outil qui
+   *       n'existe pas, il n'y a rien à fusionner : perdre la trace est
+   *       strictement pire que la borner ;
+   *     · **étape 4** — REFUSER un `principal` malformé, et non le borner : il
+   *       ancre `ops_quota` (unicité `(window, tool, principal)`) et
+   *       `ops_runtime` (un profil actif par principal), et un repli fusionnerait
+   *       deux principaux dans un même compteur. La ligne de refus porte alors un
+   *       principal RÉSERVÉ, qu'aucun émetteur ne peut produire.
    */
   it.fails(
     "🔴 § 11 · § 24 — toute terminaison doit être attestée, quel que soit le champ fautif",
@@ -1535,27 +1572,39 @@ describe("N4 · le contrat écrit de `idempotencyRef`", () => {
   });
 
   /**
-   * 🔴 **NOUVEAU CONSTAT — MINEUR, MAIS C'EST UNE PROSE QUI MENT.**
+   * 🔴 **CONSTAT MOITIÉ FERMÉ AU LOT 2 — LA PROSE NE MENT PLUS, LE CHAMP PEUT
+   * ENCORE.**
    *
-   * `core/types.ts` écrit, sur `idempotencyRef` : « `null` quand l'outil déclare
-   * `idempotency: "n/a"`, ou quand l'appel n'en porte aucune ». La seconde moitié
-   * est vraie. La première ne l'est pas : l'orchestrateur pose
+   * ═══ CE QUE C'ÉTAIT ═══
+   *
+   * `core/types.ts` écrivait, sur `idempotencyRef` : « `null` quand l'outil
+   * déclare `idempotency: "n/a"`, ou quand l'appel n'en porte aucune ». La
+   * seconde moitié était vraie. La première ne l'était pas : l'orchestrateur pose
    * `empreinteDeCleDIdempotence(appel.idempotencyKey)` INCONDITIONNELLEMENT, sans
    * jamais consulter le mode de l'outil.
    *
-   * ⚠️ CE QUE ÇA COÛTE, ET CE QUE ÇA NE COÛTE PAS. Aucune fuite : c'est une
-   *    empreinte. Mais un adaptateur qui lit ce commentaire et écrit « si
-   *    `idempotencyRef` n'est pas nul, je déduplique » croira dédupliquer sur un
-   *    outil que le socle a déclaré non déduplicable — et il le fera d'autant plus
-   *    volontiers que l'ADR 0020 justifie le champ par ce besoin exact (« un
-   *    adaptateur qui relaie vers une API tierce a besoin d'un jeton stable »).
-   *    Une prose fausse sur un champ dont la raison d'être est d'être LU par un
-   *    tiers coûte plus que sa taille.
+   * ✅ **LA PHRASE EST CORRIGÉE (lot 2, correctif (b)).** Elle dit désormais
+   *    « `null` quand l'appel ne porte AUCUNE clé », et elle porte en toutes
+   *    lettres l'avertissement inverse : ne rien déduire du mode d'un champ non
+   *    nul, le mode se lit dans le manifeste. Le mensonge est supprimé.
    *
-   * Deux correctifs, et aucun n'est un arbitrage lourd : dériver le `null` du
-   * mode, ou corriger la phrase. Le premier est le plus sûr.
+   * 🔴 **ET CE TEST RESTE OUVERT, DÉLIBÉRÉMENT.** Il porte maintenant le
+   *    correctif (a) — DÉRIVER le `null` du mode à la construction du `ctx` —,
+   *    qui reste le plus sûr : corriger une prose supprime le mensonge, cela ne
+   *    rend pas le champ INCAPABLE de mentir. La ligne visée est celle que
+   *    l'ADR 0020 désigne comme « LA couture, et elle n'est pas délégable »
+   *    (`core/chaine/orchestrateur.ts`), hors du périmètre du constructeur qui a
+   *    corrigé la phrase ; et appeler `dependances.reglages(outil)` une seconde
+   *    fois est une décision, pas un branchement.
+   *
+   * ⚠️ CE QUE ÇA COÛTE, ET CE QUE ÇA NE COÛTE PAS. Aucune fuite : c'est une
+   *    empreinte. Mais un adaptateur qui écrit « si `idempotencyRef` n'est pas
+   *    nul, je déduplique » dédupliquera sur un outil que le socle a déclaré non
+   *    déduplicable — et il le fera d'autant plus volontiers que l'ADR 0020
+   *    justifie le champ par ce besoin exact (« un adaptateur qui relaie vers une
+   *    API tierce a besoin d'un jeton stable »).
    */
-  it.fails("🔴 `idempotencyRef` doit valoir `null` sur un outil `n/a`, comme écrit", async () => {
+  it.fails("🔴 `idempotencyRef` doit se DÉRIVER du mode : `null` sur un outil `n/a`", async () => {
     const CLE = "cle-sur-outil-na-lot-1d";
     let mesures = 0;
     const refs: (readonly [string, string | null])[] = [];
@@ -1586,8 +1635,10 @@ describe("N4 · le contrat écrit de `idempotencyRef`", () => {
       empreinteDeCleDIdempotence(CLE),
     );
 
-    // L'ATTENTE ÉCRITE DANS `core/types.ts`, celle qui échoue aujourd'hui.
-    expect(refs[0]?.[1], "en mode `n/a`, le contrat écrit dit `null`").toBeNull();
+    // L'ATTENTE DU CORRECTIF (a), celle qui échoue toujours — et qui n'est plus
+    // celle d'une phrase : `core/types.ts` ne promet plus le `null`, il AVERTIT
+    // qu'il ne le promet pas. Ce qui reste à faire est de le rendre vrai.
+    expect(refs[0]?.[1], "en mode `n/a`, la dérivation du mode donnerait `null`").toBeNull();
   });
 });
 

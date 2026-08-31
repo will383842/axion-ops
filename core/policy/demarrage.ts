@@ -19,6 +19,7 @@
  *    permet à une garde de mesurer si le raccordement a été fait.
  */
 
+import { sansCommentairesNiChaines } from "../adapter-kit/autorisation.js";
 import type { PolicyLevel } from "../types.js";
 import type { DepotPolitique } from "./depot.js";
 import { ligneDeDemarrage, type LignePolitique } from "./ligne.js";
@@ -104,24 +105,54 @@ export async function demarrerPolitique(
  *    répond à « quel fichier écrit ce nom », pas à « quel chemin d'exécution
  *    l'atteint réellement ». Un appel derrière un drapeau jamais vrai lui
  *    échapperait.
+ *
+ * ⚠️ **LA PROSE EST RETIRÉE AVANT LE COMPTE — CORRIGÉ AU LOT 2.** Le premier jet
+ *    cherchait `demarrerPolitique(` par un `String.includes` sur le source BRUT :
+ *    un module qui NOMMAIT la fonction dans un bloc de documentation,
+ *    parenthèses comprises, comptait pour un appelant. C'est le défaut exact que
+ *    `sansProse` ferme dans le registre des coutures, et il rendait la garde du
+ *    raccordement verte sur un socle que rien n'appelait. La garde qui le
+ *    mesurait EXIGEAIT en outre qu'au moins une citation en prose subsiste — un
+ *    cliquet à l'envers, qui aurait rougi le jour de la correction. Les deux
+ *    sont défaits du même geste.
  */
 export interface CablageDuDemarrage {
   readonly fichiersLus: number;
   readonly appelantsDeProduction: readonly string[];
+  /**
+   * Les modules qui NOMMENT le point d'entrée sans l'appeler. Comptés, jamais
+   * comptés POUR : c'est la différence entre annoncer une borne et l'exiger.
+   */
+  readonly citationsEnProse: readonly string[];
 }
 
+/**
+ * ⚠️ **LE NETTOYAGE EST CELUI DE `core/adapter-kit`, JAMAIS UNE SECONDE
+ *    ÉCRITURE.** `sansCommentairesNiChaines` est un balayage à états, seul
+ *    capable de ne pas apparier deux délimiteurs qui n'ouvrent ni ne ferment le
+ *    même littéral. Une expression régulière écrite ici a été essayée et
+ *    MESURÉE : sur `ops/main.ts`, elle appariait le backtick FERMANT d'un
+ *    gabarit avec le backtick OUVRANT du suivant, effaçait le code entre les
+ *    deux — dont l'appel à `demarrerPolitique(` — et la garde du raccordement
+ *    annonçait ZÉRO appelant de production sur une racine qui l'appelle.
+ */
 export function verifierLeCablageDuDemarrage(
   fichiers: ReadonlyMap<string, string>,
   nomDuPointDEntree = "demarrerPolitique",
 ): CablageDuDemarrage {
   const appelants: string[] = [];
+  const citations: string[] = [];
   for (const [chemin, source] of fichiers) {
     if (chemin.endsWith(".spec.ts")) continue;
     // Le fichier qui DÉCLARE la fonction ne compte pas comme appelant.
     if (chemin.endsWith("demarrage.ts")) continue;
-    if (source.includes(`${nomDuPointDEntree}(`)) {
-      appelants.push(chemin);
-    }
+    const forme = `${nomDuPointDEntree}(`;
+    if (sansCommentairesNiChaines(source).includes(forme)) appelants.push(chemin);
+    else if (source.includes(forme)) citations.push(chemin);
   }
-  return { fichiersLus: fichiers.size, appelantsDeProduction: appelants };
+  return {
+    fichiersLus: fichiers.size,
+    appelantsDeProduction: appelants,
+    citationsEnProse: citations,
+  };
 }

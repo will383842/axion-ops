@@ -359,9 +359,59 @@ describe("le manifeste refuse de se construire", () => {
 });
 
 describe("le kit ferme l'énumération des profils", () => {
-  it("refuse d'exister sans profils — sinon la garde du § 14 ne ferme rien", () => {
-    console.info(`[garde profils] ${String(PROFILS.length)} profil(s) au kit réel, 0 au témoin`);
-    expect(() => creerAdapterKit([], SCEAU_TEMOIN)).toThrow(/vide/);
+  /**
+   * ⚠️ CETTE GARDE S'EST ÉLARGIE AU LOT 2, ET LE MOTIF EST LE JUMEAU OUBLIÉ.
+   *
+   *    `creerAdapterKit` portait sa PROPRE comparaison (`length === 0`) pendant
+   *    que `verifierEnumerationProfils` — écrite par la même décision, dans le
+   *    même fichier que `verifierFormeDuSceau` — n'avait AUCUN appelant de
+   *    production. Deux écritures d'une même règle, dont l'une plus étroite : un
+   *    profil au nom VIDE ou un profil EN DOUBLE traversait la construction sans
+   *    un mot, et la garde du § 14 comptait ensuite un profil de plus qu'il n'en
+   *    existe.
+   *
+   *    La garde éprouve donc les TROIS anomalies, et pas seulement la première :
+   *    une garde qui n'éprouve qu'un cas d'une règle à trois cas ne dit rien des
+   *    deux autres.
+   */
+  it("refuse d'exister sur une énumération inutilisable — les TROIS anomalies", () => {
+    const CAS = [
+      { nom: "énumération vide", profils: [] as readonly string[] },
+      { nom: "profil au nom vide", profils: ["dev", "  "] },
+      { nom: "profil en double", profils: ["dev", "dev"] },
+    ] as const;
+
+    let soumis = 0;
+    const refuses: string[] = [];
+    for (const cas of CAS) {
+      soumis += 1;
+      try {
+        creerAdapterKit(cas.profils, SCEAU_TEMOIN);
+      } catch {
+        refuses.push(cas.nom);
+      }
+    }
+
+    // LA CONTRE-ÉPREUVE, sans laquelle « tout est refusé » ne se distinguerait
+    // pas d'un constructeur qui lève toujours.
+    const sain = creerAdapterKit(["dev", "admin"], SCEAU_TEMOIN);
+
+    console.info(
+      `[garde profils] ${String(PROFILS.length)} profil(s) au kit réel · ` +
+        `${String(soumis)} énumération(s) fautive(s) soumise(s) · ` +
+        `${String(refuses.length)} refusée(s) : ${refuses.join(", ")} · ` +
+        `énumération saine acceptée : ${String(sain.profilsConnus.length)} profil(s)`,
+    );
+
+    expect(soumis, "plancher : trois anomalies soumises").toBe(3);
+    expect(refuses, "chacune est refusée À LA CONSTRUCTION").toEqual([
+      "énumération vide",
+      "profil au nom vide",
+      "profil en double",
+    ]);
+    expect(sain.profilsConnus, "une énumération saine construit bien un kit").toHaveLength(2);
+    // Le message NOMME ce qui a mordu : le § 25 veut qu'un refus dise où chercher.
+    expect(() => creerAdapterKit([], SCEAU_TEMOIN)).toThrow(/VIDE/);
   });
 
   it("expose l'énumération reçue, sans en garder de copie propre", () => {

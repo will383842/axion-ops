@@ -18,7 +18,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { verifierAucunContenu } from "./contenu.js";
+import {
+  CHAMPS_IDENTIFIANTS_DU_JOURNAL,
+  bornerIdentifiantDuJournal,
+  bornesDIdentifiantDuJournal,
+  bornesDeListeDuJournal,
+  verifierAucunContenu,
+} from "./contenu.js";
 import { CHAMPS_COUVERTS } from "./canonique.js";
 import { contenuTemoin } from "./fixtures.js";
 import type { ContenuLigne } from "./vocabulaire.js";
@@ -224,5 +230,156 @@ describe("TÉMOIN — § 31 : la garde de contenu sait-elle rougir ?", () => {
 
     expect(verdict.anomalies).toHaveLength(6);
     expect(verdict.champsInspectes).toBe(CHAMPS_COUVERTS.length);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+//  ADR 0029, POINT 4 — LA BORNE DES IDENTIFIANTS DÉRIVE DE `FORMES`
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * CE QUE CE BLOC GARDE, ET POURQUOI IL EST SÉPARÉ DU PRÉCÉDENT.
+ *
+ * Le défaut BLOQUANT du lot 1d n'était pas dans `verifierAucunContenu()` — elle
+ * avait raison de refuser. Il était en AMONT : `tool` et `principal` étaient
+ * posés VERBATIM, la ligne était refusée, et l'écriture levait hors du `try` de
+ * `journaliser` — zéro ligne d'`ops_audit`.
+ *
+ * L'ADR 0029, point 4, exige que la borne appliquée en amont soit **dérivée** de
+ * `FORMES` et jamais réécrite. Ces témoins gardent la dérivation elle-même :
+ *
+ *  · la FAMILLE est énumérable et son cardinal est ANNONCÉ — sans quoi le
+ *    troisième champ serait oublié comme `principal` l'a été ;
+ *  · un changement de genre fait LEVER, jamais rendre une borne fantaisiste ;
+ *  · le REPLI est confronté à la garde qu'il prétend satisfaire ;
+ *  · et la valeur BORNÉE s'écrit vraiment — c'est la seule moitié qui prouve que
+ *    la ligne n'est plus perdue.
+ */
+describe("TÉMOIN — ADR 0029 : la borne des identifiants dérive, et sait lever", () => {
+  it("ÉNUMÈRE la famille par dérivation du genre, et ANNONCE son cardinal", () => {
+    const bornes = CHAMPS_IDENTIFIANTS_DU_JOURNAL.map(
+      (champ) => [champ, bornesDIdentifiantDuJournal(champ).maxCar] as const,
+    );
+
+    console.log(
+      `[témoin ADR 0029 · famille] ${String(CHAMPS_COUVERTS.length)} champ(s) couvert(s) · ` +
+        `${String(CHAMPS_IDENTIFIANTS_DU_JOURNAL.length)} de genre IDENTIFIANT : ` +
+        bornes.map(([champ, max]) => `${champ}\u2264${String(max)}`).join(", "),
+    );
+
+    // ⚠️ LES DEUX CHAMPS DU DÉFAUT BLOQUANT SONT DANS LA FAMILLE, ET C'EST
+    //    L'ASSERTION QUI COMPTE : si l'un en sortait, l'amont cesserait de le
+    //    borner SANS QU'AUCUNE AUTRE GARDE NE CHANGE DE COULEUR.
+    expect(CHAMPS_IDENTIFIANTS_DU_JOURNAL, "`tool` est de la famille").toContain("tool");
+    expect(CHAMPS_IDENTIFIANTS_DU_JOURNAL, "`principal` aussi").toContain("principal");
+    // Plancher-témoin : une dérivation qui rendrait une liste vide serait verte
+    // partout ailleurs. Cinq colonnes portent le genre `identifiant` aujourd'hui.
+    expect(CHAMPS_IDENTIFIANTS_DU_JOURNAL.length, "plancher-témoin").toBeGreaterThanOrEqual(5);
+    // ET la famille n'est pas TOUT : une dérivation qui rendrait tous les champs
+    // couverts s'accorderait, elle aussi, pour une mauvaise raison.
+    expect(
+      CHAMPS_IDENTIFIANTS_DU_JOURNAL.length,
+      "elle ne prend pas toutes les colonnes",
+    ).toBeLessThan(CHAMPS_COUVERTS.length);
+    expect(
+      bornes.every(([, max]) => Number.isInteger(max) && max > 0),
+      "aucune borne fantaisiste",
+    ).toBe(true);
+  });
+
+  it("LÈVE quand on lui réclame la borne d'une colonne d'un AUTRE genre", () => {
+    // ⚠️ LE TÉMOIN FABRIQUÉ, ET IL SE LIT DANS LES DEUX SENS : la même confusion
+    //    est soumise à la fonction SŒUR, qui doit lever à l'inverse. Sans cette
+    //    seconde moitié, « elle lève » ne se distinguerait pas de « elle lève
+    //    toujours ».
+    const confusions: string[] = [];
+    let levees = 0;
+
+    for (const [demande, champ] of [
+      ["identifiant", "recordIds"],
+      ["liste", "principal"],
+    ] as const) {
+      confusions.push(`${demande}(${champ})`);
+      try {
+        if (demande === "identifiant") bornesDIdentifiantDuJournal(champ);
+        else bornesDeListeDuJournal(champ as unknown as "recordIds");
+      } catch {
+        levees += 1;
+      }
+    }
+
+    console.log(
+      `[témoin ADR 0029 · genre] ${String(confusions.length)} confusion(s) de genre ` +
+        `soumise(s) : ${confusions.join(", ")} · ${String(levees)} levée(s)`,
+    );
+
+    expect(confusions.length, "plancher : deux confusions soumises").toBe(2);
+    expect(levees, "un changement de genre lève, il ne rend pas une borne").toBe(2);
+    // La contre-épreuve : sur son propre genre, chacune rend bien sa borne.
+    expect(bornesDIdentifiantDuJournal("tool").maxCar).toBeGreaterThan(0);
+    expect(bornesDeListeDuJournal("recordIds").maxElements).toBeGreaterThan(0);
+  });
+
+  it("BORNE ce que le § 31 refuserait, et la valeur bornée S'ÉCRIT", () => {
+    const REPLI = "inconnu:hors-forme";
+    const FAUTIVES = [
+      "outil inconnu",
+      "outil\ninconnu",
+      "prin cipal",
+      "un.nom.qui.est.en.fait.une.phrase.francaise.deguisee",
+      "adresse@exemple.invalid",
+      "x".repeat(500),
+    ] as const;
+
+    let soumises = 0;
+    let borneesAuRepli = 0;
+    for (const valeur of FAUTIVES) {
+      soumises += 1;
+      if (bornerIdentifiantDuJournal("tool", valeur, REPLI) === REPLI) borneesAuRepli += 1;
+    }
+
+    // La contre-épreuve : une valeur SAINE traverse sans être remplacée. Sans
+    // elle, « tout est borné » ne se distinguerait pas de « tout est écrasé ».
+    const saine = bornerIdentifiantDuJournal("tool", "axionia.inbox.recent", REPLI);
+
+    let repliRefuse = false;
+    try {
+      bornerIdentifiantDuJournal("tool", "peu importe", "un repli avec des espaces");
+    } catch {
+      repliRefuse = true;
+    }
+
+    console.log(
+      `[témoin ADR 0029 · borne] ${String(soumises)} forme(s) fautive(s) soumise(s) · ` +
+        `${String(borneesAuRepli)} bornée(s) au repli · valeur saine conservée : ` +
+        `${String(saine === "axionia.inbox.recent")} · repli malformé refusé : ` +
+        `${String(repliRefuse)}`,
+    );
+
+    expect(soumises, "plancher : six formes fautives").toBe(6);
+    expect(borneesAuRepli, "chacune est bornée").toBe(6);
+    expect(saine, "une valeur saine n'est jamais remplacée").toBe("axionia.inbox.recent");
+    expect(repliRefuse, "un repli qui ne passe pas le § 31 est REFUSÉ, pas écrit").toBe(true);
+
+    // ⚠️ LA MOITIÉ QUI FAIT LE LIEN, ET SANS ELLE CE TÉMOIN NE PROUVERAIT RIEN :
+    //    la valeur bornée doit passer la garde du § 31 ELLE-MÊME. Une borne dont
+    //    le résultat serait encore refusé perdrait la ligne exactement comme
+    //    avant, et tous les comptes ci-dessus resteraient verts.
+    const ligne = {
+      ...contenuTemoin(11),
+      tool: bornerIdentifiantDuJournal("tool", FAUTIVES[0], REPLI),
+      principal: bornerIdentifiantDuJournal("principal", FAUTIVES[2], REPLI),
+    } as unknown as ContenuLigne;
+    const verdict = verifierAucunContenu(ligne);
+
+    console.log(
+      `[témoin ADR 0029 · écriture] ${String(verdict.champsInspectes)} champ(s) inspecté(s) · ` +
+        `${String(verdict.anomalies.length)} anomalie(s) après bornage`,
+    );
+
+    expect(verdict.anomalies, "la ligne bornée s'écrit").toEqual([]);
+    expect(verdict.champsInspectes, "et la garde a bien tout inspecté").toBe(
+      CHAMPS_COUVERTS.length,
+    );
   });
 });

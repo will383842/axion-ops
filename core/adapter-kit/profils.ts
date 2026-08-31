@@ -78,10 +78,46 @@ export function verifierFormeDuSceau(sceau: SceauProfils): readonly string[] {
 }
 
 /**
- * Vérifie qu'une énumération de profils reçue est utilisable.
+ * VÉRIFIE QU'UNE ÉNUMÉRATION DE PROFILS REÇUE EST UTILISABLE.
  *
- * Employée par le harnais et par les tests : elle transforme « la liste est
- * vide » en anomalie visible, au lieu d'un kit qui accepte tout.
+ * ═══ LE JUMEAU OUBLIÉ DE L'ADR 0004, ET CE QU'IL A COÛTÉ ═══
+ *
+ * Sa voisine immédiate {@link verifierFormeDuSceau}, écrite dans ce fichier-ci
+ * et par la MÊME décision, avait un appelant de production
+ * (`analyserDefinition`, `manifest.ts`). Celle-ci n'en avait AUCUN : le sceau
+ * des profils était confronté dans sa FORME et l'énumération jamais dans la
+ * sienne. Une garde écrite que rien n'appelle est la panne exacte du lot 1c.
+ *
+ * ═══ OÙ ELLE EST APPELÉE, ET POURQUOI LÀ ═══
+ *
+ * L'arbitrage était « à QUOI l'énumération reçue est-elle confrontée ». La
+ * réponse est : à rien d'extérieur — elle est confrontée à SA PROPRE FORME,
+ * exactement comme le sceau. La confrontation au socle appartient au REGISTRE
+ * (`profilesVersion` / `profilesSha`), qui détient la vérité du socle et où le
+ * refus se journalise. Deux endroits l'appellent donc, et **ils ne font pas le
+ * même geste** :
+ *
+ *  · `creerAdapterKit()` — **LÈVE.** C'est l'entrée unique de l'énumération dans
+ *    le kit ; un kit bâti sur une énumération inutilisable accepterait
+ *    `profiles: […]` sans rien fermer, et la garde du § 14 mesurerait sur du
+ *    vide en restant verte. Le kit refusait déjà la liste VIDE par une
+ *    comparaison écrite à la main ; il la refuse désormais par CETTE
+ *    fonction — une seule expression de la règle, et deux anomalies de plus
+ *    qu'il laissait passer en silence (un nom vide, un doublon) ;
+ *  · `analyserDefinition()` — **REND UNE ANOMALIE**, à côté de son jumeau et
+ *    dans le même geste. Le harnais a besoin de la LISTE des anomalies, pas de
+ *    la première : c'est le contrat de cette fonction, et le jumeau le respecte.
+ *
+ * ⚠️ **LES DEUX APPELS NE SONT PAS UNE REDONDANCE.** Un adaptateur tiers peut
+ *    appeler `analyserDefinition()` sans passer par le kit — c'est une fonction
+ *    exportée —, et le kit peut être construit sans qu'aucune définition ne soit
+ *    analysée. Chacun couvre un chemin que l'autre ne voit pas.
+ *
+ * ⚠️ **CE QU'ELLE NE PROUVE PAS.** Elle dit qu'une énumération est UTILISABLE,
+ *    jamais qu'elle est la BONNE. Une énumération parfaitement formée mais
+ *    périmée passe ici et se fait prendre par le sceau, chez le registre. Les
+ *    confondre ferait croire qu'un manifeste admis a été construit contre
+ *    l'énumération courante.
  */
 export function verifierEnumerationProfils(profils: readonly string[]): readonly string[] {
   const anomalies: string[] = [];

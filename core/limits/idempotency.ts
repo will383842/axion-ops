@@ -254,10 +254,48 @@ export interface FaitsDeCloture {
  *    ne le décide pas lui-même : il APPELLE `estEffetExterieur`, dont la totalité
  *    vit chez le propriétaire du § 20. Une seconde liste ici aurait laissé
  *    `destructive` dehors le jour où quelqu'un n'aurait relu qu'une des deux.
+ *
+ * ═══ BORNE D'ÉPROUVABILITÉ — LA PREMIÈRE BRANCHE NE DÉCIDE AUJOURD'HUI DE RIEN ═══
+ *
+ * ⚠️ **CE N'EST PAS UN DÉFAUT, ET C'EST ÉCRIT ICI POUR QUE PERSONNE NE LA
+ *    « SIMPLIFIE ».** La branche du cliquet (`effetExterieurSurvenu`) est la
+ *    bonne, et elle n'est décisive dans AUCUN cas atteignable :
+ *
+ *     · le cliquet n'est levé que sous `estEffetExterieur(outil.effect)` ;
+ *     · or la troisième branche rend déjà `done` sous exactement cette condition.
+ *
+ *    Mesuré au lot 1d : « 4 couple(s) ATTEIGNABLE(s) confronté(s) · 4 écarté(s) ·
+ *    0 cas où la LECTURE du cliquet change l'issue », avec son témoin de capacité
+ *    apparié — « 16 cellule(s) parcourue(s) sur 4 effet(s) · 2 issue(s)
+ *    DISTINCTE(s) » —, sans lequel « 0 cas » se lirait « cette table ne mesure
+ *    rien ».
+ *
+ * ⚠️ **CE QUI A RÉELLEMENT REFERMÉ LE DÉFAUT DU LOT 1c EST `terminaisonRendue`**,
+ *    la deuxième branche, posée juste après le retour de l'étape 14. C'est elle
+ *    qui empêche qu'un courrier parti reparte quand la panne est POSTÉRIEURE au
+ *    retour de l'adaptateur. Attribuer ce mérite au cliquet ferait déplacer le
+ *    mauvais garde-fou le jour où quelqu'un voudrait en retirer un.
+ *
+ * ⚠️ **LA PREMIÈRE BRANCHE EST UNE PROVISION, ET LE JOUR OÙ ELLE SERVIRA EST
+ *    NOMMABLE** : celui où la troisième cessera d'être aussi franchement
+ *    fail-closed — si l'on distinguait, par exemple, un `send` dont on SAIT que
+ *    l'adaptateur n'a pas été atteint. Ce jour-là, la lecture du cliquet sera la
+ *    seule à savoir que quelque chose EST sorti.
+ *
+ *    **Et ce jour-là, écrire D'ABORD le témoin de bout en bout qui distingue les
+ *    deux branches — il n'en existe AUCUN.** Les mutations M3 et M6 du lot 1d ne
+ *    font rougir aucun test de l'épreuve ; la seule garde du dépôt qui rougit sur
+ *    M3 appelle cette fonction PURE avec un couple que la chaîne ne produit pas.
+ *    Affiner la troisième branche sans ce témoin, ce serait rendre décisive une
+ *    branche que rien n'éprouve.
  */
 export function issueDeReservation(
   faits: FaitsDeCloture,
 ): Extract<StatutIdempotence, "done" | "failed"> {
+  // ⚠️ BRANCHE 1 — voir la borne d'éprouvabilité en tête : elle couvre
+  //    aujourd'hui le même ensemble que la branche 3, et c'est `terminaisonRendue`
+  //    (branche 2) qui referme le défaut du lot 1c. Ne pas la retirer : elle est
+  //    la provision du jour où la branche 3 cessera d'être fail-closed.
   if (faits.effetExterieurSurvenu) return "done";
   if (faits.terminaisonRendue) return "done";
 

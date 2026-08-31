@@ -32,11 +32,9 @@
  * AUCUN SECRET RÉEL, AUCUN APPEL RÉSEAU, AUCUN IDENTIFIANT D'INFRASTRUCTURE.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join, relative } from "node:path";
-
 import { describe, expect, it } from "vitest";
+
+import { fichiersLivresDuDepot, lireDuDepot } from "../epreuve/perimetre-de-production.js";
 
 import { Journal, avecJournal, sha256Hex, type AffineursDAppel } from "../audit/index.js";
 import { HorlogeFigee, SCELLEUR_TEMOIN } from "../audit/fixtures.js";
@@ -196,30 +194,28 @@ describe("ADR 0021 — le lecteur du cliquet ne peut ni le lever, ni le baisser"
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * Les fichiers de PRODUCTION de `core/`, DÉRIVÉS du disque.
+ * Les fichiers de PRODUCTION du DÉPÔT — **et non plus de `core/` seul.**
  *
- * ⚠️ LE CRITÈRE EST DÉRIVÉ, ET SA BORNE EST ÉCRITE. « Production » vaut ici
- *    « ce que `tsconfig.build.json` émet » : tout `.ts` de `core/` qui n'est pas
- *    un `.spec.ts`. Restent donc dedans les doubles en mémoire et les fixtures —
- *    volontairement, parce qu'ils FRANCHISSENT la frontière du paquet et qu'un
- *    appelant du cliquet caché là serait un appelant réel.
+ * ⚠️ **CE PÉRIMÈTRE ÉTAIT PLUS ÉTROIT QUE SON PROPRE ÉNONCÉ, ET LE LOT 2 L'A
+ *    RENDU COÛTEUX.** Il dérivait sa racine de `core/types.ts` — donc `core/` —
+ *    alors que le titre du test dit « dans tout le code de production ». Le lot 2
+ *    fait de `ops/` la couche qui SÉQUENCE le socle et la porte à douze modules
+ *    livrés, dont la racine de composition : un appel au signal d'effet extérieur
+ *    logé là n'aurait été vu par personne, et le plancher-témoin (« plus de
+ *    cinquante fichiers ») était franchi sans peine par un périmètre amputé.
+ *
+ *    L'écart jouait aussi dans l'AUTRE sens : cinq fichiers que `pnpm build`
+ *    n'émet pas — quatre `fixtures.ts` et `core/epreuve/outils.ts` — étaient lus
+ *    et gonflaient le compte annoncé.
+ *
+ * ⚠️ **LE CRITÈRE EST CELUI DE `tsconfig.build.json`, ET IL N'EST ÉCRIT QU'UNE
+ *    FOIS**, dans `core/epreuve/perimetre-de-production.ts`. L'épreuve qui
+ *    mesure cette garde appelle le MÊME symbole : deux dérivations d'un même
+ *    fait finissent par se contredire, et c'est la plus étroite qui gagne en
+ *    silence.
  */
-function fichiersDeProduction(racine: string): readonly string[] {
-  const trouves: string[] = [];
-  const parcourir = (dossier: string): void => {
-    for (const entree of readdirSync(dossier, { withFileTypes: true })) {
-      const chemin = join(dossier, entree.name);
-      if (entree.isDirectory()) {
-        parcourir(chemin);
-        continue;
-      }
-      if (!entree.name.endsWith(".ts")) continue;
-      if (entree.name.endsWith(".spec.ts")) continue;
-      trouves.push(chemin);
-    }
-  };
-  parcourir(racine);
-  return trouves;
+function fichiersDeProduction(): readonly string[] {
+  return fichiersLivresDuDepot();
 }
 
 /**
@@ -268,24 +264,26 @@ describe("ADR 0017 + 0021 — le signal garde son appelant unique", () => {
   });
 
   it("n'a QU'UN appelant dans tout le code de production, et il est nommé", () => {
-    const racine = dirname(fileURLToPath(new URL("../types.ts", import.meta.url)));
-    const fichiers = fichiersDeProduction(racine);
+    const fichiers = fichiersDeProduction();
 
     let fichiersLus = 0;
     let appelsTotaux = 0;
     const appelants: string[] = [];
+    const dossiersVus = new Set<string>();
 
-    for (const fichier of fichiers) {
+    for (const chemin of fichiers) {
       fichiersLus += 1;
-      const appels = appelsAuSignal(readFileSync(fichier, "utf8"));
+      dossiersVus.add(chemin.slice(0, chemin.indexOf("/")));
+      const appels = appelsAuSignal(lireDuDepot(chemin));
       if (appels > 0) {
         appelsTotaux += appels;
-        appelants.push(`${relative(racine, fichier).replace(/\\/g, "/")} ×${String(appels)}`);
+        appelants.push(`${chemin} ×${String(appels)}`);
       }
     }
 
     console.info(
       `[garde appelant unique] ${String(fichiersLus)} fichier(s) de production lu(s) · ` +
+        `dossier(s) balayé(s) : [${[...dossiersVus].sort().join(", ")}] · ` +
         `${String(appelsTotaux)} appel(s) au signal · ` +
         `appelant(s) : ${appelants.join(", ") || "aucun"}`,
     );
@@ -293,9 +291,13 @@ describe("ADR 0017 + 0021 — le signal garde son appelant unique", () => {
     // PLANCHER-TÉMOIN : un dossier mal résolu rendrait zéro fichier, et « zéro
     // appelant de trop » serait vert pour la pire des raisons.
     expect(fichiersLus, "le parcours du disque a bien mordu").toBeGreaterThan(50);
+    // ⚠️ ET LE PLANCHER QUI MANQUAIT : `ops/` DOIT être dans le périmètre. C'est
+    //    la couche qui séquence le socle, et elle en était absente tout entière.
+    expect(dossiersVus, "la couche de composition est bien regardée").toContain("ops");
+    expect(dossiersVus, "et le noyau aussi").toContain("core");
     expect(appelsTotaux, "le cliquet EST tiré quelque part").toBe(1);
     expect(appelants, "et c'est l'orchestrateur, à l'étape 14").toEqual([
-      "chaine/orchestrateur.ts ×1",
+      "core/chaine/orchestrateur.ts ×1",
     ]);
   });
 });

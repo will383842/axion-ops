@@ -1,0 +1,489 @@
+/**
+ * `ops/service.spec.ts` — **LE JALON DU LOT, ÉPROUVÉ SUR UN FIL RÉEL.**
+ *
+ * ═══ CE QUE CE FICHIER MESURE, ET POURQUOI IL OUVRE UNE SOCKET ═══
+ *
+ * Le lot 2 se donne pour jalon : « après lui, le socle DÉMARRE et RÉPOND ».
+ * « Répondre » a un sens vérifiable, et un seul : un processus tient une socket
+ * ou lit un flux, et rend une réponse. Toutes les autres gardes du dépôt
+ * mesurent des fonctions ; celle-ci mesure un OCTET QUI REVIENT.
+ *
+ * ⚠️ **L'ÉCOUTE EST BORNÉE À `127.0.0.1`, ET AUCUN APPEL NE SORT.** Le port est
+ *    obtenu en liant puis relâchant une socket éphémère : un port codé en dur
+ *    ferait rougir la garde sur la machine de quelqu'un d'autre, et un rouge qui
+ *    ne parle pas du code finit par être ignoré. Les valeurs de jeton, d'hôte et
+ *    d'audience viennent des fabriques de témoins, toutes sur `stub.invalid`
+ *    (RFC 2606, qui ne résout jamais).
+ *
+ * ⚠️ **LE NOYAU EST RÉEL.** `fabriquerHarnaisStdio` monte `orchestrerAppel` avec
+ *    les cinq étapes de `core/chaine`, le vrai journal chaîné et le vrai index de
+ *    provenance. Ce qui est doublé est ce qui STOCKE, jamais ce qui DÉCIDE.
+ */
+
+import { createServer } from "node:net";
+
+import { describe, expect, it } from "vitest";
+
+import type { EtatIndexProvenance } from "../core/chaine/etape-11-provenance.js";
+import { MagasinDeVerrousEnMemoire, frapperInstance } from "../core/instance/index.js";
+import { HOTE_SANS_MAGASIN_PARTAGE } from "../core/instance/postgres.js";
+import { DepotPolitiqueMemoire } from "../core/policy/index.js";
+import {
+  AUDIENCE_DE_TEMOIN,
+  PORTEUR_DE_TEMOIN,
+  ligneOpsTokenDeTemoin,
+  registreDeTemoin,
+  revendicationsDeTemoin,
+  verificateurDeTemoin,
+} from "../core/transport/http/fixtures.js";
+import {
+  HABILITATIONS_DU_HARNAIS,
+  INSTANT_DU_HARNAIS,
+  OUTIL_BONJOUR,
+  fabriquerHarnaisStdio,
+} from "../core/transport/stdio/fixtures.js";
+import type { DescripteurOutilServi } from "../core/transport/stdio/index.js";
+import type { EtatCoffre } from "../core/vault/index.js";
+import { PONT_AU_PLUS_FAIBLE, catalogueDesAdaptateursAdmis } from "./index.js";
+import type { DependancesDuSocle, Planificateur } from "./main.js";
+import { SONDES_NON_POURVUES, demarrerLeSocle, reglagesDepuisLEnvironnement } from "./main.js";
+import type { PortsDuService } from "./service.js";
+import { ErreurDeMontageDuService, monterLeService } from "./service.js";
+
+const PLANIFICATEUR_INERTE: Planificateur = () => () => {
+  /* rien : aucune garde d'ici ne dépend d'un battement programmé */
+};
+
+/** § 20 — un index figé, non vide, pour que le zéro se distingue d'une mesure. */
+function provenanceTemoin(): EtatIndexProvenance {
+  return {
+    extraits: 3,
+    sessions: 1,
+    empreintesRefusees: 0,
+    sessionsEvincees: 0,
+    indetermine: false,
+    plafondExtraits: 10_000,
+    plafondSessions: 512,
+    ttlMs: 4 * 60 * 60_000,
+  };
+}
+
+/** L'environnement factice du § 19, COMPLET. Aucune valeur réelle. */
+const ENV_FACTICE: Readonly<Record<string, string>> = {
+  DATABASE_URL: `postgresql://stub:stub@${HOTE_SANS_MAGASIN_PARTAGE}:5432/stub`,
+  OPS_RESOURCE_INDICATOR: AUDIENCE_DE_TEMOIN,
+  OPS_CONSOLE_ISSUER: "https://socle.stub.invalid/auth",
+  OPS_CONSOLE_SESSION_KEY: "valeur-factice-non-secrete",
+  OPS_CONSOLE_TOTP_ISSUER: "axion-ops (garde)",
+};
+
+async function socleQuiSert(
+  coffre: EtatCoffre,
+  hotesAdmis: readonly string[],
+): Promise<ReturnType<typeof demarrerLeSocle>> {
+  const environnement = reglagesDepuisLEnvironnement({
+    ...ENV_FACTICE,
+    OPS_ALLOWED_HOSTS: hotesAdmis.join(","),
+  });
+  const deps: DependancesDuSocle = {
+    urlDeBase: environnement.urlDeBase,
+    ouvrirLaSessionDeVerrou: null,
+    magasinEnMemoire: new MagasinDeVerrousEnMemoire(),
+    instance: frapperInstance(INSTANT_DU_HARNAIS),
+    lireLEtatDuCoffre: () => Promise.resolve(coffre),
+    reglagesDAuthentification: environnement.reglagesDAuthentification,
+    controlerLAuthentification: null,
+    depotPolitique: new DepotPolitiqueMemoire(),
+    motifDuDemarrage: "démarrage du socle (garde du service)",
+    lireLeLockDAdaptateurs: () => Promise.resolve({ present: false, brut: null }),
+    manifestesAAdmettre: [],
+    transports: ["http", "stdio"],
+    hotesAutorises: environnement.hotesAutorises,
+    lireLaProvenance: provenanceTemoin,
+    periodeDeVeilleMs: 30_000,
+    planifier: PLANIFICATEUR_INERTE,
+    sondes: SONDES_NON_POURVUES,
+    horloge: () => INSTANT_DU_HARNAIS,
+    ecrireSurLaSortieDErreur: () => {
+      /* la garde lit `demarrage`, pas la sortie d'erreur */
+    },
+  };
+  return demarrerLeSocle(deps);
+}
+
+/** Un flux d'entrée fabriqué : la garde POUSSE les morceaux elle-même. */
+class FluxDEntreeFabrique {
+  #ecouteur: ((morceau: string) => void) | null = null;
+  public codages: string[] = [];
+
+  setEncoding(codage: "utf8"): unknown {
+    this.codages.push(codage);
+    return this;
+  }
+
+  on(_evenement: "data", ecouteur: (morceau: string) => void): unknown {
+    this.#ecouteur = ecouteur;
+    return this;
+  }
+
+  pousser(morceau: string): void {
+    if (this.#ecouteur === null) throw new Error("garde mal fabriquée : aucun écouteur branché");
+    this.#ecouteur(morceau);
+  }
+}
+
+/** Un flux de sortie fabriqué : il RETIENT ce que le socle écrit. */
+class FluxDeSortieFabrique {
+  public readonly ecrites: string[] = [];
+
+  write(donnees: string): unknown {
+    this.ecrites.push(donnees);
+    return true;
+  }
+}
+
+/**
+ * UN PORT LIBRE, OBTENU EN LIANT PUIS EN RELÂCHANT.
+ *
+ * ⚠️ Un port codé en dur ferait rougir cette garde sur la machine de quelqu'un
+ *    d'autre, pour une raison qui n'a rien à voir avec le code gardé.
+ */
+function portLibre(): Promise<number> {
+  return new Promise((resoudre, rejeter) => {
+    const sonde = createServer();
+    sonde.once("error", rejeter);
+    sonde.listen(0, "127.0.0.1", () => {
+      const adresse = sonde.address();
+      if (adresse === null || typeof adresse === "string") {
+        rejeter(new Error("la sonde n'a pas rendu de port"));
+        return;
+      }
+      const port = adresse.port;
+      sonde.close(() => {
+        resoudre(port);
+      });
+    });
+  });
+}
+
+/** Les ports du service, montés sur un noyau RÉEL. */
+function portsAvecNoyauReel(
+  entree: FluxDEntreeFabrique,
+  sortie: FluxDeSortieFabrique,
+  outilsServis: readonly DescripteurOutilServi[],
+): { readonly ports: PortsDuService; readonly lectures: () => number } {
+  const harnais = fabriquerHarnaisStdio();
+  const catalogue = catalogueDesAdaptateursAdmis(outilsServis);
+  return {
+    ports: {
+      noyau: harnais.noyau,
+      catalogue: catalogue.catalogue,
+      habilitations: () => HABILITATIONS_DU_HARNAIS,
+      verificateurDeJeton: verificateurDeTemoin(revendicationsDeTemoin()),
+      registreDesJetons: registreDeTemoin(ligneOpsTokenDeTemoin()),
+      pontDIdentite: PONT_AU_PLUS_FAIBLE,
+      fluxDEntree: entree,
+      fluxDeSortie: sortie,
+      maintenant: () => INSTANT_DU_HARNAIS,
+    },
+    lectures: (): number => catalogue.lectures(),
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ① LE JALON — LE SOCLE ÉCOUTE, ET IL RÉPOND
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("§ 32 · ① le socle MONTE ses deux transports et répond sur le fil", () => {
+  it("ouvre une socket sur la boucle locale et sert un `tools/call` de bout en bout", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports } = portsAvecNoyauReel(entree, sortie, []);
+
+    const service = monterLeService(socle, ports, {
+      transports: ["http", "stdio"],
+      hotesAdmis: [hote],
+      audienceAttendue: AUDIENCE_DE_TEMOIN,
+      budgetMs: 30_000,
+      octetsMaxDuCorps: 1_048_576,
+      portHttp: port,
+      adresseHttp: "127.0.0.1",
+    });
+
+    const liee = await service.ecouter();
+
+    const corps = JSON.stringify({
+      jsonrpc: "2.0",
+      id: "garde-1",
+      method: "tools/call",
+      params: { name: OUTIL_BONJOUR.name, arguments: { ton: "neutre" } },
+    });
+    const reponse = await fetch(`http://${hote}/api/mcp`, {
+      method: "POST",
+      headers: {
+        host: hote,
+        "content-type": "application/json",
+        authorization: `Bearer ${PORTEUR_DE_TEMOIN}`,
+      },
+      body: corps,
+    });
+    const lu = (await reponse.json()) as Record<string, unknown>;
+
+    console.info(
+      `[① · le socle répond] transports NOMMÉS : [http, stdio] · ` +
+        `transports MONTÉS : [${service.transportsMontes.join(", ")}] · ` +
+        `sert les outils : ${String(service.sertLesOutils)} · ` +
+        `${String(service.empechements.length)} empêchement(s) · ` +
+        `écoute sur ${liee?.adresse ?? "?"}:${String(liee?.port ?? 0)} · ` +
+        `statut HTTP : ${String(reponse.status)} · ` +
+        `clés du corps : [${Object.keys(lu).join(", ")}] · ` +
+        `${String(corps.length)} octet(s) envoyés`,
+    );
+
+    // ── LE JALON, MESURÉ ────────────────────────────────────────────────────
+    expect(service.empechements).toEqual([]);
+    expect(service.sertLesOutils).toBe(true);
+    expect(service.transportsMontes).toEqual(["http", "stdio"]);
+    expect(liee).not.toBeNull();
+    expect(liee?.adresse).toBe("127.0.0.1");
+    expect(reponse.status).toBe(200);
+    // Un refus de la chaîne serait un `result` portant `isError` ; une enveloppe
+    // fautive serait un `error`. Ici : ni l'un ni l'autre, l'appel a traversé.
+    expect(Object.keys(lu)).toContain("result");
+    expect(lu["error"]).toBeUndefined();
+
+    await service.arreter();
+    await socle.arreter();
+  });
+
+  it("lit le FIL stdio et rend un `tools/list` — la liste est RELUE à chaque appel", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const outil: DescripteurOutilServi = {
+      name: OUTIL_BONJOUR.name,
+      description: OUTIL_BONJOUR.description,
+      inputSchema: OUTIL_BONJOUR.inputSchema,
+    };
+    const { ports, lectures } = portsAvecNoyauReel(entree, sortie, [outil]);
+
+    const service = monterLeService(socle, ports, {
+      transports: ["stdio"],
+      hotesAdmis: [hote],
+      audienceAttendue: AUDIENCE_DE_TEMOIN,
+      budgetMs: 30_000,
+      octetsMaxDuCorps: 1_048_576,
+      portHttp: port,
+    });
+
+    const APPELS = 3;
+    for (let rang = 0; rang < APPELS; rang += 1) {
+      entree.pousser(`${JSON.stringify({ jsonrpc: "2.0", id: rang + 1, method: "tools/list" })}\n`);
+    }
+    await service.attacheStdio?.aQuai();
+
+    const reponses = sortie.ecrites.map(
+      (ligne) => JSON.parse(ligne.trimEnd()) as Record<string, unknown>,
+    );
+    const premiere = reponses[0]?.["result"] as { tools?: readonly unknown[] } | undefined;
+    const mesures = service.serveurStdio?.mesures();
+
+    console.info(
+      `[① · le fil stdio] ${String(APPELS)} ligne(s) poussée(s) · ` +
+        `${String(service.attacheStdio?.morceauxRecus() ?? 0)} morceau(x) reçu(s) · ` +
+        `${String(service.attacheStdio?.levees() ?? -1)} levée(s) · ` +
+        `${String(sortie.ecrites.length)} réponse(s) écrite(s) · ` +
+        `${String(mesures?.toolsListServis ?? -1)} tools/list servi(s) · ` +
+        `${String(mesures?.lecturesDuCatalogue ?? -1)} lecture(s) du catalogue par le transport · ` +
+        `${String(lectures())} listage(s) réellement demandé(s) au port · ` +
+        `${String(premiere?.tools?.length ?? -1)} outil(s) dans la première réponse · ` +
+        `codage(s) posé(s) sur le flux d'entrée : [${entree.codages.join(", ")}]`,
+    );
+
+    // Le transport est BRANCHÉ : les morceaux arrivent, et rien ne lève.
+    expect(service.transportsMontes).toEqual(["stdio"]);
+    expect(service.attacheStdio?.morceauxRecus()).toBe(APPELS);
+    expect(service.attacheStdio?.levees()).toBe(0);
+    expect(entree.codages).toEqual(["utf8"]);
+
+    // Et il RÉPOND : une réponse par ligne, portant la liste servie.
+    expect(sortie.ecrites.length).toBe(APPELS);
+    expect(premiere?.tools?.length).toBe(1);
+
+    // § 11 — « la liste est relue à chaque `tools/list` » : trois comptes qui
+    // doivent coïncider. Une mémoïsation les ferait diverger.
+    expect(mesures?.toolsListServis).toBe(APPELS);
+    expect(mesures?.lecturesDuCatalogue).toBe(APPELS);
+    expect(lectures()).toBe(APPELS);
+
+    await service.arreter();
+    await socle.arreter();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ② LE MONTAGE SAIT DIRE NON
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("§ 23 · ② le montage refuse — et il NOMME ce qui l'en empêche", () => {
+  /**
+   * ⚠️ **C'EST ICI QUE `appelsDOutilsAcceptes` CESSE D'ÊTRE UN CONSTAT PUBLIÉ.**
+   *    Il était calculé par `core/vault/demarrage.ts`, relayé par
+   *    `ops/demarrage.ts`, republié par le healthcheck — et lu par PERSONNE. Le
+   *    § 32 était donc éprouvé sur des ÉTIQUETTES : « `routesServies` contient
+   *    la chaîne `console` ». Ici il décide, et la mesure est un compte de
+   *    transports montés.
+   */
+  it("coffre VERROUILLÉ — le socle vit, le healthcheck rend 200, et RIEN n'écoute", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("verrouillé", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports } = portsAvecNoyauReel(entree, sortie, []);
+
+    const service = monterLeService(socle, ports, {
+      transports: ["http", "stdio"],
+      hotesAdmis: [hote],
+      audienceAttendue: AUDIENCE_DE_TEMOIN,
+      budgetMs: 30_000,
+      octetsMaxDuCorps: 1_048_576,
+      portHttp: port,
+    });
+    const sante = await socle.healthcheck?.();
+
+    console.info(
+      `[② · coffre verrouillé] sert : ${String(socle.demarrage.sert)} · ` +
+        `healthcheck : ${String(sante?.statut ?? 0)} · ` +
+        `vaultLocked : ${String(sante?.corps.vaultLocked ?? false)} · ` +
+        `routes servies : [${(sante?.corps.routesServies ?? []).join(", ")}] · ` +
+        `appels d'outils acceptés : ${String(sante?.corps.appelsDOutilsAcceptes ?? true)} · ` +
+        `transports montés : ${String(service.transportsMontes.length)} · ` +
+        `${String(service.empechements.length)} empêchement(s) : ` +
+        `[${service.empechements.join(" | ")}]`,
+    );
+
+    // § 23 — le socle VIT, amputé.
+    expect(socle.demarrage.sert).toBe(true);
+    expect(sante?.statut).toBe(200);
+    expect(sante?.corps.vaultLocked).toBe(true);
+    expect(sante?.corps.routesServies).toContain("console");
+    expect(sante?.corps.routesServies).not.toContain("outils");
+
+    // Et le refus est PRONONCÉ : rien n'écoute, rien ne lit le fil.
+    expect(service.sertLesOutils).toBe(false);
+    expect(service.transportsMontes).toEqual([]);
+    expect(service.serveurHttp).toBeNull();
+    expect(service.attacheStdio).toBeNull();
+    expect(service.empechements.length).toBe(1);
+    expect(service.empechements[0]).toContain("§ 23");
+    expect(await service.ecouter()).toBeNull();
+
+    await socle.arreter();
+  });
+
+  it("SAIT DIRE NON — un transport HTTP sans vérificateur de jeton LÈVE au montage", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports } = portsAvecNoyauReel(entree, sortie, []);
+
+    const monter = (surcharge: Partial<PortsDuService>): (() => void) => {
+      return () => {
+        monterLeService(
+          socle,
+          { ...ports, ...surcharge },
+          {
+            transports: ["http", "stdio"],
+            hotesAdmis: [hote],
+            audienceAttendue: AUDIENCE_DE_TEMOIN,
+            budgetMs: 30_000,
+            octetsMaxDuCorps: 1_048_576,
+            portHttp: port,
+          },
+        );
+      };
+    };
+
+    const mutilations: ReadonlyArray<readonly [string, Partial<PortsDuService>]> = [
+      ["étape 2 sans exécutant", { verificateurDeJeton: null }],
+      ["étape 4 sans exécutant", { registreDesJetons: null }],
+      ["les deux", { verificateurDeJeton: null, registreDesJetons: null }],
+      ["stdio sans flux d'entrée", { fluxDEntree: null }],
+      ["stdio sans flux de sortie", { fluxDeSortie: null }],
+    ];
+
+    let levees = 0;
+    const manquees: string[] = [];
+    for (const [nom, surcharge] of mutilations) {
+      try {
+        monter(surcharge)();
+        manquees.push(nom);
+      } catch (erreur) {
+        if (erreur instanceof ErreurDeMontageDuService) levees += 1;
+        else manquees.push(`${nom} (levée d'un autre genre)`);
+      }
+    }
+
+    // TÉMOIN INVERSE, OBLIGATOIRE : sans lui, un montage qui lèverait TOUJOURS
+    // satisferait la garde. Les ports complets doivent passer.
+    let complet = 0;
+    monter({});
+    complet += 1;
+
+    console.info(
+      `[② · montage mutilé] ${String(mutilations.length)} mutilation(s) fabriquée(s) · ` +
+        `${String(levees)} refusée(s) au montage · ` +
+        `${String(manquees.length)} manquée(s) [${manquees.join(", ") || "aucune"}] · ` +
+        `témoin inverse : ${String(complet)} montage(s) complet(s) accepté(s)`,
+    );
+
+    expect(levees).toBe(mutilations.length);
+    expect(manquees).toEqual([]);
+    expect(complet).toBe(1);
+
+    await socle.arreter();
+  });
+
+  it("SAIT DIRE NON — sans noyau, aucun transport n'est monté, et le motif est écrit", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports } = portsAvecNoyauReel(entree, sortie, []);
+
+    const service = monterLeService(
+      socle,
+      { ...ports, noyau: null },
+      {
+        transports: ["http", "stdio"],
+        hotesAdmis: [hote],
+        audienceAttendue: AUDIENCE_DE_TEMOIN,
+        budgetMs: 30_000,
+        octetsMaxDuCorps: 1_048_576,
+        portHttp: port,
+      },
+    );
+
+    console.info(
+      `[② · chaîne non composée] transports montés : ` +
+        `${String(service.transportsMontes.length)} · ` +
+        `${String(service.empechements.length)} empêchement(s) : ` +
+        `[${service.empechements.join(" | ")}]`,
+    );
+
+    expect(service.transportsMontes).toEqual([]);
+    expect(service.empechements.length).toBe(1);
+    expect(service.empechements[0]).toContain("quatorze étapes");
+
+    await socle.arreter();
+  });
+});

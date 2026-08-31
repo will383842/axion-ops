@@ -249,31 +249,45 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
   {
     adr: "0001",
     decision: "Le socle émet ses propres jetons ; les étapes 2 à 4 les relisent.",
-    etat: "à-nommer",
-    dossierAttendu: "core/auth/",
-    lot: "lot 2 — l'émetteur et les routes `/auth/*`",
+    etat: "cousue",
+    symbole: "Octroi",
+    genre: "type",
+    module: "core/auth/contrat.ts",
+    mesureeAilleurs: null,
     motif:
-      "L'ADR nomme un dossier et une table, aucune fonction. Inventer un nom ici " +
-      "fabriquerait un registre faux — l'entrée se périmera d'elle-même le jour où " +
-      "`core/auth/` atterrira.",
+      "1 importateur de production mesuré : `core/auth/octroi.ts`, qui rend un `Octroi` depuis " +
+      "`echangerLeCode()`. ✅ DEUX PÉREMPTIONS SUCCESSIVES, ET ELLES ONT FONCTIONNÉ TOUTES LES " +
+      "DEUX : l'entrée était en `à-nommer` tant que `core/auth/` n'existait pas, puis en " +
+      "`à-coudre` tant que l'émetteur n'était pas écrit. C'est l'usage prévu de ces états — ils " +
+      "ne cachaient pas la dette, ils l'ont fait échoir. ⚠️ CE QUE CE COMPTE NE MESURE PAS : le " +
+      "type contraint la SORTIE du premier octroi, et lui seul. Un rafraîchissement ne rend " +
+      "délibérément PAS un `Octroi` — `ResultatDeRafraichissement` porte la colonne " +
+      "`sessionIdColonne` en texte, parce que retyper une session est le geste du transport " +
+      "(`APPELANTS_DE_LA_RELECTURE`) et non celui de l'émetteur.",
   },
   {
     adr: "0001",
     decision:
       "`ctx.requestId` est FRAPPÉ par le socle et `ctx.deadline` CALCULÉE par lui : " +
       "ni l'un ni l'autre n'est recopié d'une valeur reçue.",
-    etat: "à-nommer",
-    dossierAttendu: "core/transport/",
-    lot: "lot 3 — le transport, étapes 1 à 4 (« HTTP seul »)",
+    etat: "cousue",
+    symbole: "ValeursFrappeesParLeTransport",
+    genre: "type",
+    module: "core/transport/contrat.ts",
+    mesureeAilleurs: "core/transport/stdio/serveur.spec.ts",
     motif:
-      "⚠️ RÈGLE POSÉE PAR L'ADR 0020, COUTURE DUE AU TRANSPORT — et c'est cette " +
-      "entrée-ci qui empêche de l'y oublier. L'inventaire des canaux du `ctx` " +
-      "(`STATUT_DES_CANAUX_DE_CONTEXTE`, `core/types.ts`) classe les deux champs " +
-      "« à-fermer-au-transport » et porte leur motif ; la règle est écrite AVANT que " +
-      "`core/transport/` existe, parce que c'est le seul moment où elle ne coûte " +
-      "aucune migration. Aucun symbole n'est nommable aujourd'hui : les étapes 1 à 4 " +
-      "n'ont pas de fichier, et inventer un nom fabriquerait un registre faux. " +
-      "L'entrée se périme d'elle-même le jour où le dossier atterrit.",
+      "1 importateur de production mesuré : `core/transport/stdio/serveur.ts`, où la fonction " +
+      "`frapper()` rend ce type et ne reçoit RIEN de l'enveloppe — c'est la forme la plus " +
+      "courte d'une preuve que rien de reçu n'y entre. ⚠️ RÈGLE POSÉE PAR L'ADR 0020, COUTURE " +
+      "DUE AU TRANSPORT, ET ELLE VIENT D'ÊTRE FAITE : l'inventaire des canaux du `ctx` " +
+      "(`core/types.ts`) classait les deux champs « à-fermer-au-transport » depuis le lot 1c, " +
+      "et c'est cette entrée-ci qui a empêché de les y oublier. ⚠️ ET LE COMPTE " +
+      "D'IMPORTATEURS N'EST PAS LA MESURE DE FOND : un transport peut parfaitement importer " +
+      "ce type et recopier quand même l'`id` de l'enveloppe. Ce qui mesure est la garde " +
+      "nommée en `mesureeAilleurs` — deux appels portant le MÊME `id` JSON-RPC doivent " +
+      "recevoir deux `requestId` DIFFÉRENTS, et l'écart de la `deadline` à l'instant du socle " +
+      "doit valoir exactement le budget. ⚠️ BORNE ÉCRITE : le transport HTTP ne l'importe pas " +
+      "encore, et la règle y vaut mot pour mot.",
   },
 
   // ── ADR 0002 ───────────────────────────────────────────────────────────────
@@ -361,18 +375,28 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
   },
   {
     adr: "0004",
-    decision: "L'énumération de profils reçue est confrontée à celle du socle.",
-    etat: "à-coudre",
+    decision: "L'énumération de profils reçue est confrontée à sa forme, aux deux entrées du kit.",
+    etat: "cousue",
     symbole: "verifierEnumerationProfils",
     genre: "fonction",
     module: "core/adapter-kit/profils.ts",
     mesureeAilleurs: null,
     motif:
-      "🔴 0 appelant de production MESURÉ — LE JUMEAU OUBLIÉ. Sa voisine immédiate " +
-      "`verifierFormeDuSceau`, écrite dans le même fichier et par la même décision, en " +
-      "a un. Le sceau est donc confronté dans sa FORME et jamais dans son CONTENU : " +
-      "un manifeste peut annoncer une énumération de profils que personne ne dément. " +
-      "Écart signalé au rapport du lot 1d, à coudre par le constructeur du registre.",
+      "✅ 2 appelants de production mesurés : `core/adapter-kit/kit.ts` (LÈVE — c'est l'entrée " +
+      "unique de l'énumération dans le kit) et `core/adapter-kit/manifest.ts` (REND UNE " +
+      "ANOMALIE, à côté de son jumeau `verifierFormeDuSceau`, dont le contrat est de rendre " +
+      "la LISTE et jamais la première). ⚠️ C'ÉTAIT LE JUMEAU OUBLIÉ, ET LE MOTIF DE SON OUBLI " +
+      "MÉRITE DE RESTER ÉCRIT : sa voisine immédiate, née de la même décision dans le même " +
+      "fichier, avait un appelant ; celle-ci n'en avait aucun, si bien que le sceau des " +
+      "profils était confronté dans sa FORME et l'énumération qu'il scelle jamais dans la " +
+      "sienne. ⚠️ ET LA COUTURE A SUPPRIMÉ UNE SECONDE ÉCRITURE : `creerAdapterKit` portait " +
+      "sa propre comparaison `length === 0`, plus ÉTROITE — un profil au nom vide ou en " +
+      "double traversait la construction en silence, et la garde du § 14 comptait ensuite un " +
+      "profil de plus qu'il n'en existe. Une seule expression de la règle, désormais. " +
+      "⚠️ BORNE : elle dit qu'une énumération est UTILISABLE, jamais qu'elle est la BONNE — " +
+      "la confrontation au sceau du socle appartient au registre (`profilesVersion`, " +
+      "`profilesSha`), et les confondre ferait croire qu'un manifeste admis a été construit " +
+      "contre l'énumération courante.",
   },
 
   // ── ADR 0005 ───────────────────────────────────────────────────────────────
@@ -536,7 +560,29 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "la couture faite à qui cherchait le nom au `grep`.",
   },
 
-  // ── ADR 0017 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0016",
+    decision:
+      "MOITIÉ « TABLE » — `ops_tool` porte enfin `governanceFields`, le dernier tronçon " +
+      "d'une propagation qui existait partout ailleurs.",
+    etat: "hors-code",
+    motif:
+      "⚠️ CETTE MOITIÉ NE PRODUIT AUCUN SYMBOLE DE CE DÉPÔT : elle porte sur `model " +
+      "OpsTool` de `prisma/schema.prisma`. Elle est inscrite parce qu'elle est MESURÉE — " +
+      "`core/adapter-kit/colonne-de-gouvernance.temoin.spec.ts` confronte les propriétés " +
+      "d'`OutilDuCatalogue` aux colonnes du modèle, LUES toutes deux sur le disque. La " +
+      "déclaration voyageait du manifeste jusqu'à l'étape 11 PAR LE TYPE ; au premier " +
+      "catalogue réel elle serait arrivée VIDE, et le § 20 n'aurait plus surveillé que ce " +
+      "que le filet au nom retient — sur la seule branche qu'aucune confirmation ne " +
+      "rattrape. ⚠️ ET LA GARDE TIENT UN CLIQUET DATÉ SUR CE QUI MANQUE ENCORE : quatre " +
+      "propriétés n'ont toujours aucune colonne (`pagination`, `compaction`, `maxBytes`, " +
+      "`idFields`). Elles ne sont pas posées ici parce qu'une colonne sans LECTEUR est une " +
+      "seconde source de vérité — motif pour lequel le lot 1d avait refusé de poser " +
+      "`governanceFields` seule — et parce que deux d'entre elles demandent un arbitrage de " +
+      "FORME. Une cinquième ne peut plus s'ajouter en silence.",
+  },
+
+  // ── ADR 0017 ──────────────────────────────────────────────────────────────────
   {
     adr: "0017",
     decision: "Le journal enveloppe l'appel : aucune terminaison ne sort sans sa ligne.",
@@ -590,10 +636,16 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "alors que la fonction était définie et appelée dans le même arbre de travail. " +
       "C'est le second sens de rougissement — celui qu'on oublie d'écrire —, survenu dans " +
       "le lot même qui l'a nommé, et rien ne l'a vu parce que la garde G1 n'existait pas. " +
-      "⚠️ BORNE ÉCRITE AVEC LA MESURE : la moitié POSTGRES de l'ADR 0018 n'est pas écrite " +
-      "(`VerrouPostgres`, `core/transport/`), et aucun point d'entrée de conteneur " +
-      "n'appelle `demarrerLeSocleMonoInstance` — la couture est prouvée à l'intérieur de " +
-      "`core/instance/`, pas jusqu'au processus qui sert.",
+      "✅ LA BORNE DE CETTE ENTRÉE EST LEVÉE AU LOT 2, ET ELLE EST RÉÉCRITE ICI PLUTÔT " +
+      "QUE RETIRÉE : elle disait « la moitié POSTGRES n'est pas écrite, et aucun point " +
+      "d'entrée de conteneur n'appelle `demarrerLeSocleMonoInstance` — la couture est " +
+      "prouvée à l'intérieur de `core/instance/`, pas jusqu'au processus qui sert ». " +
+      "`core/instance/postgres.ts` existe (ADR 0024) et `ops/main.ts` appelle " +
+      "`demarrerLeSocleMonoInstance` à l'étage 1, AVANT tout le reste. La couture va " +
+      "désormais jusqu'au processus. ⚠️ IL RESTE UNE BORNE, ET ELLE N'EST PAS LA MÊME : " +
+      "en local, l'URL de base est sur `stub.invalid`, donc l'implémentation retenue est " +
+      "le DOUBLE EN MÉMOIRE, qui ne voit pas un second processus. `ChoixDuVerrou` porte " +
+      "ce fait dans `aveugleAuxAutresProcessus`, pour que la borne voyage avec le choix.",
   },
   {
     adr: "0018",
@@ -621,20 +673,24 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     decision:
       "Le healthcheck RELIT le verrou à chaque appel et passe à 503 dès qu'il " +
       "n'est plus tenu.",
-    etat: "à-coudre",
+    etat: "cousue",
     symbole: "relireLaSanteMonoInstance",
     genre: "fonction",
     module: "core/instance/demarrage.ts",
     mesureeAilleurs: "core/instance/demarrage.spec.ts",
     motif:
-      "0 appelant de production MESURÉ, et c'est attendu : son appelant est la route " +
-      "`/healthz`, qui vit dans `core/transport/` (lot 3) et n'existe pas. ⚠️ C'EST LA " +
-      "MOITIÉ DE L'ADR 0018 QUE PERSONNE N'APPELLE ENCORE, et l'écrire ici est ce qui " +
-      "empêche de l'oublier au moment où le transport atterrira : un socle déployé " +
-      "aujourd'hui prendrait le verrou au démarrage et ne saurait jamais dire qu'il l'a " +
-      "perdu. Le cas que l'ADR exclut nommément — un healthcheck qui répond depuis un " +
-      "drapeau posé à l'acquisition plutôt que depuis une relecture — est éprouvé par le " +
-      "témoin T3 de `core/instance/couture-adr-0018.temoin.spec.ts`.",
+      "✅ COUSUE AU LOT 2. 1 appelant de production mesuré : `ops/main.ts`, qui l'appelle à " +
+      "DEUX endroits — au premier battement de la veille (étage 7) et, surtout, dans le " +
+      "healthcheck construit par `construireLeHealthcheck`, à CHAQUE appel. ⚠️ CETTE ENTRÉE " +
+      "ANNONÇAIT « 0 appelant, et c'est attendu : son appelant est la route `/healthz`, qui " +
+      "vit dans `core/transport/` et n'existe pas ». La racine de composition a levé " +
+      "l'attente sans attendre le transport : le healthcheck est une FONCTION, et le " +
+      "transport ne fera que la publier. Le cas que l'ADR exclut nommément — un healthcheck " +
+      "qui répond depuis un drapeau posé à l'acquisition plutôt que depuis une relecture — " +
+      "est éprouvé deux fois : par le témoin T3 de " +
+      "`core/instance/couture-adr-0018.temoin.spec.ts`, et désormais de bout en bout par " +
+      "`ops/main.spec.ts` (④), où le verrou est ARRACHÉ après le démarrage et où le " +
+      "healthcheck passe de 200 à 503 sans que rien d'autre ne bouge.",
   },
 
   // ── ADR 0019 à 0022 — les décisions du lot 1d ──────────────────────────────
@@ -808,6 +864,869 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "registre serait devenu VERT, et l'alarme promise — « une intention sans issue EST " +
       "l'alarme » — n'aurait eu personne pour la lever. Deux entrées : la seconde reste " +
       "rouge tant que le compteur n'atterrit pas.",
+  },
+
+  // ── ADR 0023 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0023",
+    decision:
+      "Le démarrage est une ÉCHELLE DE SEPT ÉTAGES déclarée comme une donnée ; " +
+      "`ops/main.ts` la parcourt et ne redécide rien.",
+    etat: "cousue",
+    symbole: "EtageDeDemarrage",
+    genre: "type",
+    module: "ops/demarrage/etages.ts",
+    mesureeAilleurs: null,
+    motif:
+      "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `ops/demarrage.ts`, où " +
+      "l'arbitre `arbitrerLeDemarrage` et la garde `verifierLaCouvertureDesEtages` prennent " +
+      "l'échelle en PARAMÈTRE typé par ce type — ce qui les rend éprouvables sur une échelle " +
+      "fabriquée sans jamais mutiler la vraie. Les trois entrées annoncées comme filles " +
+      "sont basculées du même mouvement : `relireLaSanteMonoInstance` et " +
+      "`deciderDemarrageMonoInstance` ici même, `demarrerPolitique` par la bascule du " +
+      "`it.todo` de `core/epreuve/politique-chemins-de-panne.spec.ts`.",
+  },
+  {
+    adr: "0023",
+    decision:
+      "TROIS issues de refus, pas deux : sortir, amputer, désactiver. Le deuxième " +
+      "état du coffre (§ 23) et l'épinglage (§ 20) n'ont pas d'autre endroit où se ranger.",
+    etat: "cousue",
+    symbole: "IssueDeRefus",
+    genre: "type",
+    module: "ops/demarrage/etages.ts",
+    mesureeAilleurs: null,
+    motif:
+      "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `ops/demarrage.ts`, où " +
+      "`RefusDEtage.issue` le porte et où `issueDuRefusDeCoffre` le RETOURNE. ⚠️ ET CETTE " +
+      "ENTRÉE SÉPARÉE A SERVI EXACTEMENT À CE POUR QUOI ELLE A ÉTÉ ÉCRITE : en la cousant, " +
+      "on a mesuré que l'échelle attribue `demarrage-ampute` à l'étage 2 alors que son " +
+      "propre `refusQuand` porte sur un coffre ABSENT, cas où le § 23 exige que le " +
+      "conteneur NE DÉMARRE PAS. L'issue est donc DÉRIVÉE du propriétaire de la décision " +
+      "(`decisionDeDemarrage`), et l'écart est mesuré par `ops/demarrage.spec.ts` (B) au " +
+      "lieu d'être écrit dans une prose. Voir l'écart signalé à l'architecte.",
+  },
+  {
+    adr: "0023",
+    decision:
+      "L'arbitrage du démarrage est PUR : on lui donne ce que les sept étages ont " +
+      "répondu, il rend ce que le socle sert. Le câblage n'a rien à recalculer.",
+    etat: "cousue",
+    symbole: "arbitrerLeDemarrage",
+    genre: "fonction",
+    module: "ops/demarrage.ts",
+    mesureeAilleurs: null,
+    motif:
+      "1 appelant de production mesuré : `ops/main.ts`, dans `conclure()` — la SEULE " +
+      "fonction par laquelle toutes les sorties anticipées de la séquence passent. ⚠️ CE " +
+      "QUE CETTE UNICITÉ FERME : une décision reprise dans une branche de sortie aurait " +
+      "divergé de celle des autres, et c'est la branche la moins parcourue qui aurait " +
+      "divergé — celle des refus, c'est-à-dire celle dont tout dépend. La pureté est ce " +
+      "qui permet de couvrir les trois issues et les sept étages sans ouvrir une " +
+      "connexion (`ops/demarrage.spec.ts`).",
+  },
+  {
+    adr: "0023",
+    decision:
+      "`ops/main.ts` est CONFRONTÉ à l'échelle, jamais l'inverse : un étage déclaré " +
+      "et sauté fait rougir, et l'ordre des appels est mesuré sur les positions.",
+    etat: "à-coudre",
+    symbole: "verifierLaCouvertureDesEtages",
+    genre: "fonction",
+    module: "ops/demarrage.ts",
+    mesureeAilleurs: "ops/couverture-des-etages.temoin.spec.ts",
+    motif:
+      "0 appelant de production mesuré, ET C'EST LA BONNE VALEUR : cette garde lit le " +
+      "SOURCE de la racine, ce qu'un conteneur ne porte pas — il n'embarque que le " +
+      "JavaScript émis. L'appeler au démarrage la ferait échouer en production pour une " +
+      "raison étrangère à ce qu'elle garde. Même motif que `verifierLesCoutures` " +
+      "(ADR 0019), et même remède : la mesure réelle est déléguée à la garde nommée " +
+      "ci-dessus, qui annonce ses comptes (octets lus, étages confrontés, symboles " +
+      "cherchés, appels trouvés) et porte cinq témoins fabriqués — dont un étage retiré, " +
+      "un ordre inversé, une citation en prose et un import sans appel.",
+  },
+
+  // ── ADR 0024 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0024",
+    decision:
+      "Le verrou consultatif de session tient sur une connexion DÉDIÉE hors du pool, " +
+      "et la relecture interroge la MÊME connexion que l'acquisition.",
+    etat: "cousue",
+    symbole: "ConnexionDeVerrou",
+    genre: "type",
+    module: "core/instance/contrat-postgres.ts",
+    mesureeAilleurs: null,
+    motif:
+      "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `core/instance/postgres.ts`, " +
+      "où `VerrouPostgres.connexion()` le RETOURNE et où `memeSessionQuAlAcquisition` est " +
+      "DÉRIVÉ de la dernière relecture — jamais d'un drapeau posé à l'acquisition, qui " +
+      "répondrait « oui » exactement dans le cas où la connexion vient d'être recyclée. " +
+      "⚠️ CE QUE CETTE ENTRÉE SURVEILLE N'EST PAS L'ABSENCE DU VERROU MAIS L'ENDROIT OÙ IL " +
+      "VIT. Le défaut est éprouvé par un témoin fabriqué (`core/instance/postgres.spec.ts`, " +
+      "T3) où le pool recycle la connexion : elle se dit TOUJOURS ouverte, le catalogue " +
+      "répond TOUJOURS « la session courante tient ce verrou », et l'état rendu est " +
+      "pourtant `perdu` — parce qu'une fenêtre a existé. ⚠️ ET LE TÉMOIN A ÉTÉ CORRIGÉ " +
+      "APRÈS MESURE : dans sa première écriture, il restait VERT quand on neutralisait la " +
+      "confrontation d'identité, parce que le compte de verrous tenus suffisait. Deux " +
+      "règles, deux témoins.",
+  },
+  {
+    adr: "0024",
+    decision:
+      "Le verrou de session est TOUJOURS pris ; seule son implémentation dépend du " +
+      "magasin, choisie d'après l'URL de base et jamais d'après un drapeau.",
+    etat: "cousue",
+    symbole: "choisirImplementationDuVerrou",
+    genre: "fonction",
+    module: "core/instance/postgres.ts",
+    mesureeAilleurs: null,
+    motif:
+      "1 appelant de production mesuré : `ops/main.ts`, à l'étage 1, AVANT toute " +
+      "construction de verrou. ⚠️ UN DRAPEAU SE MET À `false` POUR FAIRE PASSER UN TEST ET " +
+      "NE REVIENT JAMAIS — d'où la dérivation depuis l'URL. Et un champ que l'ADR 0024 " +
+      "n'avait pas prévu s'est révélé nécessaire à l'écriture : `urlLisible`. Sans lui, " +
+      "une URL mal orthographiée tombe sur « mémoire » exactement comme une URL factice, " +
+      "et le socle prend un verrou aveugle aux autres processus EN PRODUCTION, sans un " +
+      "mot. La racine refuse de démarrer sur ce cas (`ops/main.spec.ts`, ③).",
+  },
+  {
+    adr: "0024",
+    decision:
+      "L'adaptation Postgres tient le verrou sur une connexion DÉDIÉE hors du pool, " +
+      "et la perte de cette connexion est la perte du verrou — jamais une reconnexion.",
+    etat: "cousue",
+    symbole: "VerrouPostgres",
+    genre: "fonction",
+    module: "core/instance/postgres.ts",
+    mesureeAilleurs: null,
+    motif:
+      "1 appelant de production mesuré : `ops/main.ts`, qui l'instancie à l'étage 1 quand " +
+      "l'URL de base désigne un magasin réel. ⚠️ CE QUE LA GARDE NE PEUT PAS FAIRE, ÉCRIT " +
+      "AVEC ELLE : le dépôt ne fait AUCUN appel réseau sortant, donc rien ici n'ouvre de " +
+      "connexion Postgres. La session dédiée est un PORT, et c'est ce qui rend les trois " +
+      "propriétés éprouvables sans base — hors du pool, même session à la relecture, " +
+      "aucune reconnexion (`ouverturesDeSession` reste à 1 après la chute, mesuré). " +
+      "⚠️ LA CLÉ EST DÉRIVÉE, ET UN TÉMOIN LE MESURE DANS LES DEUX SENS : trois domaines " +
+      "donnent trois clés distinctes, et le module ne porte AUCUN entier de dix chiffres " +
+      "ou plus — la forme que l'ADR 0018 écarte comme « recopiée dans une migration ».",
+  },
+
+  // ── ADR 0025 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0025",
+    decision:
+      "Les deux transports passent par UN SEUL noyau ; le contournement n'est pas " +
+      "interdit par une règle, il est rendu INCONSTRUCTIBLE.",
+    etat: "cousue",
+    symbole: "NoyauUnique",
+    genre: "type",
+    module: "core/transport/contrat.ts",
+    mesureeAilleurs: "core/transport/http/imports.temoin.spec.ts",
+    motif:
+      "2 importateurs de production mesurés — `core/transport/http/transport.ts` et " +
+      "`core/transport/stdio/serveur.ts` : les deux transports REÇOIVENT le noyau, aucun ne " +
+      "l'appelle par un import. ⚠️ LE COMPTE D'IMPORTATEURS N'EST TOUJOURS PAS LA MESURE DE " +
+      "FOND, et il faut continuer à le dire : ce que l'ADR 0025 tient est un graphe d'imports " +
+      "NÉGATIF — un transport qui n'importe AUCUN module d'étape, l'ensemble interdit étant " +
+      "DÉRIVÉ d'`EXECUTANTS_ETAPES`. Cette garde-là existe désormais, et c'est elle que " +
+      "`mesureeAilleurs` désigne : elle annonce les fichiers balayés, les imports lus et la " +
+      "taille de l'ensemble interdit, et un témoin fabriqué lui fait produire exactement une " +
+      "anomalie nommant le module d'étape ajouté.",
+  },
+  {
+    adr: "0025",
+    decision:
+      "L'étape 1 (anti DNS-rebinding) s'exécute AVANT l'analyse du corps, et une " +
+      "liste blanche VIDE est un refus de démarrer — jamais un « tout autoriser ».",
+    etat: "cousue",
+    symbole: "VerdictDHote",
+    genre: "type",
+    module: "core/transport/contrat.ts",
+    mesureeAilleurs: "core/transport/http/hote.spec.ts",
+    motif:
+      "1 importateur de production mesuré : `core/transport/http/hote.ts`. ⚠️ ENTRÉE SÉPARÉE " +
+      "DE LA PRÉCÉDENTE, PARCE QUE LE MODE DE DÉFAILLANCE EST AUTRE : le noyau unique se perd " +
+      "par un import de trop, l'étape 1 se perd par une liste VIDE. Une liste blanche qui se " +
+      "résout à zéro entrée ne trouve aucun refus à prononcer et reste verte — c'est le motif " +
+      "pour lequel `entreesConfrontees` est un champ du verdict et non un détail de " +
+      "journalisation. ⚠️ ET LE COMPTE D'IMPORTATEURS NE MESURE PAS CELA : `listeBlancheDHotes` " +
+      "LÈVE sur une liste vide, `creerTransportHttp` refuse de se monter dessus, et " +
+      "`verifierLHote` ne peut pas rendre `autorise: true` avec zéro entrée confrontée. Les " +
+      "trois sont éprouvés par la garde nommée en `mesureeAilleurs`, qui annonce ses comptes.",
+  },
+  {
+    adr: "0025",
+    decision:
+      "Les quatre étapes « HTTP seul » s'exécutent DANS L'ORDRE, avant que le corps " +
+      "de la requête soit lu — et chacune ANNONCE ce qu'elle a confronté.",
+    etat: "cousue",
+    symbole: "franchirLAmont",
+    genre: "fonction",
+    module: "core/transport/http/amont.ts",
+    mesureeAilleurs: "core/transport/http/amont.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/http/transport.ts`. ⚠️ CE QUI TIENT " +
+      "L'ORDRE N'EST PAS CETTE FONCTION MAIS SA SIGNATURE — elle ne reçoit AUCUN corps, donc " +
+      "elle ne peut rien analyser avant l'étape 1, et `RequeteHttp.lireLeCorps` est une " +
+      "FONCTION que le transport n'appelle qu'après les quatre. La garde compte ses " +
+      "invocations : zéro sur un hôte refusé, zéro sur un jeton refusé. ⚠️ ET LE COMPTE " +
+      "D'APPELANTS NE DIRAIT RIEN DE CE QUE CHAQUE ÉTAPE A REGARDÉ : `TraceAmont` porte quatre " +
+      "compteurs — entrées d'hôte confrontées, comparaisons d'audience, lignes `ops_token` " +
+      "confrontées, champs de journal inspectés — parce qu'une étape peut refuser ou accorder " +
+      "en n'ayant rien mesuré, et c'est le seul défaut qui compte ici.",
+  },
+  {
+    adr: "0025",
+    decision:
+      "INTERDIT DE CONSTRUCTION N° 3 — la couverture des étapes amont est confrontée " +
+      "AU DÉMARRAGE du transport, pas seulement en test.",
+    etat: "cousue",
+    symbole: "exigerLaCouvertureAmont",
+    genre: "fonction",
+    module: "core/transport/http/couverture.ts",
+    mesureeAilleurs: null,
+    motif:
+      "1 appelant de production mesuré : `creerTransportHttp` l'appelle avant toute autre " +
+      "chose, si bien qu'une étape « HTTP seul » sans exécutant fait LEVER la construction du " +
+      "transport — donc dans le conteneur, pas seulement en CI. ⚠️ ELLE FERME UN TROU QUE " +
+      "`verifierCouvertureDesEtapes` LAISSE EXPLICITEMENT OUVERT : pour les quatre étapes du " +
+      "transport, cette dernière ne confronte qu'une PHRASE, et son propre `executantsConfrontes` " +
+      "le dit. La table de ce module, elle, nomme des symboles de son dossier, et la " +
+      "confrontation rougit dans les deux sens — une étape due sans exécutant, ET un exécutant " +
+      "devenu orphelin.",
+  },
+
+  // ── ADR 0026 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0026",
+    decision:
+      "L'audience est l'URL absolue de la ressource MCP ; cinq contraintes de forme, " +
+      "comptées SÉPARÉMENT, et une comparaison par égalité EXACTE à l'étape 3.",
+    etat: "cousue",
+    symbole: "CleDeContrainteDAudience",
+    genre: "type",
+    module: "core/auth/ressource.ts",
+    mesureeAilleurs: null,
+    motif:
+      "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `core/auth/audience.ts`, où le " +
+      "type ANNOTE la table `CONTROLES` — `Readonly<Record<CleDeContrainteDAudience, …>>`. " +
+      "⚠️ C'EST LE SEUL BRANCHEMENT QUI VAILLE POUR CE TYPE, ET IL FAUT DIRE POURQUOI : " +
+      "l'annotation est une TOTALITÉ tenue par le compilateur. Une SIXIÈME contrainte ajoutée à " +
+      "`CONTRAINTES_DE_L_AUDIENCE` sans son contrôle NE COMPILE PAS. Sans elle, la contrainte " +
+      "neuve serait écrite en prose et jamais évaluée — c'est-à-dire exactement le défaut que " +
+      "l'ADR 0026 nomme : « une garde qui ne prouverait pas les cinq laisserait quatre d'entre " +
+      "elles mourir sans un mot ».",
+  },
+  {
+    adr: "0026",
+    decision:
+      "La FORME de l'audience se confronte contrainte par contrainte, et le verdict " +
+      "ANNONCE combien il en a confrontées.",
+    etat: "cousue",
+    symbole: "verifierLaFormeDeLAudience",
+    genre: "fonction",
+    module: "core/auth/audience.ts",
+    mesureeAilleurs: "core/auth/audience.spec.ts",
+    motif:
+      "2 appelants de production mesurés : `core/auth/configuration.ts` (l'étage 3, sur la " +
+      "valeur de configuration) et `core/auth/octroi.ts` (au MONTAGE de l'émetteur). ⚠️ LE " +
+      "SECOND N'EST PAS UNE REDONDANCE : `ops_token.audience` n'est JAMAIS réécrite (ADR 0026, " +
+      "conséquences acceptées), donc un émetteur monté sur une audience mal formée écrirait des " +
+      "colonnes qu'on ne pourra plus corriger sans effacer la seule trace de ce POUR QUOI le " +
+      "jeton avait été émis. ⚠️ ET LE COMPTE D'APPELANTS N'EST PAS LA MESURE DE FOND : c'est " +
+      "`contraintesConfrontees` qui l'est, et la garde nommée ci-dessus porte UN TÉMOIN PAR " +
+      "CONTRAINTE, chacun n'en violant qu'UNE — un témoin qui en violerait deux ne prouverait " +
+      "ni l'une ni l'autre.",
+  },
+  {
+    adr: "0026",
+    decision:
+      "L'étape 3 compare l'audience par ÉGALITÉ EXACTE ; une audience absente, " +
+      "multiple ou non textuelle est refusée, et le verdict ANNONCE combien de comparaisons ont eu lieu.",
+    etat: "cousue",
+    symbole: "verifierLAudience",
+    genre: "fonction",
+    module: "core/transport/http/audience.ts",
+    mesureeAilleurs: "core/transport/http/audience.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/http/amont.ts`, à l'étape 3. " +
+      "⚠️ ENTRÉE DISTINCTE DE LA PRÉCÉDENTE, ET LA DISTINCTION EST CELLE QUE L'ADR 0026 POSE : " +
+      "la FORME de l'audience se vérifie UNE FOIS, à l'étage 3 du démarrage, sur une valeur de " +
+      "configuration ; la COMPARAISON se refait à chaque appel. Deux moments, deux symboles, " +
+      "deux modes de défaillance — une forme non vérifiée fait démarrer un socle dont l'étape 3 " +
+      "ne signifie rien, une comparaison approchée fait passer un jeton d'une autre ressource. " +
+      "⚠️ LE COMPTE D'APPELANTS NE MESURE PAS LA SECONDE : `comparaisonsFaites` la mesure, et il " +
+      "vaut ZÉRO sur les trois refus prononcés avant toute comparaison — ce qui est la bonne " +
+      "valeur, et ce qui empêche de lire « autorisé » là où rien n'a été comparé.",
+  },
+
+  // ── ADR 0027 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0027",
+    decision:
+      "L'émetteur refuse À L'OCTROI ce que l'étape 5 refuserait trop tard : " +
+      "`ops:policy` n'est jamais porté par un jeton de connecteur.",
+    etat: "cousue",
+    symbole: "VerdictDeScopes",
+    genre: "type",
+    module: "core/auth/contrat.ts",
+    mesureeAilleurs: null,
+    motif:
+      "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `core/auth/scopes.ts`, où " +
+      "`VerdictDeScopesDemandes` l'ÉTEND. ⚠️ L'EXTENSION EST UNE DÉCISION, PAS UNE COMMODITÉ : " +
+      "le contrat type `accordes` et `refuses` sur `OpsScope`, donc sur les cinq valeurs du " +
+      "socle, alors qu'une demande arrive du RÉSEAU et peut nommer n'importe quoi. Ces " +
+      "chaînes-là n'ont aucun endroit où se ranger dans le contrat ; les taire les rendrait " +
+      "invisibles, et un scope mal orthographié donnerait à un client moins de droits qu'il ne " +
+      "croit, en silence. `inconnus` les compte SANS élargir le type qui garde les cinq. " +
+      "⚠️ LA DISTINCTION QUI PORTE LA DÉCISION RESTE ÉCRITE : l'étape 5 refuse un APPEL, " +
+      "l'émetteur refuse que le jeton EXISTE.",
+  },
+  {
+    adr: "0027",
+    decision:
+      "L'ensemble émissible se DÉRIVE de `PORTE_PAR_LE_JETON_DAPPEL` ; un octroi qui " +
+      "demande `ops:policy` est REFUSÉ EN ENTIER, jamais réduit en silence.",
+    etat: "cousue",
+    symbole: "verdictDeScopesDemandes",
+    genre: "fonction",
+    module: "core/auth/scopes.ts",
+    mesureeAilleurs: "core/auth/scopes.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/auth/octroi.ts`, dans `preparerUneAutorisation` " +
+      "— c'est-à-dire AVANT qu'un code d'autorisation soit rendu, et non à l'échange. ⚠️ LE " +
+      "REFUS EST TOTAL, ET C'EST UN ARBITRAGE : OAuth permet d'accorder MOINS que ce qui est " +
+      "demandé, et c'est la réponse qu'on écrit sans y penser. Réduire en silence rendrait un " +
+      "jeton « qui marche » à un client ayant demandé le desserrage de la politique, et le seul " +
+      "endroit où l'écart se verrait serait un journal que personne ne lit avant l'incident. " +
+      "⚠️ ET LA MESURE DE FOND N'EST PAS LE COMPTE D'APPELANTS : c'est que `SCOPES_EMISSIBLES` " +
+      "et `SCOPES_JAMAIS_PORTES_PAR_LE_JETON_DAPPEL` PARTITIONNENT `OPS_SCOPES` — ni " +
+      "recouvrement, ni trou. Un scope absent des deux serait refusé sans motif écrit, et " +
+      "personne ne saurait dire si c'est voulu.",
+  },
+  {
+    adr: "0027",
+    decision:
+      "`ops_token.tokenHash` est un HMAC-SHA-256 CLÉ PAR LE COFFRE, avec séparation " +
+      "de domaine par genre — jamais un SHA « salé », dont le sel vit dans la même ligne.",
+    etat: "cousue",
+    symbole: "creerCalculEmpreinteDeJeton",
+    genre: "fonction",
+    module: "core/auth/empreinte.ts",
+    mesureeAilleurs: "core/auth/empreinte.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/auth/octroi.ts`, au montage — l'émetteur reçoit " +
+      "le COFFRE et construit le calcul, plutôt que de recevoir le calcul tout fait : une " +
+      "racine de composition qui pourrait injecter un calculateur pourrait injecter un SHA nu. " +
+      "⚠️ LA SÉPARATION PAR GENRE N'EST PAS DÉCORATIVE, ET SA MESURE EST DANS LA GARDE : sans " +
+      "elle, l'empreinte d'un jeton d'accès révoqué serait celle d'un refresh révoqué, et " +
+      "présenter un vieil accès au rafraîchissement révoquerait TOUTE la chaîne d'octroi — la " +
+      "détection de rejeu se retournerait en déni de service, à la portée de quiconque a vu " +
+      "passer un jeton expiré. Un témoin apparié le mesure. ⚠️ ET LE CADRAGE EST UNE COPIE " +
+      "ASSUMÉE de `core/limits/arg-hash.ts`, qui n'exporte pas le sien : la garde CONFRONTE les " +
+      "deux écritures sur des morceaux identiques et exige des octets identiques.",
+  },
+  {
+    adr: "0027",
+    decision:
+      "L'émetteur écrit `ops_token` par un PORT, et le jeton en clair ne sort " +
+      "qu'une fois — par un mécanisme, non par une promesse.",
+    etat: "cousue",
+    symbole: "DepotDeJetons",
+    genre: "type",
+    module: "core/auth/depot.ts",
+    mesureeAilleurs: "core/auth/schema.spec.ts",
+    motif:
+      "2 importateurs de production mesurés : `core/auth/octroi.ts` et `core/auth/memoire.ts`. " +
+      "⚠️ LA MESURE DE FOND EST AILLEURS, ET ELLE EST NOMMÉE : la garde déléguée CONFRONTE " +
+      "`LigneOpsToken` à `model OpsToken` de `prisma/schema.prisma`, colonne par colonne, dans " +
+      "les DEUX SENS. Une colonne sans lecteur est la seconde source de vérité que l'ADR 0027 " +
+      "refuse ; un champ sans colonne est un émetteur qui écrit dans le vide. ⚠️ ET LES CHAMPS " +
+      "SONT LUS SUR UNE VALEUR CONSTRUITE, JAMAIS DANS LE SOURCE : un type n'existe pas à " +
+      "l'exécution, et une expression régulière sur le fichier aurait fait une TROISIÈME " +
+      "dérivation à tenir en accord avec les deux autres.",
+  },
+  {
+    adr: "0027",
+    decision:
+      "L'émetteur de jetons — PKCE `S256`, access 1 h, refresh 30 j rotatif, et le " +
+      "rejeu d'un refresh révoqué qui révoque TOUTE la chaîne d'octroi.",
+    etat: "à-coudre",
+    symbole: "creerEmetteurDeJetons",
+    genre: "fonction",
+    module: "core/auth/octroi.ts",
+    mesureeAilleurs: "core/auth/octroi.spec.ts",
+    motif:
+      "0 appelant de production mesuré, ET C'EST LA VALEUR ATTENDUE AUJOURD'HUI : le montage " +
+      "de l'émetteur appartient à la racine de composition, et `ops/main.ts` ne sert encore " +
+      "aucune route `/auth/*` — l'étage 6 monte les transports. ⚠️ ÉCRIRE LA FONCTION N'EST " +
+      "PAS LE TRAVAIL, LA BRANCHER L'EST : cette entrée reste `à-coudre` jusqu'à ce que la " +
+      "racine l'appelle, et elle rougira le jour où un constructeur la câblera sans le dire. " +
+      "⚠️ LA MESURE DE FOND EST DÉLÉGUÉE, et elle porte sur ce que l'émetteur REFUSE — " +
+      "`ops:policy` à l'octroi, un principal que le journal refuserait, un défi `plain`, une " +
+      "audience absente/multiple/étrangère, un code rejoué, un refresh rejoué — et sur ce " +
+      "qu'il PROPAGE : la session suit l'OCTROI, pas le `jti`.",
+  },
+  {
+    adr: "0027",
+    decision:
+      "§ 19, RÈGLE ABSOLUE — le socle ne démarre pas si l'authentification n'est pas " +
+      "configurée : ni mode dégradé, ni bascule de contournement, et la FORME de l'audience " +
+      "est confrontée en même temps que sa présence.",
+    etat: "cousue",
+    symbole: "verifierLaConfigurationDAuthentification",
+    genre: "fonction",
+    module: "core/auth/configuration.ts",
+    mesureeAilleurs: "core/auth/configuration.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `ops/main.ts`, à l'étage 3, sur les quatre réglages " +
+      "que `reglagesDepuisLEnvironnement` extrait de l'environnement — liste DÉRIVÉE de " +
+      "`REGLAGES_DAUTHENTIFICATION`, jamais recopiée. ⚠️ LA DETTE S'EST RAPPELÉE PAR TROIS " +
+      "BOUTS À LA FOIS, ET C'EST CE QU'ON VOULAIT D'ELLE : cette entrée, le cliquet " +
+      "`ETAGES_EN_ATTENTE_DE_LEUR_CONSTRUCTEUR` et `DECIDEURS_NON_APPELES_DIRECTEMENT` ont dû " +
+      "être vidés du même geste, et la garde de couverture des étages rougissait tant que l'un " +
+      "des trois restait. ⚠️ LE PORT `controlerLAuthentification` N'A PAS DISPARU, et son " +
+      "défaut est `null` : un verdict qui confronte ZÉRO réglage doit rester FABRICABLE — " +
+      "c'est le contrôle aveugle, et aucun environnement ne le produit. DÉBRANCHÉ, " +
+      "`ops/main.spec.ts` › « AUCUNE authentification » rougit (un socle démarrerait sur un " +
+      "environnement vide) et « une audience PRÉSENTE mais mal formée » rougit sur les deux " +
+      "anomalies de forme que seul ce décideur voit.",
+  },
+  {
+    adr: "0027",
+    decision:
+      "MOITIÉ « TABLE » — `ops_token` gagne `grantId` et `sessionId`, avec leur " +
+      "migration ET leur lecteur dans le même geste.",
+    etat: "hors-code",
+    motif:
+      "⚠️ CETTE MOITIÉ NE PRODUIT AUCUN SYMBOLE DE CE DÉPÔT : elle porte sur `model OpsToken` " +
+      "de `prisma/schema.prisma`. ✅ LES DEUX COLONNES ONT ATTERRI AU LOT 2, AVEC LEUR LECTEUR " +
+      "DANS LE MÊME GESTE — `grantId` et `sessionId` sont écrites par `core/auth/octroi.ts` et " +
+      "relues par `DepotDeJetons` (`core/auth/depot.ts`). L'entrée reste `hors-code` parce que " +
+      "sa décision porte sur une TABLE, mais elle n'est plus une dette : la garde " +
+      "`core/auth/schema.spec.ts` confronte désormais colonne à champ dans les deux sens, si " +
+      "bien qu'une colonne sans lecteur — la seconde source de vérité que le lot 1d a refusée " +
+      "pour `governanceFields` — ne peut plus s'installer en silence. ⚠️ CE QUI RESTE OUVERT, " +
+      "ET QUI N'EST PAS DE CE DÉPÔT : aucune migration n'a été lancée, aucune base ne tourne. " +
+      "Le schéma dit ce que la table DEVRA être, jamais ce qu'elle EST.",
+  },
+
+  // ── ADR 0028 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0028",
+    decision:
+      "La SOURCE de la garde d'accès est l'ensemble des chemins que le code SERT ; " +
+      "`core/auth/` en déclare sa moitié, famille par famille, avec qui l'appelle.",
+    etat: "à-coudre",
+    symbole: "CHEMINS_SERVIS_PAR_L_EMETTEUR",
+    genre: "constante",
+    module: "core/auth/routes.ts",
+    mesureeAilleurs: "core/auth/routes.spec.ts",
+    motif:
+      "0 lecteur de production mesuré, ET C'EST LA VALEUR ATTENDUE : cette constante existe " +
+      "pour être lue par une GARDE, pas par un module — `ops/acces/politique-de-chemins.ts` " +
+      "écrit que sa garde « dérive des chemins que le socle SERT, lus dans `core/transport/` et " +
+      "`core/auth/` », et une garde ne shippe pas. ⚠️ LE SENS DE LECTURE EST LA DÉCISION : une " +
+      "garde qui relirait `POLITIQUE_DE_CHEMINS` serait verte le jour où un chemin neuf est " +
+      "servi sans y être déclaré — le seul jour où elle aurait quelque chose à dire. ⚠️ ET LA " +
+      "BORNE, ÉCRITE AVEC LA MESURE : cette confrontation dit que le dépôt est cohérent avec " +
+      "lui-même. Elle ne dit RIEN de la porte posée chez Cloudflare, et aucune garde de ce " +
+      "dépôt ne le peut — il n'y a aucun appel réseau sortant, par règle.",
+  },
+  {
+    adr: "0028",
+    decision:
+      "La politique d'accès chemin par chemin est une CONFIGURATION VERSIONNÉE du " +
+      "dépôt ; la coupure passe à l'intérieur des routes d'authentification, entre l'humain et la machine.",
+    etat: "à-coudre",
+    symbole: "EntreeDePolitiqueDAcces",
+    genre: "type",
+    module: "ops/acces/politique-de-chemins.ts",
+    mesureeAilleurs: null,
+    motif:
+      "0 appelant de production mesuré : la garde de cohérence appartient au constructeur du " +
+      "lot 2. ⚠️ ET LE COMPTE D'APPELANTS NE SERA JAMAIS LA MESURE DE FOND, il faut l'écrire " +
+      "ici : cette configuration ne prouve PAS que la porte est posée chez Cloudflare, et " +
+      "aucune garde de ce dépôt ne le peut — il n'y a aucun appel réseau sortant, par règle. " +
+      "Ce qu'une garde peut tenir est la cohérence entre les chemins SERVIS par le code et les " +
+      "régimes déclarés, en lisant les premiers comme source. Lire cette entrée comme « le " +
+      "risque est couvert » serait raisonner sur une fausse sécurité.",
+  },
+
+  // ── ADR 0029 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0029",
+    decision:
+      "Le `principal` est borné À LA SOURCE par l'émetteur ; un principal malformé " +
+      "REFUSE l'appel (étape 4), là où un nom d'outil malformé est seulement BORNÉ (étape 6).",
+    etat: "cousue",
+    symbole: "PrincipalEmis",
+    genre: "type",
+    module: "core/auth/contrat.ts",
+    mesureeAilleurs: "core/epreuve/lot1d-canaux-du-contexte.temoin.spec.ts",
+    motif:
+      "✅ COUSUE AU LOT 2. 2 importateurs de production mesurés : `core/auth/principal.ts` (qui " +
+      "le FABRIQUE) et `core/auth/octroi.ts` (qui le REÇOIT). ⚠️ CETTE ENTRÉE PORTE LA MOITIÉ " +
+      "« SOURCE » DU DÉFAUT BLOQUANT DU LOT 1d, ET ELLE NE PORTE QUE CELLE-LÀ : la moitié " +
+      "« borne » a atterri du même lot, sous `bornerIdentifiantDuJournal`, avec sa propre " +
+      "entrée. ⚠️ ET LE COMPTE D'IMPORTATEURS N'EST PAS LA MESURE DE FOND — un compte ne dit " +
+      "rien d'une ligne perdue. La mesure déléguée est le témoin de perte de ligne du lot 1d, " +
+      "qui SAIT rougir. ⚠️ CE QUE LE TYPE TIENT, ET CE QU'IL NE TIENT PAS : sa marque est un " +
+      "`unique symbol` NON exporté, donc aucun littéral n'est assignable ; reste la conversion " +
+      "forcée, qu'une garde de texte compte dans `core/auth/emetteur.temoin.spec.ts` en " +
+      "écrivant qu'elle ne prouve que l'absence de la FORME ÉCRITE.",
+  },
+  {
+    adr: "0029",
+    decision:
+      "L'émetteur REFUSE d'émettre un jeton dont le principal ne passerait pas la " +
+      "forme du journal — borner à la source, c'est borner ce qui ENTRE.",
+    etat: "cousue",
+    symbole: "admettreUnPrincipal",
+    genre: "fonction",
+    module: "core/auth/principal.ts",
+    mesureeAilleurs: "core/auth/principal.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/auth/octroi.ts`, deux fois — à la préparation " +
+      "de l'autorisation ET à l'échange du code. ⚠️ LA SECONDE CONFRONTATION EST DÉLIBÉRÉE, " +
+      "ALORS QU'UNE CONVERSION FORCÉE AURAIT SUFFI : elle aurait ouvert un SECOND site de " +
+      "fabrication de `PrincipalEmis` hors du module propriétaire, c'est-à-dire retiré à la " +
+      "garde de texte le seul motif qu'elle sache chercher. Le coût est une confrontation de " +
+      "plus sur une chaîne courte ; le bénéfice est qu'il n'existe qu'UN chemin. ⚠️ ET LA " +
+      "RÈGLE N'EST PAS RÉÉCRITE : `estIdentifiantDeJournal()` EST celle du § 31, et la borne " +
+      "vient de `bornesDIdentifiantDuJournal()`. La garde mesure la MÊME borne par une AUTRE " +
+      "porte — une dichotomie sur `verifierAucunContenu()` — et exige que les deux concordent.",
+  },
+  {
+    adr: "0029",
+    decision:
+      "La borne de `principal` et de `tool` DÉRIVE de `FORMES` (§ 31) et n'est jamais " +
+      "réécrite ; la FAMILLE des colonnes d'identifiant est ÉNUMÉRABLE, pour qu'un troisième " +
+      "champ ne soit pas oublié comme `principal` l'a été.",
+    etat: "à-coudre",
+    symbole: "bornerIdentifiantDuJournal",
+    genre: "fonction",
+    module: "core/audit/contenu.ts",
+    mesureeAilleurs: "core/audit/contenu.temoin.spec.ts",
+    motif:
+      "0 appelant de production mesuré : ses deux appelants sont l'étape 4 " +
+      "(`core/transport/http.ts`) et l'étape 6 (`core/chaine/etape-06-outil.ts`), qui " +
+      "appartiennent à d'autres constructeurs du lot 2. ⚠️ C'EST LA MOITIÉ « BORNE » DU " +
+      "DÉFAUT BLOQUANT DU LOT 1d, et l'entrée voisine porte la moitié « SOURCE » " +
+      "(`PrincipalEmis`) : le lot 1d avait écrit que cette moitié-ci « n'a pas de symbole " +
+      "aujourd'hui » — elle en a un. ⚠️ LA MESURE QUI FAIT FOI RESTE LE TÉMOIN DE PERTE " +
+      "DE LIGNE (section N3 de `core/epreuve/lot1d-canaux-du-contexte.temoin.spec.ts`, en " +
+      "`it.fails`) : un compte d'appelants ne dirait rien d'une ligne perdue, et cette " +
+      "fonction ne referme rien tant que personne ne l'APPELLE — écrire la fonction n'est " +
+      "pas le travail, la BRANCHER l'est. ⚠️ LA FAMILLE " +
+      "(`CHAMPS_IDENTIFIANTS_DU_JOURNAL`) est dérivée du GENRE déclaré dans `FORMES` : cinq " +
+      "colonnes aujourd'hui, et le témoin annonce ce cardinal à chaque exécution.",
+  },
+  {
+    adr: "0029",
+    decision:
+      "MOITIÉ « ÉTAPE 4 » — un `principal` malformé REFUSE l'appel, et la borne n'est " +
+      "pas réécrite : elle est demandée à la garde du § 31 qui refuserait la ligne.",
+    etat: "cousue",
+    symbole: "verifierLaFormeDuPrincipal",
+    genre: "fonction",
+    module: "core/transport/http/principal.ts",
+    mesureeAilleurs: "core/transport/http/principal.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/http/amont.ts`, à l'étape 4 — là où " +
+      "`ops_token` est relue, donc là où le principal est LU, donc là où il se juge. ⚠️ CETTE " +
+      "ENTRÉE PORTE LA MOITIÉ « REFUS », L'ENTRÉE VOISINE PORTE LA MOITIÉ « SOURCE ». Les deux " +
+      "sont nécessaires : borner à l'émission empêche d'écrire un principal fautif, refuser à " +
+      "l'étape 4 empêche qu'un jeton émis avant la borne — ou par un émetteur qui l'aurait " +
+      "perdue — fasse perdre une ligne d'`ops_audit`. ⚠️ ET LA BORNE N'EST PAS RECOPIÉE : la " +
+      "sonde SOUMET une ligne témoin à `verifierAucunContenu()` elle-même, si bien qu'un " +
+      "changement de `FORMES.principal` la suit sans qu'une ligne bouge. Un témoin de capacité " +
+      "APPARIÉ, sur `PRINCIPAL_STDIO`, tourne à chaque appel : sans lui, « zéro anomalie » se " +
+      "lirait « ce principal est bon » quand la lecture juste serait « cette sonde ne trouve " +
+      "plus rien », et le verdict est fail-closed sur ce cas.",
+  },
+
+  // ── ADR 0030 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0030",
+    decision:
+      "Une étape rend le code de sa CAUSE quand elle en connaît un ; l'ancrage " +
+      "`APPEL_STEPS[n].refus` n'en est que le DÉFAUT. `stepDenied`, lui, vient toujours de l'ancrage.",
+    etat: "hors-code",
+    motif:
+      "⚠️ AUCUN SYMBOLE NEUF : la décision se pose dans `refuser()` et dans le `case 13:` de " +
+      "`core/chaine/orchestrateur.ts`, sur des symboles qui existent déjà et qui appartiennent " +
+      "à d'autres entrées. L'inscrire quand même est délibéré : la question avait DÉJÀ été " +
+      "tranchée une fois dans l'autre sens, et une décision rouverte sans trace est une " +
+      "décision qui se refermera toute seule. ⚠️ LE FAUX CORRECTIF À REFUSER EST NOMMÉ DANS " +
+      "L'ADR : remplacer un code unique par un autre code unique. La garde doit exiger AU " +
+      "MOINS deux codes distincts ET que `conflict` reste celui des trois causes qui le " +
+      "méritent.",
+  },
+  {
+    adr: "0030",
+    decision:
+      "LE CAS LIMITE DE LA MÊME RÈGLE — les quatre étapes « HTTP seul » ont un " +
+      "ancrage à `refus: null` ; le défaut étant VIDE, c'est l'étape qui nomme son code, et l'ancrage garde la priorité s'il en gagne un.",
+    etat: "cousue",
+    symbole: "codeDuRefusAmont",
+    genre: "fonction",
+    module: "core/transport/http/codes.ts",
+    mesureeAilleurs: "core/transport/http/amont.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/http/amont.ts`, dans le `refuser()` local " +
+      "de `franchirLAmont`. ⚠️ LE MODULE EST SÉPARÉ D'`amont.ts` POUR QUE LA COUTURE SOIT " +
+      "MESURABLE : le registre ne compte jamais un définisseur comme son propre appelant, si bien " +
+      "qu'écrite dans `amont.ts` cette fonction annonçait « 0 appelant » tout en décidant de " +
+      "chaque code de refus amont — indistinguable d'une décision débranchée. ⚠️ ENTRÉE " +
+      "SÉPARÉE DE LA PRÉCÉDENTE PARCE QUE LE SENS DE LA PRIORITÉ Y EST INVERSE, ET QUE C'EST " +
+      "PRÉCISÉMENT CE QUI PEUT SE PERDRE : à l'étape 13, l'ADR 0030 fait rendre à l'étape un " +
+      "code AUTRE que celui de l'ancrage ; ici l'ancrage n'en porte AUCUN, et la fonction " +
+      "vérifie d'abord `APPEL_STEPS[n].refus` — si le § 11 finit par donner un code à ces " +
+      "étapes, c'est LUI qui fait foi et la table locale meurt sans qu'une ligne bouge. " +
+      "L'inverse — une table locale qui écraserait l'ancrage — serait le défaut du lot 1d " +
+      "refait à l'envers. ⚠️ ÉCART PORTÉ PAR CETTE ENTRÉE : l'étape 1 rend `null`, parce que le " +
+      "§ 15 n'énumère aucun code pour un `Host` refusé et que nommer un code hors tableau " +
+      "appartient à `ops/codes-hors-tableau.ts`. La conséquence est écrite : un refus d'étape 1 " +
+      "ne porte que le statut `403`, et un client qui trie sur le code ne le voit pas.",
+  },
+
+  // ── ADR 0033 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0033",
+    decision:
+      "Chaque réponse HTTP est RELUE avant d'être expédiée, et confrontée aux valeurs " +
+      "sensibles de la requête qui l'a produite ; une fuite REMPLACE la réponse par un `internal` nu.",
+    etat: "cousue",
+    symbole: "verifierAucuneFuite",
+    genre: "fonction",
+    module: "core/transport/http/reponse.ts",
+    mesureeAilleurs: "core/transport/http/transport.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/http/transport.ts`, sur le chemin de " +
+      "scellement par lequel passe TOUTE réponse — succès compris. ⚠️ LE COMPTE D'APPELANTS NE " +
+      "MESURE PAS LA DÉCISION, ET IL FAUT L'ÉCRIRE : un filet qui aurait confronté ZÉRO valeur " +
+      "serait vert pour la pire des raisons. Ce qui fait foi est `VerdictDeFuite`, qui annonce " +
+      "les valeurs confrontées ET celles écartées comme trop courtes — la borne est ainsi lue, " +
+      "et non seulement écrite. ⚠️ LE NOM D'OUTIL EST EXCLU DE LA CONFRONTATION, DÉLIBÉRÉMENT : " +
+      "le § 15 exige que `tool_disabled` « dise qu'il existe, et où l'activer ». Un témoin de " +
+      "NON-régression le vérifie, sans quoi la garde dériverait vers le refus du comportement " +
+      "prescrit — et le remède qu'on chercherait à cette fausse alerte serait de la désactiver.",
+  },
+
+  // ── ADR 0031 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0031",
+    decision:
+      "L'inventaire des canaux que L'APPELANT choisit — `AppelEntrant` — est tenu par " +
+      "le compilateur, comme celui du `ctx`.",
+    etat: "à-coudre",
+    symbole: "STATUT_DES_CANAUX_D_APPEL",
+    genre: "constante",
+    module: "core/types.ts",
+    mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    motif:
+      "0 appelant de production MESURÉ, et c'est ici l'état DÉFINITIF, non une dette — " +
+      "même lecture que `STATUT_DES_CANAUX_DE_CONTEXTE` sous l'ADR 0020 : c'est une DONNÉE " +
+      "typée dont le seul lecteur légitime est une garde. ⚠️ SA TOTALITÉ NE DÉPEND " +
+      "D'AUCUN APPELANT : `Readonly<Record<keyof AppelEntrant, StatutDeCanal>>` fait qu'un " +
+      "champ ajouté à l'enveloppe d'appel sans être classé est une erreur de COMPILATION. " +
+      "⚠️ L'ENTRÉE ÉTAIT `hors-code` À L'ARCHITECTURE, ET SON MOTIF DISAIT POURQUOI : " +
+      "nommer un symbole avant de l'écrire est le défaut que le cliquet du lot 1d compte et " +
+      "refuse. Le symbole est écrit, l'entrée le nomme. Mesuré : « 11 champs de SOURCE " +
+      "confrontés · 11 classés par LEUR PROPRE inventaire · 0 par HOMONYMIE · 0 par RIEN ».",
+  },
+  {
+    adr: "0031",
+    decision:
+      "L'inventaire des canaux de l'IDENTITÉ — `IdentiteAppelante` — fait cesser la " +
+      "couverture par HOMONYMIE, et ses homonymes sont CONFRONTÉS plutôt que comptés.",
+    etat: "à-coudre",
+    symbole: "STATUT_DES_CANAUX_D_IDENTITE",
+    genre: "constante",
+    module: "core/types.ts",
+    mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    motif:
+      "0 appelant de production MESURÉ, état DÉFINITIF — même lecture que ci-dessus. " +
+      "⚠️ ENTRÉE SÉPARÉE DE SA JUMELLE, ET LE MODE DE DÉFAILLANCE EST AUTRE : les six " +
+      "champs de ce type portaient les MÊMES NOMS que six champs du `ctx` et PARAISSAIENT " +
+      "classés. Le jour où l'un des deux types en gagne un que l'autre n'a pas, la " +
+      "coïncidence cesse et RIEN ne le dit — une garde qui rétrécit sans changer de " +
+      "couleur. Avec une entrée unique, poser le seul record d'`AppelEntrant` aurait rendu " +
+      "l'ADR `cousue` en laissant l'homonymie intacte.",
+  },
+  {
+    adr: "0031",
+    decision:
+      "`StatutDeCanal` porte DEUX destinations : le régime vers l'adaptateur, et " +
+      "`versLeJournal` vers `ops_audit` — où `verbatim` est une ANOMALIE, jamais un état toléré.",
+    etat: "à-coudre",
+    symbole: "VersLeJournal",
+    genre: "type",
+    module: "core/types.ts",
+    mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    motif:
+      "0 importateur de production MESURÉ, état DÉFINITIF : c'est la forme d'une donnée de " +
+      "garde. ⚠️ TROISIÈME ENTRÉE, PARCE QU'UN QUATRIÈME RÉGIME AURAIT ÉTÉ LA MAUVAISE " +
+      "RÉPONSE : un même champ peut être FERMÉ vers une destination et OUVERT vers l'autre " +
+      "— `nomComplet` est confronté au catalogue côté adaptateur et VERBATIM côté journal. " +
+      "⚠️ LE VARIANT `borné-par` PORTE UN CHAMP `borne` OBLIGATOIRE : une borne qu'on ne " +
+      "peut pas nommer est une borne qu'on croit avoir, et le compilateur refuse ici de la " +
+      "laisser implicite. ⚠️ LA GARDE TIENT UN CLIQUET DATÉ des `verbatim` — trois " +
+      "aujourd'hui (`ToolContext.principal`, `AppelEntrant.nomComplet`, " +
+      "`IdentiteAppelante.principal`), qui sont le défaut BLOQUANT du lot 1d : un quatrième " +
+      "rougit, et le jour où l'un des trois se referme la garde rougit AUSSI, pour qu'on " +
+      "revienne resserrer le cliquet.",
+  },
+
+  // ── ADR 0032 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0032",
+    decision:
+      "Le fil stdio est cadré ligne par ligne, la borne du tampon RESYNCHRONISE, et " +
+      "un lot JSON-RPC est refusé plutôt que servi à moitié.",
+    etat: "cousue",
+    symbole: "creerDecoupeur",
+    genre: "fonction",
+    module: "core/transport/stdio/cadrage.ts",
+    mesureeAilleurs: "core/transport/stdio/cadrage.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/stdio/serveur.ts`, qui monte le " +
+      "découpeur au montage du démon et lui remet chaque morceau de flux. ⚠️ LE COMPTE " +
+      "D'APPELANTS NE MESURE PAS LA DÉCISION, et il faut l'écrire : ce que l'ADR 0032 tient " +
+      "est la RESYNCHRONISATION après un dépassement — vider le tampon sans elle laisserait " +
+      "la SUITE de la ligne trop longue être lue comme un début de message, c'est-à-dire " +
+      "faire analyser au socle un fragment choisi à l'octet près. La garde nommée en " +
+      "`mesureeAilleurs` porte cette mesure, avec son témoin (l'attaque elle-même) ET sa " +
+      "contre-épreuve (le même flux sous un plafond qui ne mord pas, où la charge EST " +
+      "analysée) — sans laquelle le vert ne serait pas attribuable à la borne.",
+  },
+  {
+    adr: "0032",
+    decision:
+      "Un refus de la chaîne est un RÉSULTAT JSON-RPC portant le NUMÉRO de l'étape, " +
+      "jamais une erreur de protocole.",
+    etat: "cousue",
+    symbole: "resultatRefuse",
+    genre: "fonction",
+    module: "core/transport/stdio/protocole.ts",
+    mesureeAilleurs: "core/transport/stdio/etapes-exercees.temoin.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/stdio/serveur.ts`, sur la seule " +
+      "branche `resultat.refus !== null`. ⚠️ CE QUI FAIT FOI EST LA MESURE APPARIÉE, PAS " +
+      "L'APPELANT : la garde nommée fait refuser les ONZE étapes applicables au transport " +
+      "par le FIL stdio, et exige pour chacune trois choses ensemble — une ligne d'`ops_audit` " +
+      "portant SON `stepDenied`, un `result.isError` portant le même rang, et AUCUN champ " +
+      "`error`. Un code JSON-RPC négatif ferait réessayer le TRANSPORT là où le § 15 veut " +
+      "qu'on corrige l'APPEL. ⚠️ ÉCART PORTÉ PAR CETTE ENTRÉE : la frontière laisse une " +
+      "enveloppe fautive SANS ligne d'`ops_audit` — aucun appel n'a été formé, et stdio n'a " +
+      "aucune étape 1 à 4 dont inscrire le numéro. C'est une asymétrie assumée avec HTTP.",
+  },
+  {
+    adr: "0032",
+    decision:
+      "Les paramètres de `tools/call` sont une liste FERMÉE : ce qui n'est pas nommé " +
+      "est REFUSÉ, jamais ignoré — une fermeture ne vieillit pas, une liste noire si.",
+    etat: "cousue",
+    symbole: "CLES_DE_PARAMETRES_DE_TOOLS_CALL",
+    genre: "constante",
+    module: "core/transport/stdio/protocole.ts",
+    mesureeAilleurs: "core/transport/stdio/serveur.spec.ts",
+    motif:
+      "1 lecteur de production mesuré : `core/transport/stdio/serveur.ts`, qui la nomme dans " +
+      "le message de refus — la liste rendue au client est celle de ce qui est ADMIS, jamais " +
+      "un écho de ce qu'il a envoyé (§ 20 : le jeton de confirmation voyage dans ces " +
+      "paramètres). ⚠️ LA GARDE NOMMÉE ÉPROUVE DES NOMS DÉRIVÉS DES CLÉS DE " +
+      "`STATUT_DES_CANAUX_DE_CONTEXTE`, et non une liste écrite : un champ ajouté au `ctx` " +
+      "entre dans l'épreuve sans qu'une ligne soit à retoucher. ⚠️ ET LE TÉMOIN INVERSE EST " +
+      "OBLIGATOIRE : les cinq clés admises soumises ensemble DOIVENT passer, sans quoi un " +
+      "transport qui refuse tout satisferait la garde. ⚠️ BORNE : la fermeture porte sur le " +
+      "PREMIER NIVEAU de `params` ; ce qui est caché sous `arguments` relève de l'étape 8 et " +
+      "du contrôle 7 du § 09.",
+  },
+  {
+    adr: "0032",
+    decision:
+      "Le transport ANNONCE les étapes du § 11 que ses appels ont réellement " +
+      "touchées, et confronte ce compte à sa colonne — en service, pas seulement en test.",
+    etat: "cousue",
+    symbole: "confronterLesEtapesExercees",
+    genre: "fonction",
+    module: "core/transport/stdio/etapes-exercees.ts",
+    mesureeAilleurs: "core/transport/stdio/etapes-exercees.temoin.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `core/transport/stdio/serveur.ts`, dans " +
+      "`rapportDeCouverture()` — l'écran Santé (§ 22) et le § 24 doivent pouvoir dire quelles " +
+      "gardes ont mordu depuis le démarrage, et une confrontation qui ne vivrait qu'en test " +
+      "l'aurait laissé invisible en service. ⚠️ ET CETTE MESURE NE SUFFIT PAS SEULE, C'EST LE " +
+      "PIÈGE DU LOT : un SEUL appel réussi franchit les onze étapes applicables, si bien que " +
+      "la couverture est verte au premier « bonjour » et qu'un transport n'ayant jamais fait " +
+      "refuser personne la satisferait. Elle mesure que la chaîne est PARCOURUE, jamais " +
+      "qu'elle DÉCIDE. C'est l'entrée `resultatRefuse` qui porte l'autre moitié. ⚠️ Un verdict " +
+      "rendu sur ZÉRO appel est une anomalie à part entière, sans quoi une liste d'étapes " +
+      "fabriquée à la main satisferait la garde sans qu'un appel ait traversé le socle.",
+  },
+  {
+    adr: "0032",
+    decision:
+      "L'attache aux flux standard SÉRIALISE les morceaux : deux appels porteurs de " +
+      "la même clé d'idempotence se croisent dans le DÉPÔT (étape 13), jamais dans le transport.",
+    etat: "cousue",
+    symbole: "brancherSurLesFlux",
+    genre: "fonction",
+    module: "core/transport/stdio/serveur.ts",
+    mesureeAilleurs: "core/transport/stdio/serveur.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `ops/service.ts`, dans `monterLeService()`, qui reçoit " +
+      "les flux de `ops/index.ts` et ne les nomme jamais lui-même. ⚠️ CETTE ENTRÉE A PORTÉ " +
+      "« 0 appelant » PENDANT UN LOT ENTIER, et c'est ce zéro écrit qui a rendu la dette " +
+      "trouvable à la recette : la fonction était écrite, éprouvée de bout en bout sur des " +
+      "doubles, et DÉBRANCHÉE de tout flux réel. Trois autres montages étaient dans le même " +
+      "état sans qu'AUCUNE entrée ne les compte — `creerServeurHttp`, `creerTransportHttp`, " +
+      "`creerServeurStdio` — et c'est cette asymétrie, plus que le zéro, qui a coûté le lot. " +
+      "⚠️ ET LE COMPTE D'APPELANTS NE MESURE PAS LA DÉCISION : ce que l'ADR 0032 tient est la " +
+      "SÉRIALISATION. La garde la mesure par un témoin qui ne peut pas être satisfait par " +
+      "hasard — un noyau dont les retards DÉCROISSENT (30, 20, 10 ms) : servi en parallèle, " +
+      "l'ordre des réponses serait 3, 2, 1 ; il doit être 1, 2, 3.",
+  },
+  {
+    adr: "0034",
+    decision:
+      "LE SOCLE A UN POINT D'ENTRÉE DE PROCESSUS, et c'est lui — et lui seul — qui " +
+      "monte les transports. `ops/main.ts` SÉQUENCE les sept étages ; `ops/service.ts` MONTE ; " +
+      "`ops/index.ts` lit l'environnement et relie les deux.",
+    etat: "cousue",
+    symbole: "monterLeService",
+    genre: "fonction",
+    module: "ops/service.ts",
+    mesureeAilleurs: "ops/service.spec.ts",
+    motif:
+      "1 appelant de production mesuré : `ops/index.ts`. C'est le geste qui ferme le manque " +
+      "du lot 2 — « les deux transports sont écrits, et rien ne les monte ». DÉBRANCHÉ, " +
+      "`ops/service.spec.ts` › « ouvre une socket sur la boucle locale et sert un `tools/call` " +
+      "de bout en bout » rougit : la garde lie réellement `127.0.0.1`, envoie une requête et " +
+      "lit un `result` — c'est la seule garde du dépôt qui mesure un OCTET QUI REVIENT.",
+  },
+  {
+    adr: "0034",
+    decision:
+      "§ 23 — `appelsDOutilsAcceptes` DÉCIDE, il ne se contente plus d'être publié : " +
+      "coffre verrouillé, aucun transport d'outils n'est monté.",
+    etat: "cousue",
+    symbole: "appelsDOutilsAcceptes",
+    genre: "membre",
+    module: "ops/demarrage.ts",
+    mesureeAilleurs: "ops/service.spec.ts",
+    motif:
+      "2 appelants de production mesurés : `ops/main.ts` (le healthcheck le republie) et " +
+      "`ops/service.ts` (le montage le LIT et refuse). ⚠️ AVANT CE LOT, IL AVAIT ZÉRO " +
+      "CONSOMMATEUR : calculé par `core/vault/demarrage.ts`, relayé par `ops/demarrage.ts`, " +
+      "republié par le healthcheck — et lu par PERSONNE. Le critère de recette du § 32 était " +
+      "donc éprouvé sur des ÉTIQUETTES (« `routesServies` contient la chaîne `console` ») et " +
+      "non sur un comportement : un périmètre d'observation transformé en garantie. " +
+      "DÉBRANCHÉ, `ops/service.spec.ts` › « coffre VERROUILLÉ — le socle vit, le healthcheck " +
+      "rend 200, et RIEN n'écoute » rougit sur `transportsMontes` et sur `serveurHttp`.",
   },
 ];
 

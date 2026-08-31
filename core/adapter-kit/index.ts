@@ -93,6 +93,7 @@ export {
   lireClesDAutorisation,
   proprietesDInterface,
   sansCommentaires,
+  sansCommentairesNiChaines,
 } from "./autorisation.js";
 export type { ClesDAutorisation } from "./autorisation.js";
 

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { sansCommentaires } from "../adapter-kit/autorisation.js";
+import { sansCommentaires, sansCommentairesNiChaines } from "../adapter-kit/autorisation.js";
 import {
   APPELANTS_DE_LA_RELECTURE,
   ErreurSessionIdNonSouverain,
@@ -651,6 +651,42 @@ function nu(fichier: FichierSource): string {
 }
 
 /**
+ * LES LITTÉRAUX DE CHAÎNE, BLANCHIS — **ET SEULEMENT POUR G3.**
+ *
+ * ⚠️ **POURQUOI CE SECOND NETTOYAGE N'EST PAS APPLIQUÉ À `nu()`.** G2 lit les
+ *    clauses d'`import`, dont le spécificateur EST une chaîne : blanchir les
+ *    chaînes dans `nu()` ferait rendre ZÉRO import au graphe, c'est-à-dire une
+ *    garde verte parce qu'elle ne regarde plus rien. Les deux nettoyages ont
+ *    donc deux clients, et un seul ajoute celui-ci.
+ *
+ * ⚠️ **CE QUE G3 A COÛTÉ SANS LUI.** Le motif de G3 est resté ROUGE sur
+ *    `core/types.ts` parce qu'un champ `motif:` NOMME la conversion forcée en
+ *    prose. Une garde de sûreté rouge pour une phrase s'apprend à ignorer, puis
+ *    se désactive : c'est ainsi qu'on perd un filet. Le témoin fabriqué « la
+ *    même forme dans une CHAÎNE » ci-dessous existe pour que ce trou ne se
+ *    rouvre pas en silence.
+ *
+ * ⚠️ **LE BALAYAGE EST CELUI DE `core/adapter-kit`, JAMAIS UNE SECONDE
+ *    ÉCRITURE.** Une expression régulière écrite ici aurait suffi à passer les
+ *    témoins et aurait été FAUSSE sur le dépôt : mesuré, une expression
+ *    ``/`…`/g`` apparie le backtick FERMANT d'un gabarit avec le backtick
+ *    OUVRANT du suivant et efface le code entre les deux. Deux dérivations d'un
+ *    même fait finissent par se contredire ; il n'y en a qu'une, et le témoin
+ *    « une conversion dans la SUBSTITUTION d'un gabarit » ci-dessous prouve
+ *    qu'elle ne cache pas de geste.
+ */
+const SANS_CHAINES = new WeakMap<FichierSource, string>();
+
+function nuNiChaines(fichier: FichierSource): string {
+  let stocke = SANS_CHAINES.get(fichier);
+  if (stocke === undefined) {
+    stocke = sansCommentairesNiChaines(fichier.source);
+    SANS_CHAINES.set(fichier, stocke);
+  }
+  return stocke;
+}
+
+/**
  * UN FICHIER EST-IL **LIVRÉ** ? Dérivé de l'`exclude` de `tsconfig.build.json`.
  *
  * ⚠️ C'EST LE BON CRITÈRE, ET « C'EST UN TEST » NE L'EST PAS. Ce qui rend une
@@ -1016,7 +1052,7 @@ function verifierConversionsForcees(fichiers: readonly FichierSource[]): Verdict
   let occurrences = 0;
 
   for (const fichier of candidats) {
-    const trouvees = [...nu(fichier).matchAll(MOTIF_CONVERSION_FORCEE)];
+    const trouvees = [...nuNiChaines(fichier).matchAll(MOTIF_CONVERSION_FORCEE)];
     if (trouvees.length === 0) continue;
     occurrences += trouvees.length;
     if (admis.has(fichier.chemin)) continue;
@@ -1057,6 +1093,30 @@ describe("G3 — aucune conversion forcée vers `SessionId` hors du module propr
         "un identifiant qui COMMENCE par SessionId — le motif est ancré à droite",
         { chemin: "core/audit/roles.ts", source: "const s = recu as SessionIdBrut;\n" },
         0,
+      ],
+      // ⚠️ **LE CINQUIÈME TÉMOIN, ET IL MANQUAIT.** G3 a passé un lot entière-
+      //    ment ROUGE sur `core/types.ts` parce qu'un champ `motif:` NOMME la
+      //    conversion forcée en prose. Le quatrième témoin couvrait le
+      //    COMMENTAIRE ; aucun ne couvrait la CHAÎNE. Sans celui-ci, la
+      //    correction serait invisible à la prochaine régression.
+      [
+        "la même forme dans une CHAÎNE — une PHRASE, pas un geste",
+        {
+          chemin: "core/types.ts",
+          source: `const motif = "as unknown as ${"SessionId"} reste écrivable";\n`,
+        },
+        0,
+      ],
+      // ⚠️ **ET LA CONTRE-ÉPREUVE, DANS LE MÊME MOUVEMENT.** Blanchir les
+      //    chaînes ne doit pas blanchir le CODE d'une substitution de gabarit :
+      //    une conversion écrite là est un geste, et elle doit rester vue.
+      [
+        "une conversion dans la SUBSTITUTION d'un gabarit — c'est du code",
+        {
+          chemin: "core/registry/verrou.ts",
+          source: "const s = `x${recu as unknown as SessionId}y`;\n",
+        },
+        1,
       ],
     ];
 

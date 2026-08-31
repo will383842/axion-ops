@@ -8,6 +8,88 @@ construction, de croisement et d'épreuve.
 > du jeton Coolify — ne sont pas posées. C'est la raison d'être de cette
 > retenue, pas une négligence.
 
+> ### ⚠️ 2026-09-01 — LOT 2, RECETTE : LE SOCLE DÉMARRE, ET IL RÉPOND — MAIS PAS ENCORE DEPUIS SON PROPRE PROCESSUS
+>
+> Le lot 2 a livré les deux transports, l'émetteur de jetons, la politique
+> d'accès chemin par chemin et la racine de composition. **Aucun module de
+> production ne montait quoi que ce soit.** Mesuré à l'ouverture de la recette,
+> sur les 128 modules émis par `pnpm build` : `creerServeurHttp` 0 appelant,
+> `creerTransportHttp` 0, `creerServeurStdio` 0, `brancherSurLesFlux` 0,
+> `demarrerLeSocle` 0 — et aucun point d'entrée exécutable dans le dépôt.
+>
+> **Le manque du lot 1d avait été remonté d'un étage, intact.**
+>
+> #### Ce que la recette a posé — ADR 0034
+>
+> | Fichier               | Rôle                                                                |
+> | --------------------- | ------------------------------------------------------------------- |
+> | `ops/index.ts`        | le point d'entrée du processus ; `bin` + garde `import.meta`/`argv` |
+> | `ops/service.ts`      | le montage des transports, et la liste NOMMÉE de ses empêchements   |
+> | `ops/service.spec.ts` | la seule garde qui mesure un **octet qui revient** — socket + fil   |
+>
+> #### CE QUE LE SOCLE FAIT QUAND ON LE LANCE — quatre exécutions réelles
+>
+> Toutes en local, sur `stub.invalid` (RFC 2606), valeurs factices, aucun appel
+> sortant :
+>
+> | Configuration                                     | Résultat mesuré                                                              |
+> | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+> | aucune                                            | 4 réglages refusés, **code 1**, aucun verrou pris, aucune socket ouverte     |
+> | réglages complets, base factice                   | **étage 2** — coffre absent —, **code 2**, message nommant la commande       |
+> | coffre local provisionné, aucune authentification | **étage 3**, **code 3**, « le § 19 pose une règle absolue »                  |
+> | tout, coffre local provisionné                    | **7 étages franchis**, healthcheck **200**, `vaultLocked: false`, **code 0** |
+>
+> #### 🔴 CE QUI RESTE OUVERT, ET C'EST LE CŒUR DU LOT SUIVANT
+>
+> **La chaîne des quatorze étapes n'est pas composée.** `ops/index.ts` remet
+> `noyau: null`, et `monterLeService` COMPTE l'empêchement au lieu de le taire :
+> le processus démarre, franchit ses sept étages, calcule son healthcheck — et
+> **ne monte AUCUN transport**, parce qu'un transport monté sur un noyau absent
+> servirait des appels qu'aucune ligne d'`ops_audit` n'atteste.
+>
+> Ce qui manque, nommément : un journal SCELLÉ par une clé du coffre (ADR 0002),
+> les dépôts de quota et d'idempotence, un catalogue épinglé, le câblage Prisma
+> du coffre et de `ops_token`. **Aucun n'existe en dehors des fabriques de
+> témoins.** Le montage, lui, est prouvé : `ops/service.spec.ts` monte les deux
+> transports sur un noyau RÉEL (`orchestrerAppel`, les cinq étapes, le vrai
+> journal chaîné), lie une socket sur `127.0.0.1`, obtient **200** sur un
+> `tools/call`, et sert **3 `tools/list` sur le fil stdio avec 0 levée**.
+>
+> #### Les quatre gardes cassées que la recette a réparées
+>
+> 1. **G3 (ADR 0014) était ROUGE sur une PHRASE** — le motif de `core/types.ts`
+>    nommait la conversion forcée en prose. Le nettoyage vit désormais dans un
+>    **seul** symbole partagé, et G3 a gagné le cinquième témoin qui manquait,
+>    plus un sixième en sens inverse (une conversion dans une substitution de
+>    gabarit est du CODE et doit rester vue).
+> 2. **La garde du raccordement de `demarrerPolitique` EXIGEAIT que le défaut
+>    subsiste** (`citationsEnProse.length >= 1`) : un cliquet à l'envers, qui
+>    aurait rougi le jour de la correction.
+> 3. **La garde de l'appelant unique du cliquet** disait « tout le code de
+>    production » et ne lisait que `core/` : douze modules livrés de `ops/` hors
+>    champ, cinq fichiers non livrés comptés dedans.
+> 4. **La garde du critère du lot se fabriquait son propre vert** —
+>    `reglagesConfrontes: 5` contre 4 réellement confrontés par le décideur.
+>
+> #### La mesure, à la fin de la recette
+>
+> - **Quatre gates vertes** : `typecheck`, `lint`, `format:check`, `test`.
+> - **1 418 tests verts, 0 rouge** — contre 1 409 verts et **9 ROUGES** à
+>   l'ouverture.
+> - **24 `it.fails`** — contre 28 : **quatre dettes fermées**, toutes par le
+>   point d'entrée.
+> - **Registre des coutures : 52 symboles cousus sur 67 confrontés** (48/65 à
+>   l'ouverture), 0 anomalie, 30 ADR couverts.
+> - **0 fichier de garde sans compte annoncé, sur 124.**
+> - 260 fichiers TypeScript, **130 émis** par `pnpm build`.
+>
+> #### Les cinq témoins des coutures neuves — posés, rougis, restaurés
+>
+> `brancherSurLesFlux` débranché · l'étage 3 qui n'appelle plus le décideur du
+> § 19 · `monterLeService` qui ignore `appelsDOutilsAcceptes` · `ops/index.ts`
+> qui n'appelle plus `monterLeService` · `creerServeurHttp` débranché. **Cinq
+> mutilations, cinq rouges, zéro manquée.**
+
 > ### ⚠️ 2026-08-31 — LOT 1d : CE DOCUMENT DATE DE LA FIN DU LOT 1, ET LE LOT 1d L'A DÉPASSÉ
 >
 > Le **lot 1d** a cousu quatre décisions au chemin de production et posé le
@@ -241,18 +323,29 @@ chacun exportant sa constante d'étape comme `ETAPE_POLITIQUE` et
 
 ⛔ **Arbitrage Will : ces cinq modules sont-ils le lot 2 ?**
 
-### 3.2 · La racine de composition n'existe pas — `it.todo` n° 2
+### 3.2 · ✅ La racine de composition existe (lot 2) — `it.todo` n° 2 FERMÉ
 
-`core/epreuve/politique-chemins-de-panne.spec.ts` → « est appelée par l'entrée
-du conteneur ».
+`core/epreuve/politique-chemins-de-panne.spec.ts` → l'attente « est appelée par
+l'entrée du conteneur » est passée de `it.todo` à `it()`. Elle mesure désormais
+`ops/main.ts` parmi les appelants de production de `demarrerPolitique`, et elle
+annonce du même geste les **deux bornes** de la garde qui la porte : les
+fichiers écartés par le suffixe `demarrage.ts`, et les citations en prose
+comptées comme des appels.
 
-Il n'y a **ni serveur HTTP, ni transport stdio, ni point d'entrée**. Trois
-conséquences mesurées :
+`ops/main.ts` parcourt l'échelle de sept étages d'`ops/demarrage/etages.ts`
+(ADR 0023) ; l'arbitrage vit dans `ops/demarrage.ts` et il est PUR.
 
-1. `demarrerPolitique()` (protection 4 du § 20) existe et fonctionne, mais
-   **rien ne l'appelle**. Tant que l'entrée du conteneur ne l'exécute pas au
-   démarrage, un socle qui redémarre pendant un desserrage reprend au dernier
-   niveau connu — ce que le § 20 interdit nommément.
+1. ✅ `demarrerPolitique()` (protection 4 du § 20) est appelée à l'étage 4. Un
+   socle qui redémarre pendant un desserrage de douze heures **referme** :
+   `ops/main.spec.ts` (⑤) le mesure avec son témoin de contraste — la lecture
+   seule rend `libre`, la racine rend `brouillon`.
+   ⛔ **CE QUI RESTE** : l'étage 3 (authentification) n'a **pas d'exécutant**.
+   Son décideur `verifierLaConfigurationDAuthentification` n'est écrit nulle
+   part, et tant qu'aucun contrôle n'est fourni **le processus sort** (§ 19,
+   règle absolue — pas de mode dégradé). Le cliquet daté
+   `ETAGES_EN_ATTENTE_DE_LEUR_CONSTRUCTEUR` le porte et rougit dans les deux
+   sens. Aucun point d'entrée de processus (`process.exit`) n'est donc posé : il
+   sortirait toujours en 3, et une entrée qui échoue toujours est une mine.
 2. `PROFILE_NAMES` n'est passé à `creerAdapterKit()` ni à
    `enregistrerAdaptateur()` par aucun appel de production. La « seule garde du
    budget qui ne dépende d'aucun adaptateur » (§ 14) est déclarée, armée nulle

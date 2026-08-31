@@ -253,6 +253,34 @@ model OpsTool {
   /// la colonne est une liste de chaînes, et le registre valide à l'écriture.
   profiles String[]
 
+  /// § 09 / ADR 0016, point 2 — LES CHAMPS D'ENTRÉE QUE L'OUTIL DÉCLARE DE
+  /// GOUVERNANCE. C'est le DERNIER TRONÇON d'une propagation qui existait partout
+  /// ailleurs : `ChampsDeGouvernanceDeclares` (core/adapter-kit/types.ts) →
+  /// manifeste → `OutilDuCatalogue` (core/chaine/etapes.ts) → orchestrateur →
+  /// `cumulerChampsDeGouvernance()` à l'étape 11. La déclaration voyageait donc
+  /// PAR LE TYPE, et la couture était complète sur tout le chemin qui EXISTE —
+  /// mais elle n'aurait pas survécu au premier catalogue réel, où `OutilDuCatalogue`
+  /// se lit dans cette table.
+  ///
+  /// ⚠️ UNE DÉCLARATION NE PEUT QU'AJOUTER — C'EST L'EXACT INVERSE D'`idFields`.
+  ///    Le filet au nom (`FAMILLES_GOUVERNANCE`) RESTE, et l'étape 11 prend
+  ///    l'UNION des deux. Un outil ne peut donc pas se retirer de la surveillance
+  ///    en déclarant une liste courte : ce que sa liste omet, le filet le retient.
+  ///    C'est la seule raison pour laquelle cette colonne est CRUE, là où `idFields`
+  ///    ne l'est plus (ADR 0015) — « resserrer est toujours libre, desserrer ne
+  ///    l'est jamais » (§ 20, protection 1).
+  ///
+  /// ⚠️ VALEUR NEUTRE = LISTE VIDE, et elle porte un nom côté code
+  ///    (`AUCUN_CHAMP_DE_GOUVERNANCE`). Pas de `?` ici : un outil qui ne déclare
+  ///    rien doit l'ÉCRIRE. Une colonne nullable aurait fait de l'arbitrage un
+  ///    oubli, et seul ce qui est écrit se relit en revue.
+  ///
+  /// ⚠️ MESURE, PAS CRAINTE : l'épreuve du lot 1b a compté 9 noms sur 20 qui
+  ///    échappaient au filet (`emailTo`, `envoyerA`, `validUntil`, `scheduledFor`…),
+  ///    et le § 20 fait de cette branche la seule qu'aucune confirmation ne
+  ///    rattrape.
+  governanceFields String[]
+
   /// Bascule de console, SANS redéploiement. § 14, correction 3 : la valeur
   /// mesurée en CI n'est jamais celle qui est servie — le plafond de 40 outils
   /// se refuse à l'ÉTAPE 7, pas seulement en CI.
@@ -551,15 +579,34 @@ model OpsDiscovery {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// § 12 — SANS ELLE, « RÉVOQUE LES JETONS DU SOCLE » N'A AUCUN OBJET.
-/// § 19.1 — access token 1 h, refresh 30 j ROTATIF. Seule une EMPREINTE SALÉE
-/// est conservée ; le jeton ne s'affiche en clair QU'UNE FOIS.
+/// § 19.1 — access token 1 h, refresh 30 j ROTATIF. Le jeton ne s'affiche en
+/// clair QU'UNE FOIS.
 ///
 /// § 11, étape 4 — `jti` non révoqué. C'est cette table que l'étape interroge.
+///
+/// ⚠️ ÉCRITE PAR `core/auth/octroi.ts` (l'émetteur), RELUE À L'ÉTAPE 4 par le
+/// transport. Le port qui décrit ces colonnes côté code est
+/// `core/auth/depot.ts` (`LigneOpsToken`), et `core/auth/schema.spec.ts`
+/// confronte les deux — une colonne qui n'aurait pas de champ, ou l'inverse,
+/// fabriquerait la seconde source de vérité que le lot 1d a refusée.
 model OpsToken {
   /// `jti` de la RFC 7519. Clé primaire : c'est ce que le jeton présente.
   jti String @id
 
-  /// Empreinte SHA-256 SALÉE du jeton. Le jeton en clair n'est jamais stocké.
+  /// L'EMPREINTE du jeton. Le jeton en clair n'est jamais stocké.
+  ///
+  /// ⚠️ CORRIGÉ AU LOT 2 — ADR 0027, point 7 : c'est un **HMAC-SHA-256 clé par le
+  /// coffre**, avec séparation de domaine par GENRE, et non un SHA « salé ».
+  /// Un sel par ligne ne protège pas un extrait de base — il vit dans la même
+  /// ligne que l'empreinte. La règle 2 du § 12 avait déjà tranché le cas jumeau
+  /// pour `argHash` ; `tokenHash` suit la même règle, fail-loud si la clé manque.
+  ///
+  /// ⚠️ CONSÉQUENCE ASSUMÉE : sous coffre VERROUILLÉ, `/auth/token` ne répond pas.
+  /// C'est cohérent avec le § 23 — l'émission ne sert que `/api/mcp`, qui refuse
+  /// tout de toute façon (étape 0, `vault_locked`) — et c'est ce qui explique
+  /// l'asymétrie du § 21 : le matériel d'authentification de la CONSOLE, lui,
+  /// n'entre jamais dans le coffre, sans quoi le déverrouillage serait
+  /// inatteignable.
   tokenHash String @unique
 
   /// À qui le jeton a été délivré. Ajouté par la Fondation : sans lui,
@@ -576,9 +623,55 @@ model OpsToken {
   scopes String[]
 
   /// RFC 8707, indicateur de ressource. L'étape 3 le compare.
-  /// § 19.1 : l'identifiant de ressource qui sert d'audience se décide et
-  /// s'écrit AVANT le lot 1 — l'étape 3 n'a aucun sens sans lui.
+  ///
+  /// ✅ DÉCIDÉ AU LOT 2 — ADR 0026 : c'est l'URL ABSOLUE de la ressource MCP,
+  /// cinq contraintes de forme, et une comparaison par ÉGALITÉ EXACTE.
+  ///
+  /// ⚠️ ELLE N'EST JAMAIS RÉÉCRITE. Une audience corrigée après coup effacerait
+  /// la seule trace de ce POUR QUOI le jeton avait été émis. Changer le domaine
+  /// du socle invalide donc tous les jetons en circulation à l'étape 3 : c'est
+  /// le comportement voulu, et le remède est de réémettre, pas d'assouplir.
   audience String
+
+  /// ⚠️ COLONNE AJOUTÉE AU LOT 2 — ADR 0027, point 4.
+  ///
+  /// L'identifiant de la CHAÎNE DE RAFRAÎCHISSEMENT, c'est-à-dire d'un
+  /// consentement humain. IL NE TOURNE JAMAIS, quand `jti` tourne au moins
+  /// toutes les heures (§ 19.1).
+  ///
+  /// C'est lui qui rend exécutable l'ADR 0027, point 3 : « un refresh déjà
+  /// révoqué qui se représente RÉVOQUE TOUTE LA CHAÎNE D'OCTROI ». Sans une clé
+  /// portant la chaîne, cette révocation se serait écrite en boucle chez
+  /// l'appelant — et une boucle interrompue laisse une chaîne à demi révoquée,
+  /// c'est-à-dire un jeton volé encore valide.
+  ///
+  /// Lecteur, posé DU MÊME GESTE : `core/auth/depot.ts`
+  /// (`DepotDeJetons.revoquerLaChaine`, `listerLaChaine`), appelé par
+  /// `core/auth/octroi.ts`.
+  grantId String
+
+  /// ⚠️ COLONNE AJOUTÉE AU LOT 2 — ADR 0027, point 4, et ADR 0014.
+  ///
+  /// La SESSION DE PILOTAGE (§ 11), frappée **une fois par OCTROI** et propagée à
+  /// tout jeton né de la même chaîne de rafraîchissement.
+  ///
+  /// ⚠️ ELLE MANQUAIT, ET LA CONTRADICTION ÉTAIT MESURÉE. `LigneOpsTokenRelue`
+  /// (`core/chaine/identite.ts`) l'exige depuis le lot 1c, et l'ADR 0014 décide
+  /// qu'elle suit l'OCTROI et non le `jti` : le § 19.1 donne au jeton d'accès une
+  /// heure quand `TTL_MARQUAGE_MS` donne à une marque de provenance quatre. Une
+  /// session dérivée du `jti` s'effacerait trois fois par TTL, sur un
+  /// rafraîchissement que le client conduit tout seul — et le § 20 chercherait
+  /// la marque au mauvais endroit EN RESTANT VERT.
+  ///
+  /// ⚠️ ELLE EST DU TEXTE ICI, ET UNE `SessionId` DANS LE CODE. La traversée est
+  /// `FabriqueSessionId.relireDepuisLeSocle()`, et elle appartient au TRANSPORT
+  /// (`APPELANTS_DE_LA_RELECTURE`), pas à l'émetteur : relire est le geste de
+  /// l'étape 4. L'émetteur frappe à l'octroi et PROPAGE la colonne — c'est ce qui
+  /// rend un rafraîchissement mécaniquement incapable d'ouvrir une session neuve.
+  ///
+  /// Lecteur, posé DU MÊME GESTE : `core/auth/depot.ts`
+  /// (`LigneOpsToken.sessionId`), écrit par `core/auth/octroi.ts`.
+  sessionId String
 
   issuedAt   DateTime  @default(now())
   expiresAt  DateTime
@@ -588,6 +681,11 @@ model OpsToken {
   @@index([principal])
   @@index([expiresAt])
   @@index([revokedAt])
+  /// La révocation de chaîne balaie les jetons d'un même octroi : cet index
+  /// porte ce balayage, sans quoi « révoquer toute la chaîne » scannerait la table.
+  @@index([grantId])
+  /// § 24 — les appels d'une même session de pilotage se regroupent par elle.
+  @@index([sessionId])
   @@map("ops_token")
 }
 

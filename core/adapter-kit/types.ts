@@ -209,11 +209,28 @@ interface ChampsOutil extends ChampsDeGouvernanceDeclares {
  *    (`core/chaine/etape-11-provenance.ts`) en fait l'UNION avec le filet au nom
  *    par `cumulerChampsDeGouvernance()`.
  *
- * 🔴 **CE QUI RESTE — LA COLONNE `ops_tool.governanceFields`**
- *    (`prisma/schema.prisma`, ADR 0016 point 2). Elle n'existe pas, et aucune
- *    implémentation de `CatalogueOutils` ne lit encore Prisma : la déclaration
- *    voyage aujourd'hui par le TYPE. Le tronçon manquant se pose avec
- *    `core/transport/`.
+ * ✅ **ET LA COLONNE `ops_tool.governanceFields` EST POSÉE — LOT 2.**
+ *    (`prisma/schema.prisma`, ADR 0016 point 2). C'était le DERNIER TRONÇON : la
+ *    déclaration voyageait du manifeste jusqu'à l'étape 11 par le TYPE, et la
+ *    couture était complète sur tout le chemin qui EXISTAIT — mais elle n'aurait
+ *    pas survécu au premier catalogue réel, où `OutilDuCatalogue` se lit dans
+ *    cette table : la déclaration serait arrivée VIDE à l'étape 11, et le § 20
+ *    n'aurait plus surveillé que ce que le filet au nom retient. Sur la seule
+ *    branche qu'aucune confirmation ne rattrape.
+ *
+ *    `core/adapter-kit/colonne-de-gouvernance.temoin.spec.ts` confronte désormais
+ *    les propriétés du catalogue aux colonnes du modèle, LUES toutes deux sur le
+ *    disque, et annonce ses trois comptes.
+ *
+ * 🔴 **CE QUI RESTE, ET IL EST MESURÉ PLUTÔT QUE SUPPOSÉ : QUATRE AUTRES
+ *    PROPRIÉTÉS N'ONT TOUJOURS AUCUNE COLONNE** — `pagination`, `compaction`,
+ *    `maxBytes`, `idFields`. Ce n'est pas une découverte de relecture, c'est le
+ *    compte de cette garde, et elle en tient le CLIQUET DATÉ : une cinquième ne
+ *    peut plus s'ajouter en silence. Elles ne sont pas posées ici parce qu'une
+ *    colonne sans lecteur est une seconde source de vérité — le motif exact pour
+ *    lequel le lot 1d avait refusé de poser `governanceFields` seule — et parce
+ *    que `compaction` et `pagination` demandent chacune un arbitrage de FORME
+ *    (objet structuré, énumération) qui n'appartient pas à ce lot.
  *
  * ═══ POURQUOI CE CHAMP EXISTE — LA MESURE, PAS LA CRAINTE ═══
  *
