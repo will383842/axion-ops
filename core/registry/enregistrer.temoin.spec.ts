@@ -30,6 +30,7 @@ import {
   verifierCouvertureDuVerrou,
 } from "./lock.js";
 import { MOTIFS_REFUS, type EntreeVerrou, type VerrouAdaptateurs } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 
 const PROFILS = ["courrier", "dev", "admin", "audit"] as const;
 
@@ -68,6 +69,7 @@ function manifesteTemoin(): Manifeste {
           maxBytes: 4096,
           compaction: { free: ["extrait"], tier2: [], aggregateBy: null },
           idFields: ["submissionId"],
+          governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
           fixtureMax: "fixtures/inbox.json",
           handler: () => ({ submissionId: "s1", extrait: "…" }),
         }),

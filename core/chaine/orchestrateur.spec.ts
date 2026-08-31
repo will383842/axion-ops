@@ -52,6 +52,8 @@ import {
   type ResultatAppel,
   type Transport,
 } from "./orchestrateur.js";
+// ADR 0014 — un `sessionId` ne s'écrit plus à la main : il se frappe.
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
 
 /**
  * GARDES DE `core/chaine/orchestrateur.ts` — LA CHAÎNE DU § 11.
@@ -88,6 +90,24 @@ const CLE_CURSEUR_D_EPREUVE = "cle-curseur-d-epreuve-non-secrete-0123456789ab";
 const INSTANT = new Date("2026-08-31T09:00:00.000Z");
 const PROFIL_TEMOIN: ProfileName = "courrier";
 const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+
+/**
+ * La session du harnais — FRAPPÉE, jamais écrite (ADR 0014). Elle est gardée
+ * dans une constante parce que le harnais en a besoin deux fois : un test qui
+ * rappellerait la fabrique obtiendrait une autre session, ce qui est exactement
+ * le geste que l'ADR 0014 retire au client.
+ */
+const SESSION_TEMOIN = sessionIdDeTemoin();
+
+/**
+ * LE NUMÉRO DE L'ÉTAPE 14, LU DANS `APPEL_STEPS` — jamais écrit.
+ *
+ * C'est la même dérivation que `issue()` de `core/audit/journal.ts` fait de son
+ * côté (ADR 0017) : un refus PRONONCÉ à cette étape porte `outcome: "erreur"`,
+ * les autres portent `non-exécuté`. Deux dérivations d'un même fait doivent
+ * partir de la même source, sinon elles finissent par se contredire.
+ */
+const ETAPE_EXECUTION_DU_11 = APPEL_STEPS.find((etape) => etape.cle === "execution")?.numero;
 
 const SCHEMA_SANS_CHAMP = {
   type: "object",
@@ -281,7 +301,7 @@ function fabriquerHarnais(reglages: Reglages = {}): Harnais {
     reglages.identite ??
     ({
       principal: "principal-temoin",
-      sessionId: "session-temoin",
+      sessionId: SESSION_TEMOIN,
       scopes: reglages.scopes ?? ["ops:read", "ops:draft", "ops:send"],
       habilitations: HABILITATIONS,
       requestId: "req-temoin",
@@ -512,10 +532,10 @@ describe("§ 11 — un appel traverse la chaîne et journalise", () => {
 
     console.log(
       `[provenance] extraits indexés après l'appel : ${String(harnais.index.taille())} · ` +
-        `domaines marquants : ${harnais.index.domainesMarquants("session-temoin").join(", ")}`,
+        `domaines marquants : ${harnais.index.domainesMarquants(SESSION_TEMOIN).join(", ")}`,
     );
     expect(harnais.index.taille()).toBeGreaterThanOrEqual(1);
-    expect(harnais.index.domainesMarquants("session-temoin")).toContain("temoin");
+    expect(harnais.index.domainesMarquants(SESSION_TEMOIN)).toContain("temoin");
   });
 });
 
@@ -601,7 +621,7 @@ const SCENARIOS: readonly ScenarioRefus[] = [
         outils: [outilTemoin({ inputSchema: SCHEMA_AVEC_TEXTE_LIBRE })],
       });
       // La session a lu du `personal` chez un AUTRE domaine, avant cet appel.
-      harnais.index.marquer("session-temoin", "ailleurs", ["empreinte-temoin"]);
+      harnais.index.marquer(SESSION_TEMOIN, "ailleurs", ["empreinte-temoin"]);
       return { harnais, appel: appelTemoin({ input: { note: "texte" } }) };
     },
   },
@@ -669,7 +689,16 @@ describe("§ 11 — toute terminaison écrit une ligne portant LE NUMÉRO de l'�
       const ligne = derniereLigne(harnais.store);
       expect(ligne.decision, scenario.cle).toBe("refusé");
       expect(ligne.stepDenied, scenario.cle).toBe(scenario.attendue);
-      expect(ligne.outcome, scenario.cle).toBe("non-exécuté");
+      // ⚠️ L'`outcome` D'UN REFUS N'EST PLUS UNE CONSTANTE — ADR 0017. Le
+      //    vocabulaire définit `non-exécuté` comme « refusé AVANT l'étape 14 »
+      //    et `erreur` comme « incompactable (`result_too_large`) » : un refus
+      //    PRONONCÉ à l'étape 14 porte donc `erreur`, parce qu'il se prononce
+      //    sur ce qui SORT et non sur ce qui s'est passé. Cette ligne l'écrivait
+      //    en dur et contredisait les deux définitions. Elle le DÉRIVE — de
+      //    `APPEL_STEPS`, la même source que `issue()` dans `core/audit/journal.ts`.
+      expect(ligne.outcome, scenario.cle).toBe(
+        scenario.attendue === ETAPE_EXECUTION_DU_11 ? "erreur" : "non-exécuté",
+      );
 
       // La terminaison, la trace et le détail disent LA MÊME étape : trois
       // dérivations d'un même fait qui se contrediraient seraient pires qu'une.
@@ -871,7 +900,6 @@ describe("§ 11 — la colonne par transport", () => {
 
   it("donne à stdio un principal RÉSERVÉ que la garde de forme du § 31 accepte", () => {
     const identite = identiteStdio({
-      sessionId: "session-stdio",
       requestId: "req-stdio",
       deadline: new Date(INSTANT.getTime() + 30_000),
       habilitations: HABILITATIONS,
@@ -935,7 +963,6 @@ describe("§ 11 — la colonne par transport", () => {
 
   it("sert un appel en stdio, et la ligne porte le principal réservé", async () => {
     const identite = identiteStdio({
-      sessionId: "session-stdio",
       requestId: "req-stdio",
       deadline: new Date(INSTANT.getTime() + 30_000),
       habilitations: HABILITATIONS,
@@ -959,7 +986,6 @@ describe("§ 11 — la colonne par transport", () => {
 
   it("REFUSE en stdio un effet extérieur avec les scopes par défaut — témoin", async () => {
     const identite = identiteStdio({
-      sessionId: "session-stdio",
       requestId: "req-stdio",
       deadline: new Date(INSTANT.getTime() + 30_000),
       habilitations: HABILITATIONS,

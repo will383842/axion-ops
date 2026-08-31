@@ -43,6 +43,7 @@ import { SCEAU_PROFILS } from "../profiles/index.js";
 import { enregistrerAdaptateur } from "./enregistrer.js";
 import { empreinteDuManifesteProduit } from "./lock.js";
 import { MOTIFS_REFUS, type EntreeVerrou, type VerrouAdaptateurs } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 
 const PROFILS = ["courrier", "dev", "admin", "audit"] as const;
 const kit = creerAdapterKit(PROFILS, SCEAU_PROFILS);
@@ -82,6 +83,7 @@ function manifesteTemoin(): Manifeste {
           maxBytes: 4096,
           compaction: { free: [], tier2: [], aggregateBy: null },
           idFields: ["messageId"],
+          governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
           fixtureMax: "fixtures/mail-send.json",
           handler: () => ({ messageId: "m1" }),
         }),

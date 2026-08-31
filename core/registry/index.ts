@@ -11,6 +11,7 @@ export { AUTH_MODES, ENTREE_VERROU_TEMOIN, MOTIFS_REFUS, VERSION_VERROU } from "
 export type {
   AuthMode,
   EntreeVerrou,
+  GardeAnnoncee,
   LigneOpsAdapter,
   LigneOpsTool,
   MotifRefus,

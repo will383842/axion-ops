@@ -161,6 +161,7 @@ export {
   TRANSPORTS,
   colonneDuTransport,
   empreintesParDefaut,
+  identiteHttp,
   identiteStdio,
   memoiserPourCetAppel,
   orchestrerAppel,
@@ -190,3 +191,21 @@ export type {
   Transport,
   VerificationConfirmation,
 } from "./orchestrateur.js";
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  D'OÙ VIENT LA SESSION DE PILOTAGE — ADR 0014
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ⚠️ CE QUI EST EXPORTÉ ICI EST DÉLIBÉRÉMENT MAIGRE. `core/chaine/identite.ts`
+ *    est le seul module LIVRÉ du socle qui frappe une session ; sa fabrique n'en
+ *    sort pas, et ne sortira pas d'ici non plus. Ce que le barillet rend est une
+ *    session DÉJÀ frappée (celle du démon), la forme de la ligne `ops_token` que
+ *    le transport HTTP devra satisfaire, et la projection qui en tire la session.
+ *
+ *    Un appelant qui voudrait en frapper une doit importer `core/identite/`
+ *    explicitement — et la garde G2 de l'ADR 0014 le verra dans le graphe
+ *    d'imports le jour même.
+ */
+export { SESSION_DE_CETTE_EXECUTION, sessionDuJetonRelu } from "./identite.js";
+export type { LigneOpsTokenRelue } from "./identite.js";

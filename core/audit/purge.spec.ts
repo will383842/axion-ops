@@ -217,6 +217,11 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       partialSources: encoderCharge(chargeFaussee),
       durationMs: 0,
       outcome: "ok",
+      // ADR 0017 — la MÊME valeur que `construireCloture` dérive : une purge
+      // retire du journal, et cela se voit de l'extérieur. Un témoin qui
+      // écrirait `false` ici fabriquerait une clôture que la production ne
+      // produit pas, et la garde mesurerait un objet imaginaire.
+      externalEffect: true,
     });
     store.supprimerIntervalle(premiere.seq, quatrieme.seq);
 
@@ -271,6 +276,11 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       partialSources: encoderCharge(charge),
       durationMs: 0,
       outcome: "ok",
+      // ADR 0017 — la MÊME valeur que `construireCloture` dérive : une purge
+      // retire du journal, et cela se voit de l'extérieur. Un témoin qui
+      // écrirait `false` ici fabriquerait une clôture que la production ne
+      // produit pas, et la garde mesurerait un objet imaginaire.
+      externalEffect: true,
     });
     store.supprimerIntervalle(premiere.seq, seconde.seq);
 
@@ -307,6 +317,11 @@ describe("core/audit — un saut NON ancré ne passe pas", () => {
       partialSources: ["cloture=9", "n-importe-quoi"],
       durationMs: 0,
       outcome: "ok",
+      // ADR 0017 — la MÊME valeur que `construireCloture` dérive : une purge
+      // retire du journal, et cela se voit de l'extérieur. Un témoin qui
+      // écrirait `false` ici fabriquerait une clôture que la production ne
+      // produit pas, et la garde mesurerait un objet imaginaire.
+      externalEffect: true,
     });
     store.supprimerIntervalle(premiere.seq, premiere.seq);
 

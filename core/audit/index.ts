@@ -105,7 +105,17 @@ export {
   avecJournal,
   enteteAvantIdentification,
 } from "./journal.js";
-export type { AppelJournalise, EnteteAppel } from "./journal.js";
+export type {
+  AffineurDEntete,
+  AffineursDAppel,
+  AppelJournalise,
+  EnteteAppel,
+  // ADR 0017 — le CLIQUET. Exporté parce que l'orchestrateur en est l'unique
+  // appelant, et qu'un type nommé au point d'appel vaut mieux qu'une fonction
+  // anonyme dont personne ne peut dire, six mois plus tard, si elle accepte un
+  // booléen.
+  SignalEffetExterieur,
+} from "./journal.js";
 
 export { JournalMemoire } from "./memoire.js";
 
@@ -133,6 +143,7 @@ export {
   ARG_HASH_NON_LU,
   ARG_HASH_NON_VALIDE,
   DECISIONS,
+  EFFET_EXTERIEUR_NON_SURVENU,
   FORME_EMPREINTE,
   LONGUEUR_EMPREINTE,
   OUTCOMES,
@@ -144,6 +155,7 @@ export {
 export type {
   ContenuLigne,
   Decision,
+  PorteurDEffetExterieur,
   LigneAAjouter,
   LigneAudit,
   LigneEcrite,

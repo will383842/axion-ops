@@ -107,6 +107,8 @@ import {
   type ResultatAppel,
   type Transport,
 } from "../chaine/orchestrateur.js";
+import { sessionIdDeTemoin } from "../identite/fixtures.js";
+import type { SessionId } from "../identite/session.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LE HARNAIS — un socle complet, dont chaque pièce peut TOMBER
@@ -118,6 +120,23 @@ const CLE_CURSEUR_D_EPREUVE = "cle-curseur-d-epreuve-non-secrete-0123456789ab";
 const INSTANT = new Date("2026-08-31T09:00:00.000Z");
 const PROFIL_TEMOIN: ProfileName = "courrier";
 const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+
+/**
+ * LES SESSIONS DE CE FICHIER, FRAPPÉES ET NON ÉCRITES — ADR 0014.
+ *
+ * Elles portaient « session-a », « session-b », « session-vierge ». Le
+ * resserrement de `IdentiteAppelante.sessionId` en `SessionId` les a fait cesser
+ * de compiler, ce qui est le but : c'est le geste « j'écris une session à la
+ * main » que l'épreuve du lot 1b exécutait pour annuler l'étape 11.
+ *
+ * ⚠️ ELLES SONT DES CONSTANTES, PAS DES APPELS. Chaque appel de
+ *    `sessionIdDeTemoin()` rend une session DIFFÉRENTE : marquer sous l'une et
+ *    interroger sous l'autre rendrait ces témoins verts pour la pire des raisons.
+ */
+const SESSION_A = sessionIdDeTemoin();
+const SESSION_B = sessionIdDeTemoin();
+const SESSION_VIERGE = sessionIdDeTemoin();
+const SESSION_TEMOIN = sessionIdDeTemoin();
 
 const SCHEMA_VIDE = { type: "object", properties: {}, additionalProperties: false } as const;
 
@@ -306,7 +325,7 @@ interface Reglages {
   readonly charge?: ChargeAdaptateur;
   readonly intention?: PorteeDIntention;
   readonly transport?: Transport;
-  readonly sessionId?: string;
+  readonly sessionId?: SessionId;
   readonly index?: IndexProvenanceMemoire;
   readonly calculArgHash?: CalculArgHash;
   readonly storeJournal?: JournalStore;
@@ -340,7 +359,7 @@ function fabriquerHarnais(reglages: Reglages = {}): Harnais {
 
   const identite: IdentiteAppelante = {
     principal: "principal-temoin",
-    sessionId: reglages.sessionId ?? "session-temoin",
+    sessionId: reglages.sessionId ?? SESSION_TEMOIN,
     scopes: reglages.scopes ?? ["ops:read", "ops:draft", "ops:send"],
     habilitations: HABILITATIONS,
     requestId: "req-temoin",
@@ -711,6 +730,97 @@ describe("§ 11 — l'invariant de sortie face à ce que l'adaptateur rend", () 
     //    clôtures ont lieu QUOI QU'IL ARRIVE ». La seconde doit donc
     //    survivre à l'échec de la première.
     expect(idem?.status, "les DEUX clôtures, quoi qu'il arrive").toBe("done");
+  });
+
+  /**
+   * ✅ G2 — L'EXCEPTION LEVÉE APRÈS LE RETOUR DE L'ADAPTATEUR EST VUE (ADR 0017).
+   *
+   * C'est la SECONDE fuite de l'objectif O6, et celle qu'aucune valeur
+   * d'`outcome` n'aurait couverte. `orchestrateur.ts` l'écrit lui-même dans sa
+   * borne : « un appel exécuté avec succès dont la réservation ne peut pas être
+   * close devient un “interrompu” — le journal dira “erreur” d'un appel dont
+   * l'effet a bien eu lieu ».
+   *
+   * Or « interrompu / erreur » est le couple d'une panne survenue AVANT
+   * l'adaptateur comme APRÈS lui. Rien dans la ligne ne les séparait ; une revue
+   * des effets extérieurs cherchant `decision = "autorisé" ET effect ∈ {send,
+   * destructive}` passait donc à côté de cet envoi-là.
+   *
+   * ⚠️ ET UN `externalEffect` DÉDUIT D'`effect` LE MANQUERAIT AUSSI — c'est ce
+   *    que le contre-témoin ci-dessous mesure : le MÊME outil `send`, la MÊME
+   *    déduction possible, et pourtant rien n'est sorti.
+   */
+  it("✅ G2 : une clôture d'idempotence qui LÈVE après un envoi laisse la ligne accusatrice", async () => {
+    /** Le dépôt du harnais, dont la seule clôture tombe. Tout le reste est atomique. */
+    class DepotIdemClotureEnPanne extends DepotIdemAtomique {
+      override cloturer(): Promise<void> {
+        return Promise.reject(new Error("dépôt d'épreuve : clôture impossible après l'envoi"));
+      }
+    }
+
+    const harnais = fabriquerHarnais({
+      outils: [outilEnvoi()],
+      niveau: { ...NIVEAU_BROUILLON, niveau: "libre" },
+      depotIdempotence: new DepotIdemClotureEnPanne(),
+      reglagesOutil: { modeIdempotence: "key", limiteQuota: null, warnAtQuota: null },
+    });
+
+    const issue = await issueDe(
+      harnais,
+      appelTemoin({ nomComplet: "temoin.envoyer", idempotencyKey: "cle-cloture-en-panne" }),
+    );
+    const ecrites = lignes(harnais.store);
+    const ligne = ecrites[0];
+
+    console.log(
+      `[garde G2 · exception post-effet] ${String(ecrites.length)} ligne(s) écrite(s) — ` +
+        `effets extérieurs RÉELS : ${String(harnais.effets())}, issue : ${issue.genre}, ` +
+        `decision : ${String(ligne?.decision)}, outcome : ${String(ligne?.outcome)}, ` +
+        `externalEffect : ${String(ligne?.externalEffect)}`,
+    );
+
+    expect(harnais.effets(), "l'envoi est bien PARTI").toBe(1);
+    expect(ecrites.length, "l'invariant tient : la ligne existe").toBe(1);
+    // La borne d'`orchestrateur.ts`, telle qu'elle est écrite : la panne de
+    // clôture remplace le retour déjà décidé.
+    expect(ligne?.decision).toBe("interrompu");
+    expect(ligne?.outcome).toBe("erreur");
+    // ⚖️ CE QUE SEULE LA COLONNE DIT. Les deux champs ci-dessus valent la même
+    //    chose pour une panne survenue AVANT l'adaptateur — voir le
+    //    contre-témoin. Celui-ci est le seul à distinguer les deux.
+    expect(ligne?.externalEffect, "O6 : quelque chose EST sorti").toBe(true);
+  });
+
+  it("CONTRE-TÉMOIN G2 — un `send` refusé À L'ÉTAPE 10 n'a rien envoyé", async () => {
+    // ISOLER UNE SEULE RÈGLE. Sans ce jumeau, la garde précédente serait verte
+    // pour un `externalEffect` bloqué à `true`, ou déduit d'`effect === "send"`.
+    // Ici l'outil est le MÊME, la ligne journalise bien `effect: "send"` — l'étape
+    // 6 a relu `ops_tool` — et pourtant rien n'est parti : la confirmation du
+    // § 20 manque, et l'étape 10 refuse AVANT l'adaptateur.
+    const harnais = fabriquerHarnais({
+      outils: [outilEnvoi()],
+      confirmationValide: false,
+    });
+
+    await issueDe(harnais, appelTemoin({ nomComplet: "temoin.envoyer" }));
+    const ecrites = lignes(harnais.store);
+    const ligne = ecrites[0];
+
+    console.log(
+      `[contre-témoin G2 · jumeau] ${String(ecrites.length)} ligne(s) écrite(s) — ` +
+        `effets extérieurs RÉELS : ${String(harnais.effets())}, ` +
+        `effect journalisé : ${String(ligne?.effect)}, ` +
+        `stepDenied : ${String(ligne?.stepDenied)}, ` +
+        `externalEffect : ${String(ligne?.externalEffect)}`,
+    );
+
+    expect(harnais.effets(), "rien n'est parti").toBe(0);
+    expect(ecrites.length).toBe(1);
+    // C'EST LE POINT, ET IL EST NOMMÉ DANS L'ADR 0017 : « déduire
+    // `externalEffect` d'`effect === "send"` serait vrai sur la moitié des
+    // lignes et faux sur l'autre, sans qu'on puisse dire laquelle ».
+    expect(ligne?.effect, "la ligne SAIT que c'est un envoi").toBe("send");
+    expect(ligne?.externalEffect, "et pourtant rien n'est sorti").toBe(false);
   });
 });
 
@@ -1096,7 +1206,7 @@ describe("§ 20 — l'index de provenance saturé doit FERMER", () => {
 
     // 1 · la session A lit du `personal` chez `temoin`.
     marquerResultat(index, {
-      sessionId: "session-a",
+      sessionId: SESSION_A,
       adapterId: "temoin",
       dataClass: "personal",
       empreintes: ["empreinte-a"],
@@ -1105,7 +1215,7 @@ describe("§ 20 — l'index de provenance saturé doit FERMER", () => {
 
     // 2 · la session B marque à son tour : A est évincée, faute de place.
     marquerResultat(index, {
-      sessionId: "session-b",
+      sessionId: SESSION_B,
       adapterId: "temoin",
       dataClass: "personal",
       empreintes: ["empreinte-b"],
@@ -1116,7 +1226,7 @@ describe("§ 20 — l'index de provenance saturé doit FERMER", () => {
     const harnais = fabriquerHarnais({
       outils: [OUTIL_LIBRE_AUTRE_DOMAINE],
       index,
-      sessionId: "session-a",
+      sessionId: SESSION_A,
     });
     const resultat = await orchestrerAppel(
       harnais.identite,
@@ -1151,7 +1261,7 @@ describe("§ 20 — l'index de provenance saturé doit FERMER", () => {
     for (let rang = 0; rang < 10; rang += 1) {
       marquages += 1;
       marquerResultat(index, {
-        sessionId: "session-a",
+        sessionId: SESSION_A,
         adapterId: "temoin",
         dataClass: "personal",
         empreintes: [`empreinte-${String(rang)}`],
@@ -1162,7 +1272,7 @@ describe("§ 20 — l'index de provenance saturé doit FERMER", () => {
     const harnais = fabriquerHarnais({
       outils: [OUTIL_LIBRE_AUTRE_DOMAINE],
       index,
-      sessionId: "session-a",
+      sessionId: SESSION_A,
     });
     const resultat = await orchestrerAppel(
       harnais.identite,
@@ -1189,7 +1299,7 @@ describe("§ 20 — l'index de provenance saturé doit FERMER", () => {
   it("SAIT DIRE OUI — session non marquée, le même appel traverse l'étape 11", async () => {
     const harnais = fabriquerHarnais({
       outils: [OUTIL_LIBRE_AUTRE_DOMAINE],
-      sessionId: "session-vierge",
+      sessionId: SESSION_VIERGE,
     });
     const resultat = await orchestrerAppel(
       harnais.identite,
@@ -1257,66 +1367,75 @@ describe("§ 13.3 — une charge démesurée doit être refusée, et coûter ce 
   });
 
   /**
-   * 🔴 LA LIGNE EST BIEN ÉCRITE — ET ELLE DIT LE CONTRAIRE DE CE QUI S'EST PASSÉ.
+   * ✅ G1 — LE TÉMOIN DU LOT 1b, BASCULÉ (ADR 0017).
    *
-   * L'étape 14 est la seule dont le refus arrive APRÈS l'effet extérieur. Or
-   * `avecJournal` dérive le triplet de la ligne du GENRE de la terminaison, et
-   * rien d'autre : `refus` ⇒ `decision: "refusé"`, `outcome: "non-exécuté"`.
+   * Il portait l'attente sous `it.fails` : la ligne était bien écrite, et elle
+   * disait le contraire de ce qui s'était passé. L'étape 14 est la seule dont le
+   * refus arrive APRÈS l'effet extérieur ; `avecJournal` dérivait pourtant le
+   * triplet du seul GENRE de la terminaison — `refus` ⇒ `outcome: "non-exécuté"`
+   * — si bien qu'un envoi PARTI dont la réponse dépassait le plafond était rangé
+   * parmi les appels qui n'ont rien fait.
    *
-   * Un envoi PARTI dont la réponse dépasse le plafond est donc journalisé
-   * « refusé / non-exécuté ». La ligne existe — l'invariant tient — mais le
-   * § 24 comptera cet envoi parmi les appels qui n'ont rien fait, et une revue
-   * des effets extérieurs conduite sur `ops_audit` ne le verra jamais.
+   * Ce n'était PAS la borne déclarée en tête d'`orchestrateur.ts` (« l'invariant
+   * est borné par la disponibilité du journal ») : le journal était disponible,
+   * il écrivait, et ce qu'il écrivait était faux.
    *
-   * Ce n'est PAS la borne déclarée en tête d'`orchestrateur.ts` (« l'invariant
-   * est borné par la disponibilité du journal ») : le journal est disponible, il
-   * écrit, et ce qu'il écrit est faux. `ExecutionEtablie` porte pourtant le fait
-   * — l'exécution a eu lieu, ses octets bruts sont connus — et la terminaison le
-   * jette en chemin.
+   * ⚠️ L'ATTENTE A ÉTÉ DURCIE EN MÊME TEMPS QU'ELLE BASCULE, ET C'EST VOULU.
+   *    Sous `it.fails`, elle se contentait de « pas “non-exécuté” » parce que la
+   *    valeur à retenir était encore un arbitrage. L'ADR 0017 l'a tranché sans
+   *    ajouter de mot au vocabulaire : `erreur`, que `OUTCOMES` définissait déjà
+   *    comme « incompactable (`result_too_large`) ». La garde nomme donc
+   *    désormais la valeur — et elle vérifie AUSSI `externalEffect`, sans quoi
+   *    elle resterait verte pour un `outcome` corrigé et un fait toujours perdu.
    */
-  it.fails(
-    "🔴 un `send` PARTI dont la réponse est trop grosse est journalisé « non-exécuté »",
-    async () => {
-      const gros = "z".repeat(64 * 1024);
-      const harnais = fabriquerHarnais({
-        outils: [outilEnvoi({ maxBytes: 4096 })],
-        niveau: { ...NIVEAU_BROUILLON, niveau: "libre" },
-        charge: {
-          items: Array.from({ length: 8 }, (_, r) => ({ id: String(r), texte: gros })),
-          failedSources: [],
-          sourceIncomplete: false,
-          recordIds: [],
-        },
-      });
+  it("✅ un `send` PARTI dont la réponse est trop grosse est journalisé EXÉCUTÉ", async () => {
+    const gros = "z".repeat(64 * 1024);
+    const harnais = fabriquerHarnais({
+      outils: [outilEnvoi({ maxBytes: 4096 })],
+      niveau: { ...NIVEAU_BROUILLON, niveau: "libre" },
+      charge: {
+        items: Array.from({ length: 8 }, (_, r) => ({ id: String(r), texte: gros })),
+        failedSources: [],
+        sourceIncomplete: false,
+        recordIds: [],
+      },
+    });
 
-      const resultat = await orchestrerAppel(
-        harnais.identite,
-        appelTemoin({ nomComplet: "temoin.envoyer" }),
-        harnais.deps,
-      );
-      const ecrites = lignes(harnais.store);
-      const ligne = ecrites[0];
+    const resultat = await orchestrerAppel(
+      harnais.identite,
+      appelTemoin({ nomComplet: "temoin.envoyer" }),
+      harnais.deps,
+    );
+    const ecrites = lignes(harnais.store);
+    const ligne = ecrites[0];
 
-      console.log(
-        "[garde journal après l'effet] 1 ligne mesurée — effets extérieurs RÉELS : " +
-          `${String(harnais.effets())}, effect journalisé : ${String(ligne?.effect)}, ` +
-          `decision : ${String(ligne?.decision)}, outcome : ${String(ligne?.outcome)}, ` +
-          `stepDenied : ${String(ligne?.stepDenied)}`,
-      );
+    console.log(
+      "[garde G1 · journal après l'effet] 1 ligne mesurée — effets extérieurs RÉELS : " +
+        `${String(harnais.effets())}, effect journalisé : ${String(ligne?.effect)}, ` +
+        `decision : ${String(ligne?.decision)}, outcome : ${String(ligne?.outcome)}, ` +
+        `stepDenied : ${String(ligne?.stepDenied)}, ` +
+        `externalEffect : ${String(ligne?.externalEffect)}`,
+    );
 
-      expect(harnais.effets(), "l'envoi est bien PARTI").toBe(1);
-      expect(resultat.trace.etapeRefusante).toBe(14);
-      expect(ecrites.length, "l'invariant tient : la ligne existe").toBe(1);
-      expect(ligne?.effect, "et elle sait que c'était un envoi").toBe("send");
-      // ⚖️ L'ATTENTE : la ligne d'un appel dont l'effet extérieur EST PARTI ne
-      //    peut pas le ranger parmi ceux qui n'ont rien fait. QUELLE valeur
-      //    d'`outcome` retenir est un arbitrage ; qu'elle ne soit pas
-      //    « non-exécuté » n'en est pas un.
-      expect(ligne?.outcome, "§ 24 : un envoi parti n'est pas « non-exécuté »").not.toBe(
-        "non-exécuté",
-      );
-    },
-  );
+    expect(harnais.effets(), "l'envoi est bien PARTI").toBe(1);
+    expect(resultat.trace.etapeRefusante).toBe(14);
+    expect(ecrites.length, "l'invariant tient : la ligne existe").toBe(1);
+    expect(ligne?.effect, "et elle sait que c'était un envoi").toBe("send");
+
+    // ⚖️ L'ATTENTE, TENUE ET NOMMÉE. La ligne d'un appel dont l'effet extérieur
+    //    EST PARTI ne le range plus parmi ceux qui n'ont rien fait. La valeur
+    //    est `erreur` — celle qu'`OUTCOMES` réservait déjà à l'incompactable —
+    //    et aucun mot n'a été ajouté au vocabulaire pour l'obtenir.
+    expect(ligne?.outcome, "§ 24 : un envoi parti n'est pas « non-exécuté »").not.toBe(
+      "non-exécuté",
+    );
+    expect(ligne?.outcome, "ADR 0017 : `result_too_large` EST un `erreur`").toBe("erreur");
+
+    // ⚠️ ET LE FAIT LUI-MÊME. Sans ce contrôle, la garde serait verte pour un
+    //    `outcome` corrigé et un objectif O6 toujours faux : `decision` vaut
+    //    « refusé », et rien dans la ligne ne dirait qu'un envoi est sorti.
+    expect(ligne?.externalEffect, "O6 : quelque chose EST sorti").toBe(true);
+  });
 
   /**
    * ⚠️ CE QUE CE REFUS COÛTE, MESURÉ.

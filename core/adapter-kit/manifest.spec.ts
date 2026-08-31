@@ -14,6 +14,7 @@ import {
 } from "./manifest.js";
 import { definirOutil } from "./types.js";
 import type { DefinitionAdaptateur, DefinitionOutil } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "./types.js";
 
 /**
  * Gardes du MANIFESTE (§ 09).
@@ -67,6 +68,7 @@ function outilTemoin(surcharges: Partial<DefinitionOutil<Profil>> = {}): Definit
       aggregateBy: "canal",
     },
     idFields: ["submissionId"],
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     fixtureMax: "fixtures/inbox-max.json",
     handler: () => ({ submissionId: "s1", extrait: "…", objet: "…" }),
   });

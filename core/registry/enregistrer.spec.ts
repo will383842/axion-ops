@@ -10,6 +10,7 @@ import type { DefinitionAdaptateur, DefinitionOutil } from "../adapter-kit/types
 import { enregistrerAdaptateur } from "./enregistrer.js";
 import { empreinteDuManifesteRecu } from "./lock.js";
 import type { EntreeVerrou, MotifRefus, VerrouAdaptateurs } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 
 /**
  * Gardes de L'ENREGISTREMENT (§ 09, § 12, § 29).
@@ -53,6 +54,7 @@ function outil(surcharges: Partial<DefinitionOutil<Profil>> = {}): DefinitionOut
     maxBytes: 32768,
     compaction: { free: ["extrait"], tier2: [], aggregateBy: null },
     idFields: ["submissionId"],
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     fixtureMax: "fixtures/inbox-max.json",
     handler: () => ({ submissionId: "s1", extrait: "…" }),
   });

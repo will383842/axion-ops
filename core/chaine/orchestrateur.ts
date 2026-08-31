@@ -129,6 +129,7 @@ import {
   ARG_HASH_NON_LU,
   VERSION_INCONNUE,
   avecJournal,
+  type AffineursDAppel,
   type AppelJournalise,
   type EnteteAppel,
   type Journal,
@@ -187,6 +188,11 @@ import {
   empreinteExtrait,
   marquerResultat,
 } from "./etape-11-provenance.js";
+// ADR 0014 — la session de pilotage. Ce fichier n'en frappe AUCUNE : il lit
+// celle du démon, ou reçoit celle que le transport HTTP a déjà relue.
+import { SESSION_DE_CETTE_EXECUTION, sessionDuJetonRelu } from "./identite.js";
+import type { LigneOpsTokenRelue } from "./identite.js";
+import type { SessionId } from "../identite/session.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LES ANCRAGES — les seuls numéros de ce fichier, tous LUS dans `APPEL_STEPS`
@@ -370,14 +376,30 @@ export function colonneDuTransport(transport: Transport): ColonneTransport {
  * choisirait son principal pourrait se faire passer pour un jeton HTTP dans
  * `ops_audit`, et la ligne ne le dirait pas.
  *
- * @param params.sessionId session de PILOTAGE (§ 11) — une par exécution du
- *        démon, jamais une session d'authentification : le socle n'en tient
- *        aucune.
+ * ✅ **ET LE `sessionId`, JUSTE À CÔTÉ, EST IMPOSÉ DE LA MÊME FAÇON — ADR 0014.**
+ *    Il était un paramètre ordinaire à la fin du lot 1b. C'était le verrou n° 1
+ *    du § 20 laissé ouvert : toute la garde d'exfiltration s'ancre sur cette
+ *    clé, et un appelant qui la renouvelle entre la lecture et l'appel suivant
+ *    annule l'étape 11 en entier. L'épreuve l'avait mesuré sur le pire cas —
+ *    argument de gouvernance, argument libre, autre domaine : « même session :
+ *    refusé · session renouvelée : AUTORISÉ ».
+ *
+ *    Il vient désormais de {@link SESSION_DE_CETTE_EXECUTION} : UNE par exécution
+ *    du démon, frappée au chargement de `core/chaine/identite.ts`. Le paramètre
+ *    a DISPARU de cette signature — le lui rendre optionnel aurait été la forme
+ *    sous laquelle une décision redevient un oubli.
+ *
+ * ⚠️ **CE QUE ÇA COÛTE, ÉCRIT AVEC LA MESURE.** Un test qui voulait deux
+ *    sessions distinctes en stdio ne le peut plus dans un même processus, et
+ *    c'est exactement l'interdit recherché : c'est CE geste-là que l'épreuve
+ *    adverse exécutait. Un test qui a besoin de deux sessions passe par le
+ *    transport HTTP, où deux OCTROIS distincts en donnent deux — au prix d'un
+ *    geste humain, qui est le prix voulu.
+ *
  * @param params.scopes facultatif au sens de la VALEUR seulement : l'absence
  *        vaut {@link SCOPES_PAR_DEFAUT_STDIO}, c'est-à-dire le plus étroit.
  */
 export function identiteStdio(params: {
-  readonly sessionId: string;
   readonly requestId: string;
   readonly deadline: Date;
   readonly habilitations: Habilitations;
@@ -385,8 +407,51 @@ export function identiteStdio(params: {
 }): IdentiteAppelante {
   return {
     principal: PRINCIPAL_STDIO,
-    sessionId: params.sessionId,
+    // Ni un paramètre, ni une variable d'environnement — voir ADR 0014.
+    sessionId: SESSION_DE_CETTE_EXECUTION,
     scopes: params.scopes ?? SCOPES_PAR_DEFAUT_STDIO,
+    habilitations: params.habilitations,
+    requestId: params.requestId,
+    deadline: params.deadline,
+  };
+}
+
+/**
+ * L'IDENTITÉ D'UN APPEL HTTP — ce que les étapes 1 à 4 ont établi.
+ *
+ * Le pendant d'{@link identiteStdio} pour le transport qui porte un jeton. Le
+ * `principal` et la session viennent tous deux de la LIGNE `ops_token` relue à
+ * l'étape 4 (« `jti` non révoqué »), qui est déjà lue à cet instant : la session
+ * ne coûte aucune lecture de plus.
+ *
+ * ⚠️ **LA SESSION N'EST PAS DÉRIVÉE DU `jti`, ET C'EST MESURÉ.** Le jeton d'accès
+ *    vit une heure (§ 19.1), une marque de provenance quatre (`TTL_MARQUAGE_MS`) :
+ *    une session dérivée du `jti` s'effacerait trois fois par TTL, sur un
+ *    rafraîchissement que le client MCP conduit tout seul. Elle suit l'OCTROI —
+ *    voir {@link LigneOpsTokenRelue}.
+ *
+ * ⚠️ **CETTE FONCTION N'EST PAS LE TRANSPORT, ET NE LE DEVIENT PAS.** Elle ne
+ *    lit aucune base, ne vérifie aucune signature, ne consulte aucune liste de
+ *    révocation : les étapes 1 à 4 sont « HTTP seul » (§ 11) et se passent AVANT
+ *    l'orchestrateur. Elle assemble ce qu'elles ont établi, et son seul mérite
+ *    est de refuser à la COMPILATION ce que les quatre étapes n'ont pas établi.
+ *
+ * @param params.scopes § 19.2 — ce que le jeton autorise EN PRINCIPE. Il n'y a
+ *        AUCUN défaut ici, contrairement à stdio : un jeton HTTP sans scope
+ *        n'est pas un jeton par défaut, c'est un jeton qui n'autorise rien, et
+ *        l'étape 5 doit le dire plutôt que de recevoir une liste inventée.
+ */
+export function identiteHttp(params: {
+  readonly jeton: LigneOpsTokenRelue;
+  readonly scopes: readonly OpsScope[];
+  readonly habilitations: Habilitations;
+  readonly requestId: string;
+  readonly deadline: Date;
+}): IdentiteAppelante {
+  return {
+    principal: params.jeton.principal,
+    sessionId: sessionDuJetonRelu(params.jeton),
+    scopes: params.scopes,
     habilitations: params.habilitations,
     requestId: params.requestId,
     deadline: params.deadline,
@@ -585,6 +650,12 @@ function resolveUneFonction(resolveur: unknown): boolean {
  *
  * ⚠️ `idempotencyKey` VOYAGE ICI, PAS DANS `input` (§ 20). La v5 la rendait
  *    obligatoire sur `zoho.mail.send` alors qu'aucun champ ne la transportait.
+ *
+ * ⚠️ **ET IL NE PORTE PAS DE `sessionId` — ADR 0014.** Cinquième valeur de la
+ *    même liste, et pour le même motif : la session de pilotage est un état que
+ *    le socle ÉTABLIT, pas une valeur que l'appel apporte. L'accepter ici, même
+ *    « à titre indicatif », rendrait la garde du § 20 désarmable par la charge
+ *    utile — c'est le défaut mesuré au lot 1b, par l'autre porte.
  */
 export interface AppelEntrant {
   /** Le nom COMPLET servi par `tools/list` — préfixe dérivé compris (§ 09). */
@@ -621,7 +692,29 @@ export interface AppelEntrant {
  */
 export interface IdentiteAppelante {
   readonly principal: string;
-  readonly sessionId: string;
+  /**
+   * ⚠️ **ÉTABLIE PAR LE SOCLE, JAMAIS ACCEPTÉE DU CLIENT — ADR 0014.** En HTTP
+   *    elle vient de la ligne `ops_token` relue à l'étape 4, qui est déjà lue à
+   *    cet instant ; en stdio, de l'exécution du démon. Elle n'entre par aucun
+   *    chemin que l'appelant contrôle — ni `input` (le contrôle 7 du § 09 la
+   *    refuse déjà, par dérivation des propriétés de `ToolContext`), ni
+   *    {@link AppelEntrant}, ni un paramètre de transport.
+   *
+   * ✅ **TYPE RESSERRÉ (ADR 0014) :** {@link SessionId}, le type marqué de
+   *    `core/identite/session.ts`. Sa marque est un `unique symbol` NON exporté :
+   *    aucun module ne peut nommer la propriété, donc aucun ne peut écrire un
+   *    littéral d'objet assignable. Un transport qui poserait ici une chaîne
+   *    venue du réseau **ne compile pas**, et c'est la seule forme d'interdit qui
+   *    n'arrive pas trop tard.
+   *
+   * ⚠️ LA BORNE, ÉCRITE AVEC LA MESURE : `as unknown as SessionId` reste
+   *    écrivable — aucune marque TypeScript n'y échappe. Ce que le type garantit
+   *    n'est pas l'impossibilité, c'est que le chemin HONNÊTE ne passe plus par
+   *    une chaîne, donc que toute occurrence devienne visible. C'est le graphe
+   *    d'imports (garde G2) qui porte la garantie ; le motif de texte (G3) n'est
+   *    qu'un filet.
+   */
+  readonly sessionId: SessionId;
   /** § 19.2 — ce que le jeton autorise EN PRINCIPE. */
   readonly scopes: readonly OpsScope[];
   /** § 19 bis — calculé PAR LE SOCLE. Un handler ne le reconstitue jamais. */
@@ -978,10 +1071,14 @@ export type ConstruireEntete = (
  * Déclaré pour que l'implémenteur ne l'invente pas : c'est cette forme, et elle
  * seule, qui rend l'invariant de sortie mécanique — le corps ne PEUT PAS rendre
  * une valeur à l'appelant, il rend une terminaison au journal.
+ *
+ * ⚠️ IL REÇOIT UN OBJET, ET C'EST DÉLIBÉRÉ (ADR 0017). Chacun de ses membres est
+ *    un point de MUTATION de la ligne qui sera écrite — l'empreinte validée, le
+ *    cliquet d'effet extérieur — et il y en aura un troisième. Un objet plutôt
+ *    que des paramètres positionnels, pour que l'ajout du troisième n'oblige
+ *    personne à relire un ordre d'arguments.
  */
-export type CorpsDeChaine = (
-  affiner: (argHashValide: string) => void,
-) => Promise<Terminaison<ChargeServie>>;
+export type CorpsDeChaine = (affineurs: AffineursDAppel) => Promise<Terminaison<ChargeServie>>;
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LES ERREURS — ce qui LÈVE, et pourquoi ce n'est pas un refus
@@ -1317,7 +1414,7 @@ export async function orchestrerAppel(
     return { genre: "refus", etape: verdict.etape, code: verdict.code };
   };
 
-  const corps: CorpsDeChaine = async (affiner) => {
+  const corps: CorpsDeChaine = async ({ affinerArgHash, signalerEffetExterieur }) => {
     // ═══ ÉTAPE 0 — LE COFFRE (§ 23, ADR 0005) ═══════════════════════════════
     //
     // AVANT TOUT. Coffre fermé, aucun appel d'outil n'est servi.
@@ -1481,7 +1578,7 @@ export async function orchestrerAppel(
       entreSchemaEtQuota: async (valide, argHash) => {
         // L'étape 8 est franchie : la valeur est validée, et c'est SON empreinte
         // que la ligne doit porter (§ 20, liaison du jeton de confirmation).
-        affiner(argHash);
+        affinerArgHash(argHash);
         franchir(ETAPE_SCHEMA_CHAINE.numero);
 
         // ── ÉTAPE 9 — LE CURSEUR (§ 13.1) ─────────────────────────────────
@@ -1748,7 +1845,31 @@ export async function orchestrerAppel(
     try {
       const v14 = await dependances.etapeExecution({
         outil,
-        executer: () => dependances.appelAdaptateur(contexte, limites.entree),
+        // ═══ LE CLIQUET D'EFFET EXTÉRIEUR — ADR 0017, UNIQUE APPELANT ═══════
+        //
+        // ⚠️ C'EST LE SEUL POINT DU SOCLE OÙ « QUELQUE CHOSE EST SORTI » DEVIENT
+        //    VRAI. Cette clôture est l'`executer()` de l'étape 14, et l'étape 14
+        //    est la seule à l'appeler — une fois, à l'instant nommé « ⚠️ L'EFFET
+        //    EXTÉRIEUR A LIEU ICI » dans `etape-14-execution.ts`. Le signal est
+        //    donc posé JUSTE APRÈS le retour de l'adaptateur, dans le même
+        //    `await`, sans qu'aucun chemin ne puisse s'insérer entre les deux.
+        //
+        // ⚠️ POURQUOI ICI, ET NON APRÈS `etapeExecution`. Tout ce qui suit le
+        //    retour de l'adaptateur — vérification de contrat, masquage,
+        //    cascade de compaction, refus `result_too_large` — se passe dans un
+        //    monde où l'effet EST DÉJÀ PARTI. Un signal posé après l'étape 14
+        //    serait sauté par chacune de ces sorties, et la ligne dirait de
+        //    nouveau qu'il ne s'est rien passé.
+        //
+        // ⚠️ IL EST CONDITIONNÉ PAR `estEffetExterieur`, JAMAIS PAR `effect ===
+        //    "send"`. Le test du § 20 vit chez son propriétaire sous forme de
+        //    `switch` exhaustif ; le recopier ici laisserait `destructive`
+        //    dehors le jour où quelqu'un ne relit qu'une des deux listes.
+        executer: async () => {
+          const charge = await dependances.appelAdaptateur(contexte, limites.entree);
+          if (estEffetExterieur(outil.effect)) signalerEffetExterieur();
+          return charge;
+        },
         masquage: dependances.fabriqueMasquage(identite.habilitations, outil),
         maxBytes: outil.maxBytes,
         compaction: outil.compaction,

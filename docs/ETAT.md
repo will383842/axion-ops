@@ -383,7 +383,8 @@ l'étape 8 gardaient l'empreinte de la charge brute — elles n'ont rien d'autre
 et **rien dans la ligne ne les distinguait.**
 
 `ops_audit.argHashValidated` porte désormais le fait lui-même, et il **entre
-dans l'empreinte chaînée** (`CHAMPS_COUVERTS`, seize champs). Il a été posé
+dans l'empreinte chaînée** (`CHAMPS_COUVERTS`, dix-sept champs depuis que
+l'ADR 0017 y a fait entrer `externalEffect` ; seize au lot 1b). Il a été posé
 maintenant précisément pour cela : aucune base ne tourne, aucune ligne n'existe.
 Après le premier chaînage réel, il aurait fallu une clôture de rupture et deux
 régimes de vérification dans le même journal.
@@ -605,3 +606,192 @@ relancée, puis les fichiers restaurés. Les quatre ont rougi :
 | `continue-on-error: true` dans `.github/workflows/ci.yml` | la garde qui LIT le YAML                        |
 
 Une garde qui ne peut pas échouer n'existe pas. Celles-ci le peuvent.
+
+---
+
+## 9 · Lot 1c — cinq décisions d'architecture, et la moitié de leur couture
+
+**Date : 2026-08-31.** Le lot 1c **tranche cinq points** que la Recette du lot 1b
+avait refusé de trancher seule, parce que ce sont des décisions d'architecture et
+non des correctifs. Il pose les **interfaces**, écrit les **cinq ADR** — et,
+contrairement à ce que cette section a d'abord annoncé, il **écrit aussi du
+code** : quatre constructeurs ont travaillé en parallèle après l'architecte, et
+la Recette a clos derrière eux.
+
+> ⚠️ **CETTE SECTION A ÉTÉ CORRIGÉE PAR LA RECETTE.** Elle affirmait « n'a écrit
+> ni logique, ni garde », « aucune implémentation », « 838 verts » et « aucun
+> test n'a été ajouté, supprimé ni modifié ». Les quatre sont faux, et le
+> document énonçait lui-même le diagnostic : « si un compte avait bougé, ce
+> serait le signe qu'une déclaration a changé du code ». **Le compte a bougé de
+> +139.** **Douze** fichiers de gardes créés (onze par les constructeurs, un par
+> la Recette), **dix** fichiers TypeScript de production neufs, l'ADR 0017
+> entièrement implémentée. Ce qui suit porte sa **date** et son **périmètre**,
+> parce qu'un chiffre nu était périmé le jour même.
+
+| Point ouvert au lot 1b (§ 8.3 et rapport)          | Tranché par  | La décision, en une ligne                                                                       |
+| -------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| `sessionId` ni contraint, ni authentifié           | **ADR 0014** | Établi par le socle, jamais accepté du client. Type marqué, fabrique unique.                    |
+| `idFields` est cru sur parole                      | **ADR 0015** | L'étape 11 cesse de le lire : seul le SCHÉMA referme un champ.                                  |
+| `FAMILLES_GOUVERNANCE` laisse échapper 9 noms / 20 | **ADR 0016** | L'outil DÉCLARE ses champs de gouvernance ; union avec le nom, jamais soustraction.             |
+| `ops_audit` nie une exécution qui a eu lieu        | **ADR 0017** | `outcome` ne gagne aucune valeur ; `externalEffect` devient une colonne de l'empreinte chaînée. |
+| L'index de provenance est local au processus       | **ADR 0018** | Mono-instance en v1, tenu par un verrou au démarrage ET un healthcheck à 503.                   |
+
+### 9.1 · Ce qui a été écrit
+
+| Fichier                                   | Ce qu'il porte                                                                                | Déclaré ou écrit ?                                               |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `core/identite/session.ts`                | `SessionId` (type marqué), `FabriqueSessionId`, forme du § 31, erreur, frappeurs admis        | **écrit** — la fabrique existe et est éprouvée sur 1 000 frappes |
+| `core/chaine/identite.ts`                 | session du démon stdio, `LigneOpsTokenRelue`, `sessionDuJetonRelu()`                          | **écrit**                                                        |
+| `core/adapter-kit/champs-declares.ts`     | fermeture d'un champ d'entrée, `cumulerChampsDeGouvernance()`, `FAMILLE_DECLAREE_PAR_L_OUTIL` | **écrit**                                                        |
+| `core/audit/canonique.ts` + Prisma        | `externalEffect` : colonne `OpsAudit`, entrée dans `CHAMPS_COUVERTS` (dix-sept champs)        | **écrit** (ADR 0017 implémentée de bout en bout)                 |
+| `core/chaine/etape-14-execution.ts`       | le cliquet de l'effet extérieur, tiré après le retour de la clôture `executer`                | **écrit**                                                        |
+| `ops/codes-hors-tableau.ts`               | les deux écarts assumés au § 15, leurs voisins écartés, la confrontation qui refuse un muet   | **écrit**                                                        |
+| `ops/alertes.ts` · `ops/mono-instance.ts` | alertes d'épinglage · observateur mono-instance (la moitié « constater » de l'ADR 0018)       | **écrit**                                                        |
+| `core/adapter-kit/types.ts`               | `ChampsDeGouvernanceDeclares`, `AUCUN_CHAMP_DE_GOUVERNANCE`                                   | déclaré                                                          |
+| `core/audit/vocabulaire.ts`               | `PorteurDEffetExterieur`, `EFFET_EXTERIEUR_NON_SURVENU`                                       | déclaré                                                          |
+| `core/audit/journal.ts`                   | `SignalEffetExterieur` (cliquet), `AffineursDAppel`                                           | déclaré + câblé                                                  |
+| `core/instance/verrou.ts`                 | `VerrouDInstance`, les quatre états, `SanteMonoInstance`                                      | **déclaré SEULEMENT** — voir ci-dessous                          |
+
+⚠️ **`core/instance/verrou.ts` ne porte que des déclarations, et sa prose parle
+au présent.** L'ADR 0018 pose deux gardes qui ne se remplacent pas — le
+**verrou** (empêcher) et l'**observateur** (constater). L'observateur est écrit
+et éprouvé ; le verrou n'a **aucune implémentation**, pas même le double en
+mémoire, et `deciderDemarrageMonoInstance`, que le fichier nomme comme l'arbitre
+du démarrage, **n'existe nulle part dans le dépôt**. Mesuré : 4 états déclarés,
+0 fonction exportée pour en trancher un seul. **Rien, aujourd'hui, ne fait qu'un
+second processus refuse de démarrer** — et l'index de provenance du § 20 étant
+local au processus, ce serait la garde d'exfiltration qui s'appliquerait un appel
+sur deux. Un `it.fails` le porte.
+
+Chaque point de couture restant porte un marqueur `🔧` nommant **le
+constructeur** et **l'ADR**, à l'endroit exact où la ligne se coud.
+
+### 9.2 · Pourquoi les champs sont POSÉS et non FUSIONNÉS
+
+Trois des cinq décisions ajoutent un champ **obligatoire** à un type partagé —
+`SessionId`, `governanceFields`, `externalEffect`. Les fusionner ici aurait cassé
+la compilation et une centaine de fixtures : le lot 1c serait parti rouge, et le
+premier réflexe du constructeur suivant aurait été de rendre les champs
+optionnels pour retrouver du vert. Un champ optionnel est exactement ce que ces
+trois ADR refusent — **c'est la forme sous laquelle une décision redevient un
+oubli**.
+
+Les interfaces sont donc posées **à côté**, et la fusion est une ligne
+(`extends`), écrite dans l'ADR avec la liste des fixtures à migrer.
+
+### 9.3 · Les `it.fails` se lisent par leur LISTE, jamais par leur nombre
+
+Le dépôt en portait 2 au lot 1b et en porte **17** après la Recette du lot 1c.
+Le nombre ne dit rien — deux `it.fails` peuvent très bien être deux autres :
+celui de l'ADR 0017 a **basculé en `it()`** (l'effet extérieur entre bien dans
+la ligne), celui de `scope_insufficient` aussi, et les épreuves adverses en ont
+ouvert d'autres. Chacun porte l'attente d'un défaut **nommé et encore ouvert** :
+
+- **ADR 0015 non cousue** — `analyserArgumentsDuSchema()` porte toujours son
+  paramètre `idFields` et son `identifiants.has(nom) continue`. Mesuré sur le
+  verdict : 6 champs de texte libre ordinaires sont refusés sans déclaration et
+  **les 6 deviennent autorisés** par la seule déclaration ;
+- **ADR 0016 non cousue** — la fonction n'a **aucun** paramètre pour recevoir
+  `governanceFields`, et `cumulerChampsDeGouvernance()` a **0 appelant de
+  production** sur 68 modules scannés. Les 9 graphies que le filet laisse
+  échapper sont déclarées, acceptées à l'admission, puis **surveillées par 0** ;
+- **ADR 0014 partielle** — `ContexteProvenance.sessionId`,
+  `IndexProvenance.marquer()` et `domainesMarquants()` sont toujours des
+  `string` : 3 occurrences nues, 0 marquée ;
+- `dependentSchemas` absent du parcours de `core/adapter-kit/fermeture.ts` ;
+- `idempotencyKey`, chaîne libre hors schéma qui atteint l'adaptateur et se
+  persiste telle quelle dans `ops_idempotency.key` ;
+- section critique déclarée mais absente de `JournalMemoire` ;
+- arbitre du verrou mono-instance inexistant (§ 9.1) ;
+- ligne d'intention non armée, faute de forme et de compteur ;
+- `tool` brut : un nom d'outil porteur d'un espace fait perdre **toute** la
+  ligne de journal du refus.
+
+**La couture des ADR 0015 et 0016 reste le reste-à-faire n° 1 de ce lot.** Les
+deux ADR ont atterri côté **manifeste et registre** — la déclaration est
+confrontée au schéma, son absence d'effet est **dite** — et pas côté
+**décision**. Le § 20 peut donc encore être désarmé par deux mots dans un
+manifeste de dépôt tiers, exactement comme au lot 1b.
+
+### 9.4 · Gardes éprouvées par un témoin posé dans le code RÉEL — Recette 1c
+
+Trois témoins ont été fabriqués DANS les fichiers de production, la suite
+relancée, puis les fichiers restaurés — empreintes md5 confrontées avant et
+après. Les trois ont rougi :
+
+| Témoin posé                                                               | Ce qui a rougi                                                                                |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `sessionDuJetonRelu()` frappe une session à la volée au lieu de la relire | 3 tests d'`identite.spec.ts`, dont G1 : « le rafraîchissement ne blanchit plus » → `autorise` |
+| La boucle d'annonce d'`enregistrer.ts` ne pousse plus rien                | `registry/champs-declares.temoin.spec.ts` : 0 ligne annoncée au lieu de 1 — admission muette  |
+| `cumulerChampsDeGouvernance()` remplace au lieu d'unir                    | 7 tests sur 3 fichiers ; `perdus : 11` annoncé                                                |
+
+Une garde qui ne peut pas échouer n'existe pas. Celles-ci le peuvent.
+
+### 9.5 · Mesures de fin de lot 1c — 2026-08-31, après la Recette
+
+| Gate                   | Résultat                                                         |
+| ---------------------- | ---------------------------------------------------------------- |
+| `pnpm typecheck`       | vert                                                             |
+| `pnpm lint`            | vert                                                             |
+| `pnpm format:check`    | vert **sur tout le dépôt**                                       |
+| `pnpm prisma:validate` | vert (URL stub `stub.invalid`)                                   |
+| `pnpm test`            | **977 verts, 17 `it.fails`, 1 `.todo`, 0 rouge** (838 au lot 1b) |
+
+**76 fichiers de gardes, aucun sans compte annoncé.** Mesuré deux fois, et les
+deux mesures sont écrites parce qu'elles ne disent pas la même chose : **0**
+fichier sans aucune annonce `console.*`, et **0** fichier dont les annonces ne
+porteraient **aucun nombre**. La seconde est la vraie — une annonce sans chiffre
+est une couleur.
+
+**11 étapes applicables au JSON-RPC, 11 revendiquées par un module propriétaire,
+0 orpheline** ; **5** de ces modules vivent dans `core/chaine` et existent sur
+le disque, **0** fantôme ; `etapesNonImplementees()` rend **0**.
+
+⚠️ **« 14 étapes avec un module propriétaire chacune » n'est la mesure de rien**,
+et cette formule circule. Le registre porte **15** entrées (les 14 du § 11, plus
+l'étape 0 du § 23) ; **4** sont « HTTP seul » et attendent `core/transport/`,
+qui n'existe pas ; **5** ont un module livré. Le lot 1b écrivait la chose
+exactement — « les quatorze étapes ont un PROPRIÉTAIRE, et les cinq de
+`core/chaine` sont IMPLÉMENTÉES ». C'est la reprise abrégée qui a transformé un
+périmètre d'observation en garantie.
+
+### 9.6 · `scope_insufficient` est branché
+
+Le § 11 donne un `403` à l'étape 5 et le § 15 ne nomme aucun code : les trois
+causes de refus de l'étape sortaient toutes avec `code: null`, indiscernables
+entre elles **et** d'un refus de politique, ce qui privait le comptage du § 24
+de sa seule façon de séparer une **attaque** d'un **socle mal câblé**.
+
+`APPEL_STEPS[5].refus` porte désormais `scope_insufficient`, et les **quatre
+branches** de refus de `core/chaine/etape-05-scopes.ts` le rendent. Mesuré en
+faisant refuser l'étape quatre fois et en LISANT le code rendu, pas en relisant
+le tableau. **Le module de l'étape n'a pas bougé d'une ligne** : `refuse()` LIT
+le code dans l'ancrage — c'est la propriété que `core/chaine/etapes.ts` existe
+pour tenir. Le `403` est inchangé : le code nomme la cause, il ne remplace pas
+le statut.
+
+L'`it.fails` qui portait l'attente a **basculé en `it()`**, et il mesure
+maintenant davantage qu'avant. `enAttenteDeBranchement` est **vide** pour les
+deux écarts assumés du § 15.
+
+### 9.7 · La prose qui compte des champs est désormais gardée
+
+Trois documents — `CHANGELOG.md`, cette page et l'ADR 0002 — annonçaient une
+empreinte chaînée d'une colonne plus courte qu'elle ne l'est : **dix-sept
+champs** depuis que l'ADR 0017 y a fait entrer `externalEffect`. Les trois
+phrases étaient vraies le jour de leur écriture et fausses le lendemain, et
+**aucune garde ne les lisait** : `CHAMPS_COUVERTS` est confronté au schéma
+Prisma et à sa forme canonique, à la prose par personne.
+
+`core/audit/prose-de-l-empreinte.spec.ts` relit **tous les documents Markdown** du
+dépôt, y trouve les phrases qui annoncent un nombre de champs couverts (trois, ce jour), et
+exige que chacune dise `CHAMPS_COUVERTS.length`. Elle porte **deux planchers**
+qui ne disent pas la même chose : « au moins 10 documents relus » refuse une
+garde qui ne lirait plus rien, et « au moins 3 phrases trouvées » refuse une
+garde qui les lirait tous sans plus rien y reconnaître — le cas exact d'une
+reformulation qui laisserait le chiffre faux.
+
+⚠️ **Sa borne est écrite dans son en-tête** : elle ne trouve que les formes
+qu'elle a nommées (chiffres et noms de nombres de zéro à vingt, suivis de
+« champs », à moins de 140 caractères de « empreinte chaînée » ou de
+`CHAMPS_COUVERTS`). « Une quinzaine de colonnes » lui échapperait.

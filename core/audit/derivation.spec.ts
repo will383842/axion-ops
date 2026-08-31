@@ -85,11 +85,13 @@ describe("core/audit — la couverture de l'empreinte dérive du schéma", () =>
         `prisma/schema.prisma → model OpsAudit`,
     );
 
-    // Plancher-témoin : le § 12 en énumérait dix-huit ; le lot 1b en ajoute un
-    // — `argHashValidated`, qui sépare les deux populations d'`argHash`. Un
-    // modèle introuvable ou renommé rendrait `champs` vide, et sans ce plancher
-    // la garde resterait verte en n'ayant rien lu.
-    expect(champs.length).toBe(19);
+    // Plancher-témoin : le § 12 en énumérait dix-huit ; le lot 1b en a ajouté un
+    // — `argHashValidated`, qui sépare les deux populations d'`argHash` — et le
+    // lot 1d un vingtième : `externalEffect` (ADR 0017), qui dit CE QUI EST
+    // SORTI là où `outcome` ne dit que ce qui est revenu. Un modèle introuvable
+    // ou renommé rendrait `champs` vide, et sans ce plancher la garde resterait
+    // verte en n'ayant rien lu.
+    expect(champs.length).toBe(20);
     expect(champsOrphelins(champs)).toEqual([]);
 
     // Et l'inverse : aucun champ déclaré couvert n'est absent du schéma. Sans

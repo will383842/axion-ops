@@ -219,6 +219,25 @@ export interface ToolContext<TProfile extends string = string> {
    *
    * § 11 : ce n'est PAS une session d'authentification. Le socle n'en tient
    * aucune — le jeton porte les droits. C'est un état de pilotage.
+   *
+   * ⚠️ **ELLE EST ÉTABLIE PAR LE SOCLE ET N'EST JAMAIS ACCEPTÉE DU CLIENT —
+   *    ADR 0014.** C'est le verrou n° 1 du § 20 : la garde d'exfiltration s'ancre
+   *    tout entière sur cette clé, et un appelant qui la renouvelle entre la
+   *    lecture et l'appel suivant l'annule sans qu'aucun compte ne bouge.
+   *
+   *    Ce verrou a deux moitiés, et une seule tenait à la fin du lot 1b :
+   *
+   *     · `input` — TENUE, et par DÉRIVATION : le contrôle 7 du § 09
+   *       (`core/adapter-kit/autorisation.ts`) lit les propriétés de ce type-ci
+   *       dans le SOURCE de ce fichier et refuse tout schéma d'entrée qui en
+   *       redéclare une. `sessionId` en fait partie depuis toujours ;
+   *     · le TRANSPORT — ouverte, et c'est ce que l'ADR 0014 ferme.
+   *
+   * 🔧 **TYPE À RESSERRER PAR LE CONSTRUCTEUR ① :** `SessionId`, le type marqué
+   *    de `core/identite/session.ts`. La Fondation ne peut pas le poser ici tant
+   *    que la fabrique n'existe pas — elle ne saurait ni la dériver ni la
+   *    recopier, ce qui est exactement le motif qui laisse `TProfile` ouvert
+   *    ci-dessus.
    */
   readonly sessionId: string;
 
@@ -328,6 +347,52 @@ export const ERROR_CODES = [
    * même geste) et où déverrouiller. Voir ADR 0005 et README, « Écarts relevés ».
    */
   "vault_locked",
+  /**
+   * ⚠️ AJOUTÉ HORS DU TABLEAU DU § 15 — DEUXIÈME ÉCART DU MÊME GENRE.
+   *
+   * Le § 11 donne à l'étape 5 (« scopes suffisants pour l'`effect` déclaré »)
+   * un `403`, et le § 15 N'ÉNUMÈRE AUCUN CODE pour un scope insuffisant. Le
+   * refus existe donc, mais il n'a pas de nom.
+   *
+   * ═══ POURQUOI CE TROU COÛTE, ET À QUI ═══
+   *
+   * `core/chaine/etape-05-scopes.ts` refuse pour TROIS causes de nature très
+   * différente — un jeton qui porte un scope qu'il ne devrait jamais porter,
+   * une correspondance effet → scope mal câblée dans le socle, un scope
+   * simplement absent — et les trois sortaient avec `code: null` jusqu'à la
+   * Recette du lot 1c. Seul le texte du message les séparait.
+   *
+   * Or le § 15, troisième règle, veut qu'on puisse compter « N refus portant un
+   * `effect` autre que `read` dans une fenêtre courte pour le même principal »,
+   * parce que c'est la signature d'une injection à demi réussie (§ 24). Un
+   * comptage qui ne peut pas isoler les refus de scope ne distingue pas une
+   * ATTAQUE d'un SOCLE MAL CÂBLÉ — et ces deux-là appellent des gestes opposés :
+   * l'un fait révoquer un jeton, l'autre fait corriger une table.
+   *
+   * ═══ POURQUOI AUCUN VOISIN NE CONVIENT ═══
+   *
+   *  1. `unauthenticated` — mentirait sur l'issue : le jeton est parfaitement
+   *     valide, signé, non révoqué, de la bonne audience. Le message ferait se
+   *     ré-authentifier, ce qui ne change rien et fait tourner en rond ;
+   *  2. `policy_denied` — mentirait sur la couche : la politique n'a pas
+   *     refusé, elle n'a même pas été consultée — elle est à l'étape 10. Le
+   *     message parlerait d'un niveau de garde-fou à desserrer, alors qu'aucun
+   *     desserrage n'ouvrirait cet appel-là ;
+   *  3. `tool_disabled` — mentirait deux fois : l'outil est actif, et l'écran
+   *     Outils n'y peut rien.
+   *
+   * Même geste qu'au lot 1b pour `vault_locked` (ADR 0005) : nommer le code
+   * manquant plutôt qu'emprunter celui du voisin.
+   *
+   * ⚠️ IL EST DÉCLARÉ ICI, ET IL EST BRANCHÉ DEPUIS LA RECETTE DU LOT 1c.
+   *    `APPEL_STEPS` porte `refus: "scope_insufficient"` sur l'étape 5, et
+   *    `core/chaine/etape-05-scopes.ts` le rend sur ses TROIS refus — sans une
+   *    ligne à retoucher, parce que `refuse()` LIT le code dans l'ancrage. Le
+   *    statut HTTP reste le `403` du § 11 : le code JSON-RPC le nomme, il ne le
+   *    remplace pas. L'`it.fails` d'`ops/codes-hors-tableau.spec.ts` a basculé
+   *    en `it()` du même geste. Voir README, « Écarts relevés ».
+   */
+  "scope_insufficient",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -340,8 +405,15 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
  * Une étape de la chaîne d'appel, telle qu'elle est décrite au § 11.
  *
  * `refus` porte le code d'erreur rendu quand l'étape refuse, ou `null` pour les
- * quatre étapes qui refusent au niveau HTTP seul (403, 401, 401, 401) et n'ont
- * donc pas de code JSON-RPC.
+ * quatre étapes « HTTP seul » du § 11 (403, 401, 401, 401), qui refusent au
+ * niveau du transport et n'ont donc pas de code JSON-RPC.
+ *
+ * ⚠️ « `refus === null` » ET « `httpSeul` » NE SONT PLUS LE MÊME ENSEMBLE, ET
+ *    NE L'ONT JAMAIS ÉTÉ PAR CONSTRUCTION. Depuis que la Recette du lot 1c a
+ *    branché `scope_insufficient`, les étapes SANS code sont exactement les
+ *    quatre « HTTP seul » — mais c'est une coïncidence de valeurs, pas une
+ *    règle : dériver l'un de l'autre ferait qu'une future étape sans code
+ *    passerait pour une étape de transport. Chacun se lit dans sa colonne.
  */
 export interface EtapeAppel {
   readonly numero: number;
@@ -351,11 +423,20 @@ export interface EtapeAppel {
    * Le code du § 15 rendu quand l'étape refuse, ou `null` quand le § 11 ne
    * nomme qu'un statut HTTP nu.
    *
-   * ⚠️ L'étape 5 (« scopes suffisants ») est dans ce cas : le § 11 lui donne un
-   *    403, et le § 15 N'ÉNUMÈRE AUCUN CODE pour un scope insuffisant. C'est un
-   *    trou du CDC, pas une omission de la Fondation — voir README, « Écarts
-   *    relevés ». Il est laissé VISIBLE ici plutôt que bouché par un code
-   *    voisin qui mentirait sur la cause.
+   * ⚠️ L'ÉTAPE 5 A ÉTÉ LE TROU DU § 15, ET ELLE NE L'EST PLUS. Le § 11 lui
+   *    donne un `403` et le § 15 n'énumère aucun code : le lot 1c a NOMMÉ le
+   *    code manquant (`scope_insufficient`, avec ses trois voisins écartés et
+   *    ce que chacun aurait menti), et la Recette du même lot l'a BRANCHÉ
+   *    ci-dessous. L'écart au CDC reste un écart — il est tenu par
+   *    `ops/codes-hors-tableau.ts`, qui refuse tout code ajouté sans motif
+   *    écrit.
+   *
+   * ⚠️ LE TABLEAU ET L'ÉTAPE CHANGENT ENSEMBLE, JAMAIS L'UN SANS L'AUTRE. Un
+   *    code écrit ici que l'étape ne rend pas fait chercher une métrique qui
+   *    restera vide ; une étape qui rend un code absent d'ici fabrique un
+   *    refus que le § 24 ne sait pas classer. C'est `refuse()` de
+   *    `core/chaine/etapes.ts` qui tient les deux : il LIT le code dans
+   *    l'ancrage, et aucune étape n'a le droit de l'écrire à la main.
    */
   readonly refus: ErrorCode | null;
   /** Statut HTTP nommé par le § 11, ou `null` quand l'étape n'en nomme aucun. */
@@ -464,7 +545,14 @@ export const APPEL_STEPS = [
     numero: 5,
     cle: "scopes",
     libelle: "Scopes suffisants pour l'effect déclaré",
-    refus: null,
+    // ⚠️ ÉCART ASSUMÉ AU § 15, BRANCHÉ PAR LA RECETTE DU LOT 1c. Le § 15
+    //    n'énumère aucun code pour un scope insuffisant ; le § 24 en exige un,
+    //    sans quoi les trois causes de refus de l'étape 5 se comptent avec les
+    //    refus de politique. Le motif, les voisins écartés et l'ADR vivent dans
+    //    `ops/codes-hors-tableau.ts` — un code ajouté sans motif écrit y rougit.
+    refus: "scope_insufficient",
+    // Le `403` du § 11 NE BOUGE PAS : le code JSON-RPC nomme la cause, il ne
+    // remplace pas le statut. L'étape reste applicable à tous les transports.
     statutHttp: 403,
     httpSeul: false,
   },

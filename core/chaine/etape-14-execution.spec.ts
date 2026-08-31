@@ -1082,3 +1082,157 @@ describe("§ 09 — un type TypeScript ne survit pas à la compilation", () => {
     expect(levee?.anomalies.join(" ")).toMatch(/failedSources/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Garde — `executer()` EST APPELÉ EXACTEMENT UNE FOIS SUR CHAQUE CHEMIN SERVI
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * CE QUE CETTE GARDE PROTÈGE, ET POURQUOI ELLE VIT ICI (ADR 0017).
+ *
+ * `ops_audit.externalEffect` est posé par un CLIQUET que l'orchestrateur tire
+ * dans la clôture `executer()` — c'est-à-dire ICI, au seul endroit du socle où
+ * l'adaptateur est appelé. Toute la valeur de cette colonne repose donc sur une
+ * propriété de CE fichier, et sur elle seule :
+ *
+ *   `executer()` est appelé UNE fois sur chaque chemin qui va jusqu'à
+ *   l'adaptateur, et ZÉRO fois sur ceux qui refusent avant lui.
+ *
+ * Deux façons de la perdre, deux mensonges distincts :
+ *
+ *  · **ZÉRO appel sur un chemin servi** — le cliquet n'est jamais tiré, et la
+ *    ligne dit qu'il ne s'est rien passé. C'est le défaut de l'ADR 0017, revenu
+ *    par la porte d'à côté.
+ *  · **DEUX appels** — deux effets extérieurs pour un seul appel d'outil, et un
+ *    booléen qui n'en compte qu'un. La ligne serait vraie sans être complète, et
+ *    l'idempotence du § 12 serait, elle, franchement violée.
+ *
+ * ⚠️ LA GARDE EXISTANTE (« contextes incohérents ») MESURE L'AUTRE MOITIÉ, ET
+ *    ELLE NE SUFFIT PAS. Elle prouve que rien ne part quand le contexte est
+ *    invalide ; elle ne dit rien des chemins où quelque chose PART. Celle-ci les
+ *    parcourt tous — les quatre paliers de la cascade ET le refus
+ *    `result_too_large`, qui est justement le chemin où l'effet est déjà parti.
+ */
+
+/** Ce qu'une exécution instrumentée rend : le compte d'appels, et l'issue. */
+interface Trace {
+  readonly appels: number;
+  readonly issue: "autorise" | "refuse" | "levée";
+}
+
+/**
+ * Instrumente `executer()` et rend le compte. La fonction d'étape est un
+ * PARAMÈTRE, pour qu'un témoin fabriqué puisse être mesuré par le même
+ * instrument que la vraie — sans quoi la garde ne prouverait que sa propre
+ * complaisance.
+ */
+async function tracerExecutions(
+  etape: (contexte: ContexteExecution) => Promise<VerdictEtape<ExecutionEtablie>>,
+  contexte: ContexteExecution,
+): Promise<Trace> {
+  let appels = 0;
+  const espion: ContexteExecution = {
+    ...contexte,
+    executer: async () => {
+      appels += 1;
+      return contexte.executer();
+    },
+  };
+  try {
+    const verdict = await etape(espion);
+    return { appels, issue: verdict.issue };
+  } catch {
+    return { appels, issue: "levée" };
+  }
+}
+
+describe("core/chaine — l'adaptateur est appelé UNE fois, et le cliquet en dépend", () => {
+  it("rougit sur deux témoins fabriqués — l'un qui n'exécute pas, l'autre qui exécute deux fois", async () => {
+    const charge = chargeDouble({ nombre: 2, longueurExtrait: 20, longueurHref: 8 });
+    const contexte = contexteDouble(charge, 100_000);
+
+    // Deux étapes FABRIQUÉES, chacune fautive d'un côté. Si l'instrument ne
+    // savait pas les distinguer, il ne saurait rien mesurer de la vraie.
+    const nExecuteJamais = (): Promise<VerdictEtape<ExecutionEtablie>> =>
+      Promise.reject(new Error("témoin : refuse sans jamais appeler l'adaptateur"));
+    const executeDeuxFois = async (
+      ctx: ContexteExecution,
+    ): Promise<VerdictEtape<ExecutionEtablie>> => {
+      await ctx.executer();
+      await ctx.executer();
+      throw new Error("témoin : deux effets extérieurs pour un seul appel");
+    };
+
+    const sans = await tracerExecutions(nExecuteJamais, contexte);
+    const double = await tracerExecutions(executeDeuxFois, contexte);
+
+    console.info(
+      `[témoin cliquet] 2 étapes fabriquées mesurées — « n'exécute jamais » : ` +
+        `${String(sans.appels)} appel(s), « exécute deux fois » : ` +
+        `${String(double.appels)} appel(s)`,
+    );
+
+    expect(sans.appels).toBe(0);
+    expect(double.appels).toBe(2);
+  });
+
+  it("appelle l'adaptateur UNE fois sur chaque chemin servi, refus `result_too_large` compris", async () => {
+    // Les chemins couvrent les quatre paliers du § 13.3 ET le refus. C'est le
+    // plafond qu'on fait varier, et la cascade choisit elle-même où elle
+    // s'arrête — sauf pour le dernier, où c'est l'ABSENCE d'`aggregateBy` qui
+    // ferme le troisième palier. Ce dernier est celui qui compte : l'effet
+    // extérieur EST DÉJÀ PARTI quand le refus se prononce.
+    const charge = chargeDouble({ nombre: 12, longueurExtrait: 400, longueurHref: 40 });
+
+    const chemins: ReadonlyArray<{
+      readonly libelle: string;
+      readonly contexte: ContexteExecution;
+    }> = [
+      // Les trois premiers font varier le seul PLAFOND : la cascade choisit
+      // elle-même où elle s'arrête, et ces chemins-là sont servis.
+      { libelle: "intact", contexte: contexteDouble(charge, 1_000_000) },
+      { libelle: "raccourci", contexte: contexteDouble(charge, 6_000) },
+      { libelle: "rang 2 retiré", contexte: contexteDouble(charge, 3_500) },
+      { libelle: "agrégat", contexte: contexteDouble(charge, 400) },
+      // LE CHEMIN QUI COMPTE POUR LE CLIQUET : l'outil ne déclare aucun
+      // `aggregateBy`, le troisième palier du § 13.3 lui est donc impossible,
+      // et le dépassement finit en `result_too_large` — APRÈS que l'adaptateur
+      // a répondu. C'est exactement la ligne que l'ADR 0017 accusait de mentir.
+      {
+        libelle: "result_too_large",
+        contexte: contexteDouble(charge, 3_000, {
+          compaction: { free: ["extrait"], tier2: ["detailHref"], aggregateBy: null },
+        }),
+      },
+    ];
+
+    const anomalies: string[] = [];
+    const issuesVues = new Set<string>();
+    let cheminsMesures = 0;
+
+    for (const chemin of chemins) {
+      const trace = await tracerExecutions(executerEtape14, chemin.contexte);
+      cheminsMesures += 1;
+      issuesVues.add(trace.issue);
+      if (trace.appels !== 1) {
+        anomalies.push(`${chemin.libelle} : ${String(trace.appels)} appel(s)`);
+      }
+    }
+
+    console.info(
+      `[garde cliquet · chemins servis] ${String(cheminsMesures)} chemin(s) mesuré(s), ` +
+        `issues distinctes : ${[...issuesVues].sort().join(", ")}, ` +
+        `${String(anomalies.length)} anomalie(s)`,
+    );
+
+    // Planchers-témoins. Zéro chemin serait vert sans rien regarder ; et si les
+    // quatre plafonds tombaient tous du même côté, la garde ne mesurerait qu'un
+    // seul chemin en quatre exemplaires — c'est ce que le second contrôle
+    // interdit.
+    expect(cheminsMesures).toBe(chemins.length);
+    expect(cheminsMesures).toBeGreaterThanOrEqual(5);
+    expect(issuesVues.has("autorise")).toBe(true);
+    expect(issuesVues.has("refuse")).toBe(true);
+    expect(anomalies).toEqual([]);
+  });
+});

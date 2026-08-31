@@ -15,7 +15,16 @@
     "",
     "`trustTier` et `maxDataClass` sont décidés ICI, côté socle. Un manifeste qui",
     "les porterait est refusé (`confiance_auto_decernee`) — sinon un dépôt public",
-    "se décernerait son propre niveau de confiance."
+    "se décernerait son propre niveau de confiance.",
+    "",
+    "⚠️ LES `manifestSha` CI-DESSOUS SONT DES MARQUE-PLACES, ET C'EST CE QUI REND",
+    "les ajouts au manifeste encore gratuits. La forme du manifeste a changé deux",
+    "fois — `profilesVersion`/`profilesSha` au lot 1b (ADR 0004), puis",
+    "`governanceFields` au lot 1c (ADR 0016) — et chacune a déplacé TOUTES les",
+    "empreintes. Tant qu'aucun épinglage réel n'existe, cela ne coûte rien ; après",
+    "le premier, chaque ajout obligerait à revalider à la main le `manifestSha` de",
+    "chaque dépôt tiers. Un champ qu'on sait devoir ajouter s'ajoute AVANT le",
+    "premier épinglage, jamais après."
   ],
   "lockVersion": 1,
   "adapters": [

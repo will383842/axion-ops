@@ -56,10 +56,85 @@ export type Decision = (typeof DECISIONS)[number];
  *    avant le socle (§ 13.2). Il se lit dans `partialSources`. Réutiliser le
  *    même mot pour les deux étages produit exactement ce que la note
  *    « troncature honnête » veut empêcher.
+ *
+ * ⚠️ **`non-exécuté` A UNE BORNE ÉCRITE, ET `avecJournal` LA VIOLAIT — ADR 0017.**
+ *    Sa définition ci-dessus dit « refusé AVANT l'étape 14 : rien n'a tourné ».
+ *    Or `issue()` dérive le triplet du seul GENRE de la terminaison, si bien
+ *    qu'un refus PRONONCÉ PAR l'étape 14 — `result_too_large`, qui se prononce
+ *    sur ce qui SORT — sort lui aussi en `non-exécuté`. Un `send` PARTI est donc
+ *    rangé parmi les appels qui n'ont rien fait.
+ *
+ *    Le vocabulaire, lui, était déjà juste : `erreur` nomme explicitement
+ *    « incompactable (`result_too_large`) ». **Aucune valeur n'est ajoutée ici** ;
+ *    c'est la dérivation qui est corrigée, dans `core/audit/journal.ts`. Une
+ *    valeur de plus aurait rompu l'empreinte chaînée pour un mot qui existait
+ *    déjà.
+ *
+ * ⚠️ **ET `outcome` NE DIT PAS SI UN EFFET EST SORTI.** Il décrit CE QUI REVIENT
+ *    — la charge servie, et ce qu'il a fallu en faire. Le fait « un effet
+ *    extérieur a eu lieu » est une dimension ORTHOGONALE : voir
+ *    {@link PorteurDEffetExterieur} et l'ADR 0017. Les loger dans le même mot
+ *    serait la faute que le § 13.2 dénonce déjà pour `truncated` /
+ *    `sourceIncomplete` : deux étages sous un seul mot.
  */
 export const OUTCOMES = ["ok", "compacté", "agrégé", "erreur", "non-exécuté"] as const;
 
 export type Outcome = (typeof OUTCOMES)[number];
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  L'effet extérieur — § 20, objectif O6, ADR 0017
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * **UN EFFET OBSERVABLE DE L'EXTÉRIEUR A-T-IL EU LIEU ?**
+ *
+ * ✅ **FUSIONNÉE AU LOT 1d.** {@link ContenuLigne} l'ÉTEND, `CHAMPS_COUVERTS`
+ *    (`canonique.ts`) la porte, et `ops_audit` (`prisma/schema.prisma`) déclare
+ *    la colonne. Les trois vont ENSEMBLE, et elles ont atterri ensemble : un
+ *    champ absent de `CHAMPS_COUVERTS` n'entre pas dans l'empreinte, donc se
+ *    modifie après coup sans casser la chaîne — et `derivation.spec.ts` rougit
+ *    s'il apparaît au schéma sans être ni couvert ni exclu.
+ *
+ * ═══ POURQUOI UNE COLONNE, ET POURQUOI MAINTENANT ═══
+ *
+ * Le § 20 donne le test : « quelqu'un d'autre que moi peut-il s'en apercevoir ? ».
+ * L'objectif O6 veut qu'une revue conduite sur `ops_audit` retrouve TOUS les
+ * effets extérieurs. Elle les cherche aujourd'hui par
+ * `decision = "autorisé" ET effect ∈ {send, destructive}`, et elle en manque
+ * deux familles :
+ *
+ *  · le refus de l'étape 14 APRÈS le départ de l'effet — mesuré au lot 1b ;
+ *  · l'exception levée APRÈS le retour de l'adaptateur — compaction, masquage,
+ *    clôture d'idempotence : `decision: "interrompu"`, et l'envoi est parti.
+ *
+ * Une valeur d'`outcome` de plus n'aurait couvert que la première. Un champ à
+ * part couvre les deux, et il répond à la question qu'on pose vraiment.
+ *
+ * ⚠️ **IL NE SE DÉDUIT JAMAIS D'`effect`.** Un `send` refusé à l'étape 10 n'a
+ *    rien envoyé. La valeur est posée par la SEULE étape 14, à partir du fait que
+ *    l'adaptateur a répondu, croisé avec `estEffetExterieur()` de
+ *    `core/policy/effet.ts` — dérivé, jamais recopié.
+ *
+ * ⚠️ **LA BORNE, ÉCRITE AVEC LA MESURE.** Un adaptateur qui LÈVE après avoir
+ *    envoyé est indiscernable d'un adaptateur qui lève avant : l'étape 14 ne voit
+ *    pas la différence, et ce champ vaudra `false` alors qu'un effet est parti.
+ *    C'est exactement le trou que la LIGNE D'INTENTION (`PorteeDIntention`,
+ *    `orchestrateur.ts`) couvre — ce champ dit ce que le socle SAIT, l'intention
+ *    dit ce qu'il a TENTÉ. Les deux ne se remplacent pas.
+ */
+export interface PorteurDEffetExterieur {
+  readonly externalEffect: boolean;
+}
+
+/**
+ * La valeur d'une ligne dont aucun effet extérieur n'est sorti — donc de toutes
+ * celles que l'étape 14 n'a pas atteintes.
+ *
+ * C'est une CONSTANTE NOMMÉE plutôt qu'un `false` littéral, pour le motif exact
+ * d'{@link ARG_HASH_NON_VALIDE} : un booléen nu chez plusieurs appelants est
+ * autant d'occasions de se tromper de sens, et personne ne le verrait.
+ */
+export const EFFET_EXTERIEUR_NON_SURVENU = false;
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Les constantes du journal
@@ -143,8 +218,13 @@ export const ARG_HASH_NON_VALIDE = false;
  * § 31 — CE QUI N'ENTRE JAMAIS : aucun corps, aucun extrait, aucune donnée
  * personnelle. `contenu.ts` en fait une garde qui s'exécute À L'ÉCRITURE, et
  * un manquement y est une écriture REFUSÉE, pas un avertissement.
+ *
+ * ⚠️ UN DIX-SEPTIÈME CHAMP ARRIVE PAR L'`extends` — `externalEffect`, ADR 0017.
+ *    Il est hérité plutôt qu'écrit ici pour que sa PROSE vive à un seul endroit,
+ *    avec le motif de la colonne et sa borne. Le lire ailleurs qu'à
+ *    {@link PorteurDEffetExterieur} ferait deux vérités pour un seul fait.
  */
-export interface ContenuLigne {
+export interface ContenuLigne extends PorteurDEffetExterieur {
   /** L'horodatage. ⚠️ IL NE SERT JAMAIS À ORDONNER (§ 12) — voir `seq`. */
   readonly at: Date;
 
@@ -153,6 +233,14 @@ export interface ContenuLigne {
   /**
    * Session de PILOTAGE (§ 11) — pas d'authentification. C'est elle que le § 20
    * marque quand un résultat `personal`/`sensitive` traverse le socle.
+   *
+   * ⚠️ **ÉTABLIE PAR LE SOCLE, JAMAIS ACCEPTÉE D'UN APPELANT — ADR 0014.** Un
+   *    `sessionId` choisi par qui appelle rendrait cette colonne inutilisable
+   *    pour deux usages à la fois : le marquage du § 20, et le regroupement des
+   *    appels d'une même session au § 24.
+   *
+   * 🔧 **TYPE À RESSERRER PAR LE CONSTRUCTEUR ① :** `SessionId`, le type marqué
+   *    de `core/identite/`.
    */
   readonly sessionId: string;
 

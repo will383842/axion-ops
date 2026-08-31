@@ -6,6 +6,7 @@ import { executerHarnais, formaterRapport } from "./conformite.js";
 import type { EntreeHarnais, RapportHarnais, ResultatControle } from "./conformite.js";
 import { definirOutil } from "./types.js";
 import type { DefinitionAdaptateur, DefinitionOutil } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "./types.js";
 
 /**
  * Gardes du HARNAIS DE CONFORMITÉ — les neuf contrôles du § 09.
@@ -58,6 +59,7 @@ function outilTemoin(surcharges: Partial<DefinitionOutil<Profil>> = {}): Definit
     maxBytes: 256,
     compaction: { free: ["extrait"], tier2: ["detailHref", "canal"], aggregateBy: "canal" },
     idFields: ["submissionId"],
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     fixtureMax: "fixtures/inbox-max.json",
     handler: () => ({ submissionId: "s1", extrait: "…" }),
   });

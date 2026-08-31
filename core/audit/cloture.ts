@@ -30,7 +30,12 @@
  * reprendre. Écart signalé au rapport.
  */
 
-import type { AppelStep } from "../types.js";
+import type { AppelStep, Effect } from "../types.js";
+// DÉRIVÉ, JAMAIS RECOPIÉ. Le test du § 20 vit chez son propriétaire
+// (`core/policy/effet.ts`) sous la forme d'un `switch` exhaustif : ajouter un
+// effet au § 09 sans le classer y est une erreur de COMPILATION. Le redire ici
+// en ferait une seconde vérité, et c'est la seconde qui ne suivrait pas.
+import { estEffetExterieur } from "../policy/effet.js";
 import type { ContenuLigne, LigneAudit } from "./vocabulaire.js";
 import { FORME_EMPREINTE, OUTIL_CLOTURE, PRINCIPAL_SYSTEME } from "./vocabulaire.js";
 
@@ -216,6 +221,22 @@ export const CHAMPS_CHARGE_CLOTURE = CHAMPS_CHARGE;
 const AUCUNE_ETAPE: AppelStep | null = null;
 
 /**
+ * L'`effect` d'une clôture, NOMMÉ UNE FOIS parce que DEUX champs de la ligne en
+ * dépendent — `effect` et `externalEffect` (ADR 0017).
+ *
+ * ⚠️ C'EST LA RAISON D'ÊTRE DE CETTE CONSTANTE, ET ELLE EST MESURÉE AILLEURS.
+ *    Les deux champs répondent à deux questions différentes — « de quelle
+ *    famille est l'opération » et « quelque chose est-il sorti » — mais ils ne
+ *    peuvent pas se contredire. Écrire `destructive` d'un côté et
+ *    `EFFET_EXTERIEUR_NON_SURVENU` de l'autre ferait DEUX dérivations d'un même
+ *    fait, dont une seule serait juste : la ligne apparaîtrait dans une revue
+ *    des effets conduite sur `effect`, et disparaîtrait de la même revue
+ *    conduite sur `externalEffect`. Ici il n'y a qu'une source, et le second
+ *    champ se DÉRIVE du premier par `estEffetExterieur` — jamais recopié.
+ */
+const EFFET_CLOTURE: Effect = "destructive";
+
+/**
  * Fabrique le CONTENU d'une ligne de clôture. Le chaînage (`prevHash`,
  * `selfHash`, `seq`) est posé par `Journal.journaliser`, comme pour n'importe
  * quelle ligne : une clôture est une ligne ORDINAIRE de la chaîne, et c'est
@@ -238,7 +259,7 @@ export function construireCloture(charge: ChargeCloture, argHash: string, at: Da
     adapterVersion: VERSION_CLOTURE,
     // Une purge détruit : le § 09 n'a pas d'autre mot pour ça, et l'écrire
     // `read` ferait disparaître les purges de toute revue des effets.
-    effect: "destructive",
+    effect: EFFET_CLOTURE,
     // Le niveau de repli du § 20. Une purge n'est pas un appel d'outil : elle
     // ne desserre rien et ne s'autorise de rien.
     policyLevel: "brouillon",
@@ -258,6 +279,17 @@ export function construireCloture(charge: ChargeCloture, argHash: string, at: Da
     partialSources: encoderCharge(charge),
     durationMs: 0,
     outcome: "ok",
+    // ADR 0017 — DÉRIVÉ d'`EFFET_CLOTURE`, jamais posé à la main. Une clôture
+    // ne passe pas par l'étape 14 et n'a donc aucun cliquet pour la signaler :
+    // c'est le seul endroit du socle où ce champ se calcule autrement, et il se
+    // calcule à partir du même mot que la ligne inscrit juste au-dessus.
+    //
+    // ⚠️ ET IL VAUT `true`. Une purge retire douze mois de journal — le test du
+    //    § 20 (« quelqu'un d'autre que moi peut-il s'en apercevoir ? ») n'a pas
+    //    de réponse plus nette. Une revue des effets extérieurs qui filtrerait
+    //    `externalEffect = true` et n'y verrait aucune purge serait exactement
+    //    l'angle mort que l'objectif O6 nomme.
+    externalEffect: estEffetExterieur(EFFET_CLOTURE),
   };
 }
 

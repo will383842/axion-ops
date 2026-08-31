@@ -34,7 +34,7 @@ describe("core/audit — aucun contenu n'entre dans le journal (§ 31)", () => {
         `${String(verdict.anomalies.length)} anomalies`,
     );
 
-    expect(verdict.champsInspectes).toBe(16);
+    expect(verdict.champsInspectes).toBe(17);
     expect(verdict.anomalies).not.toHaveLength(0);
   });
 
@@ -47,11 +47,14 @@ describe("core/audit — aucun contenu n'entre dans le journal (§ 31)", () => {
     );
 
     expect(verdict.champsInspectes).toBe(CHAMPS_COUVERTS.length);
-    expect(verdict.champsInspectes).toBe(16);
+    // Dix-sept depuis l'ADR 0017 : `externalEffect` a rejoint les champs
+    // couverts, et un booléen se contrôle comme les autres — il peut porter un
+    // `undefined` ou une chaîne, et il entre dans l'empreinte.
+    expect(verdict.champsInspectes).toBe(17);
     expect(verdict.anomalies).toEqual([]);
   });
 
-  it("refuse le poison sur CHACUN des seize champs couverts — aucun n'échappe", () => {
+  it("refuse le poison sur CHACUN des dix-sept champs couverts — aucun n'échappe", () => {
     // La dérivation : on ne choisit pas les champs à éprouver, on les prend
     // tous. Un champ qui aurait été oublié dans la table des formes resterait
     // vert ici, et c'est précisément ce que cette boucle interdit.
@@ -67,7 +70,7 @@ describe("core/audit — aucun contenu n'entre dans le journal (§ 31)", () => {
 
     console.info(`[garde contenu · balayage] ${String(mesures)} champs éprouvés au poison`);
 
-    expect(mesures).toBe(16);
+    expect(mesures).toBe(17);
     expect(permissifs).toEqual([]);
   });
 

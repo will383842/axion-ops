@@ -124,6 +124,8 @@ axion-ops/
 ├─ core/
 │  ├─ types.ts       LES TYPES PARTAGÉS, ET EUX SEULS  ← posé par la Fondation
 │  ├─ auth/          émetteur (/auth/*) + resource server (/api/mcp) + session console
+│  ├─ identite/      la SESSION DE PILOTAGE — établie par le socle (ADR 0014)
+│  ├─ instance/      le verrou MONO-INSTANCE, et la santé qu'il expose (ADR 0018)
 │  ├─ vault/         coffre à TROIS ÉTATS : absent · verrouillé · ouvert
 │  ├─ policy/        niveaux, grammaire de scope, TTL paresseux, TOTP
 │  ├─ provenance/    marquage de session, argHash HMAC, étape 11
@@ -136,7 +138,10 @@ axion-ops/
 ├─ adapters/zoho-mail/   seul adaptateur en mode HÉBERGÉ
 ├─ console/              8 écrans, dont Arrêt d'urgence et Déverrouillage
 ├─ voice/                démon local, verrouillé après inactivité
-├─ ops/                  Dockerfile, healthcheck, migrations, sauvegarde
+├─ ops/                  chaîne d'intégration, healthcheck, exploitation
+│  ├─ alertes.ts             la TABLE D'ALERTES du § 24 — huit lignes, plus l'écart d'épinglage
+│  ├─ codes-hors-tableau.ts  les codes que le § 15 n'énumère pas, et leur motif écrit
+│  └─ mono-instance.ts       l'observation du healthcheck : un SECOND socle est détectable
 ├─ prisma/schema.prisma  LES DIX TABLES DU § 12
 └─ docs/adr/             décisions, datées
 ```
@@ -186,10 +191,18 @@ nouvelle**. Vérifié le 2026-08-30 sur la version installée ici :
 
 ## Écarts relevés dans le cahier des charges
 
-Cinq points où le CDC se contredit ou laisse un trou. Ils sont laissés
-**visibles** dans le code plutôt que bouchés en silence. Les deux derniers ont
-été **tranchés au lot 1b** (ADR 0005) ; l'écart avec le document, lui, subsiste
-et reste écrit.
+Dix points où le CDC se contredit, laisse un trou, ou dit moins que ce que ce
+dépôt tient. Ils sont laissés **visibles** dans le code plutôt que bouchés en
+silence. Les points 4 et 5 ont été tranchés au **lot 1b** (ADR 0005), les
+points 6 à 9 au **lot 1c** (ADR 0014 à 0018), les points 2 et 10 au **lot 1c**
+également ; l'écart avec le document, lui, subsiste et reste écrit.
+
+⚠️ **Un écart peut être justifié ; il ne peut pas être MUET.**
+`ops/codes-hors-tableau.ts` tient désormais la règle par une garde : tout code
+présent dans `ERROR_CODES` et absent du tableau du § 15 doit porter, écrits, le §
+qui exige le refus, les voisins écartés **avec ce que chacun mentirait**, et
+l'ADR. Un quinzième code ajouté sans cela fait rougir le dépôt le jour même — pas
+au prochain audit.
 
 1. **`destructive` : scope ou effect ?** Le § 19.2 le range dans le tableau des
    _scopes_ ; le § 09 énumère `ctx.scopes` en **cinq** valeurs, sans lui.
@@ -198,10 +211,30 @@ et reste écrit.
    `ops:send` **et** à une confirmation systématique, à tous les niveaux,
    `libre` compris ») reste vraie et s'applique dans `core/policy`.
 
-2. **L'étape 5 n'a aucun code d'erreur.** Le § 11 lui donne un `403` ; le § 15
-   n'énumère **aucun** code pour un scope insuffisant. `APPEL_STEPS[4].refus`
-   vaut donc `null` et `statutHttp` vaut `403`. Le trou est visible, pas comblé
-   par un code voisin qui mentirait sur la cause.
+2. **L'étape 5 n'avait aucun code d'erreur — `scope_insufficient` est ajouté ici.**
+   Le § 11 lui donne un `403` ; le § 15 n'énumère **aucun** code pour un scope
+   insuffisant. Les **trois** refus de `core/chaine/etape-05-scopes.ts` — jeton
+   sur-privilégié, correspondance mal câblée, scope manquant — sortaient tous
+   avec `code: null` : le comptage du § 24 ne pouvait pas séparer une **attaque**
+   d'un **socle mal câblé**, alors que le § 15 (troisième règle) fonde sur ce
+   comptage la détection d'une injection à demi réussie. Aucun voisin ne
+   convenait : `unauthenticated` ferait se ré-authentifier un jeton parfaitement
+   valide, `policy_denied` parlerait d'un garde-fou que personne n'a consulté —
+   la politique est à l'étape 10 —, `tool_disabled` enverrait chercher un
+   interrupteur pour un outil actif. Même geste qu'au lot 1b pour `vault_locked`
+   (ADR 0005) : nommer le code manquant. **`ERROR_CODES` en porte donc quinze.**
+
+   ✅ **Branché par la Recette du lot 1c.** `APPEL_STEPS[5].refus` vaut
+   `scope_insufficient`, et les refus de l'étape le rendent — **mesuré, pas
+   déduit** : la garde d'`ops/codes-hors-tableau.spec.ts` fait refuser l'étape
+   sur ses **quatre branches** (les trois causes de l'en-tête, dont l'une a deux
+   branches) et LIT le code rendu, au lieu de relire le tableau. Le module de
+   l'étape n'a pas bougé d'une ligne : `refuse()` LIT le code dans l'ancrage,
+   ce que `core/chaine/etapes.ts` existe pour tenir. Le `403` du § 11 est
+   inchangé — le code nomme la cause, il ne remplace pas le statut.
+   L'`it.fails` qui portait l'attente a basculé en `it()` du même geste ; il
+   n'a été ni supprimé ni affaibli, et `enAttenteDeBranchement` est désormais
+   **vide** pour les deux écarts assumés.
 
 3. **`ops_tool` n'a pas où ranger tout le manifeste.** Le § 09 fait porter au
    manifeste `maxBytes`, `idempotency`, `pagination`, les annotations de
@@ -225,6 +258,123 @@ et reste écrit.
    **chaque déploiement** (le repli du § 23 fait démarrer verrouillé). D'où
    l'**étape 0** dans `APPEL_STEPS`, et `AppelStep = 0 | 1 | … | 14`. Voir
    **ADR 0005**.
+
+6. **Le § 12 ne dit pas d'où vient le `sessionId`.** Il donne la colonne à
+   `ops_audit` et le § 11 en fait un « état de pilotage », sans dire **qui
+   l'établit**. Toute la garde du § 20 s'y ancre pourtant : un appelant qui la
+   renouvelle entre deux appels l'annule. Ce dépôt tranche — elle est établie par
+   le socle, portée par `ops_token` (colonne que le § 12 ne nomme pas), et frappée
+   par exécution du démon en stdio. Voir **ADR 0014**.
+
+7. **Le § 09 ne dit pas de quel CÔTÉ `idFields` s'applique.** L'étape 11 le
+   lisait côté **entrée** (pour exonérer un champ de la surveillance du § 20) ;
+   le § 12 le décrit côté **sortie** (`recordIds`). Les deux lectures ne peuvent
+   pas être vraies ensemble, et la première désarmait la garde d'exfiltration
+   depuis un manifeste. Ce dépôt tranche pour la sortie : à l'entrée, seul le
+   schéma referme un champ. Voir **ADR 0015**.
+
+8. **Le § 09 ne nomme pas `governanceFields`.** Le § 20 exige que les arguments
+   de gouvernance ne proviennent jamais d'un contenu lu, sans donner au socle le
+   moyen de les connaître : la reconnaissance par le nom laissait échapper 9 noms
+   sur 20 confrontés. Le contrat d'adaptateur porte donc **un champ de plus que
+   le document**, et il ne peut que RESSERRER. Voir **ADR 0016**.
+
+9. **Le CDC ne dit nulle part que le socle est mono-instance.** Le § 23 décrit
+   **un** conteneur — ce qui n'est pas une interdiction d'en lancer deux. Or
+   l'index de provenance du § 20 est local au processus : deux instances
+   appliqueraient la garde une fois sur deux, sans qu'aucun compte ne le dise. Ce
+   dépôt pose donc une contrainte que le document ne pose pas. Voir **ADR 0018**
+   et la section ci-dessous.
+
+10. **L'écart d'épinglage n'a aucune ligne dans la table d'alertes du § 24.** Le
+    § 20 prescrit **nommément** d'alerter — « tout écart entre la valeur épinglée
+    et la valeur reçue désactive l'outil **et alerte**, au lieu de mettre à jour
+    en silence ». La table du § 24 énumère **huit** événements, et aucun n'est
+    celui-là : le niveau de cette alerte n'était fixé par rien, et **une alerte
+    sans niveau n'est routée nulle part** — le canal du § 24 trie sur le niveau.
+    L'alerte la plus importante du § 20 aurait donc été émise, puis jetée.
+    `ops/alertes.ts` pose la table du socle : les huit lignes du document, **plus
+    une neuvième**, au niveau `critique` — retenu par **voisinage** avec
+    « vérification de chaîne du journal en échec », parce que les deux disent
+    qu'une valeur qui **fait foi** ne correspond plus à ce qu'on reçoit, et
+    appellent le même geste : ne plus croire la source avant de l'avoir relue.
+    C'est une décision de ce dépôt, pas une lecture du § 24.
+
+    ⚠️ La clé et le niveau de cette neuvième ligne **dérivent** du type
+    `AlerteEpinglage` porté par `core/chaine/etape-06-outil.ts`, qui émet
+    l'alerte : si le module émetteur renomme son genre ou change son niveau, la
+    table **ne compile plus**. Deux sources de vérité qui divergent en silence
+    sont exactement le mode de panne que la règle d'épinglage combat par
+    ailleurs.
+
+    ⚠️ La **septième** ligne du § 24 en colle deux — « adaptateur injoignable
+
+    > 5 min · journal vide alors qu'une génération de coffre est attendue » — sur
+    > une seule ligne, à un seul niveau. Ce sont deux événements sans rapport, qui
+    > ne se diagnostiquent pas du même geste. Elle est conservée telle quelle : le
+    > document en compte huit, et les séparer est une décision à prendre, pas un
+    > nettoyage à faire en passant.
+
+---
+
+## Le socle est MONO-INSTANCE — et ce n'est pas une préférence
+
+**Une seule instance du socle tourne à la fois.** Ce n'est ni une simplification
+de départ, ni une question de coût : c'est une **condition de validité de la
+garde d'exfiltration du § 20**.
+
+L'index de provenance vit **en mémoire du processus** — le § 20 l'exige, et le
+§ 31 interdit qu'il soit persisté. Deux instances derrière un répartiteur ne
+partagent donc pas leurs marques : une session marquée par une lecture
+`personal` sur l'instance A arrive **propre** sur l'instance B, l'étape 11 laisse
+passer, et **rien ne le signale**. La garde s'appliquerait une fois sur deux, en
+restant verte.
+
+Deux gardes tiennent la contrainte (`core/instance/`) :
+
+- **au démarrage** — un verrou exclusif ; s'il est déjà tenu, le conteneur **ne
+  démarre pas**, comme pour un coffre absent (§ 23) ;
+- **en continu** — le healthcheck relit le verrou à chaque appel et rend **503**
+  dès qu'il n'est plus tenu, à côté du nombre d'extraits indexés qu'exige déjà le
+  § 20.
+
+Une troisième la tient **du dehors** (`ops/mono-instance.ts`), et elle ne
+remplace pas les deux autres : le verrou vit **dans le processus qu'on
+soupçonne**. Un socle mal déployé, ou dont le magasin de verrous a été neutralisé,
+ne se dénoncera pas lui-même. L'observateur, lui, ne lit que ce que le
+healthcheck **expose** — l'identifiant d'instance et le nombre d'extraits — et
+confronte une série de lectures :
+
+| Ce qu'il regarde                                     | Ce qu'un écart signifie                                                                    |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Deux fenêtres de vie qui **se chevauchent**          | deux socles ont servi en même temps ; le § 20 ne s'applique qu'à celui qui a servi l'appel |
+| Les deux annoncent le verrou **`tenu`**              | le verrou lui-même a accordé deux fois — redémarrer une instance n'y changerait rien       |
+| Statut ≠ état du verrou (dérivé du socle)            | un `200` sans verrou tenu : la garde est peut-être déjà à moitié muette, et rien ne le dit |
+| Identifiant hors forme (32 hexadécimaux)             | une sortie bricolée — et un `pid`, un hôte ou une adresse n'entrent pas ici (§ 29)         |
+| Le même identifiant sous **deux dates de démarrage** | deux exécutions devenues indiscernables : la détection est aveugle sans qu'un compte bouge |
+| Moins de deux lectures                               | `rien-mesuré` — un collecteur en panne ressemble en tout point à un socle sain             |
+
+> ⚠️ **CE QU'IL DÉTECTE, ET CE QU'IL NE PROUVE PAS.** Il détecte une **seconde
+> instance** ; il ne prouve **jamais** qu'il n'y en a pas. Un répartiteur peut
+> servir toutes les lectures depuis la même instance pendant qu'une seconde sert
+> le trafic. C'est pourquoi sa conclusion s'appelle `aucune-seconde-instance-vue`
+> et non « conforme » — et pourquoi la borne voyage **dans le verdict lui-même**,
+> et pas seulement dans un commentaire.
+
+> ⚠️ **SI LE SOCLE PASSE UN JOUR À DEUX INSTANCES, LE § 20 EST À ROUVRIR AVANT.**
+> Pas après. Un réplica ajouté sans cela vide la garde en silence, et le seul
+> signal serait un index qui reste petit pendant que le trafic monte —
+> c'est-à-dire un signal que personne ne regarde.
+
+Deux conséquences d'exploitation, à connaître **avant** de régler l'hébergeur :
+
+- **une seule réplique**, jamais deux (`REPLIQUES_ADMISES`). ⚠️ Aucun manifeste
+  de déploiement ne vit dans ce dépôt : le réglage se fait dans l'interface de
+  l'hébergeur, et **rien ici ne peut le lire**. La règle est donc écrite, et
+  confrontée à une valeur **relevée à la main** — ce qui est une garde plus
+  faible qu'une lecture, et l'est **volontairement** plutôt qu'en silence ;
+- **pas de déploiement en recouvrement.** L'ancienne instance doit avoir rendu le
+  verrou avant que la nouvelle ne le prenne.
 
 ---
 

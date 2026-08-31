@@ -92,22 +92,47 @@ describe("core/chaine — le numéro et le code d'une étape sont DÉRIVÉS du �
     expect(anomalies).toEqual([]);
   });
 
-  it("laisse VISIBLE le trou du § 15 sur l'étape 5, au lieu de le boucher", () => {
-    // Le § 11 donne un 403 nu à l'étape 5, et le § 15 n'énumère AUCUN code pour
-    // un scope insuffisant. Un code voisin — `policy_denied`, `unauthenticated` —
-    // mentirait sur la cause. La garde fixe l'écart pour qu'il ne se referme pas
-    // par accident : le jour où le CDC nomme ce code, elle rougit et on la met
-    // à jour en connaissance de cause.
-    expect(ETAPE_SCOPES.code).toBeNull();
+  it("nomme le trou du § 15 sur l'étape 5 au lieu de l'EMPRUNTER à un voisin", () => {
+    // ⚠️ CETTE GARDE A CHANGÉ DE SENS À LA RECETTE DU LOT 1c, ET C'EST CE QU'ELLE
+    //    EXISTAIT POUR PROVOQUER. Elle épinglait `ETAPE_SCOPES.code === null` en
+    //    écrivant : « le jour où le CDC nomme ce code, elle rougit et on la met à
+    //    jour en connaissance de cause ». Le code a été nommé, elle a rougi, et
+    //    voici la mise à jour — pas un `null` retiré en silence.
+    //
+    // Ce qu'elle mesure désormais : les CINQ ancrages de `core/chaine` portent
+    // tous un code de l'union fermée, et celui de l'étape 5 n'est AUCUN des trois
+    // voisins que le motif écarte — c'est le seul défaut qui pouvait revenir par
+    // la petite porte, puisque emprunter un voisin coûte un mot et compile.
+    const ancrages = [
+      ETAPE_SCOPES,
+      ETAPE_CATALOGUE,
+      ETAPE_CURSEUR,
+      ETAPE_PROVENANCE,
+      ETAPE_EXECUTION,
+    ];
+    const sansCode = ancrages.filter((ancrage) => ancrage.code === null).map((a) => a.cle);
+    const horsUnion = ancrages
+      .filter((ancrage) => ancrage.code !== null && !ERROR_CODES.includes(ancrage.code))
+      .map((a) => a.cle);
+
+    console.info(
+      `[garde codes] ${String(ancrages.length)} ancrage(s) de core/chaine mesuré(s) · ` +
+        `${String(sansCode.length)} sans code · ${String(horsUnion.length)} hors du § 15 · ` +
+        `étape 5 : « ${String(ETAPE_SCOPES.code)} » sous HTTP ${String(ETAPE_SCOPES.statutHttp)}`,
+    );
+
+    // Plancher-témoin : zéro ancrage mesuré rendrait les trois expectations
+    // suivantes vraies sur un tableau vide.
+    expect(ancrages.length).toBe(5);
+    expect(sansCode).toEqual([]);
+    expect(horsUnion).toEqual([]);
+    // Le code de l'étape 5, et pas un emprunt. Les trois voisins sont ceux
+    // qu'`ops/codes-hors-tableau.ts` écarte, avec ce que chacun mentirait.
+    expect(ETAPE_SCOPES.code).toBe("scope_insufficient");
+    expect(["policy_denied", "unauthenticated", "tool_disabled"]).not.toContain(ETAPE_SCOPES.code);
+    // Le 403 du § 11 n'a pas bougé : le code nomme la cause, il ne remplace
+    // pas le statut.
     expect(ETAPE_SCOPES.statutHttp).toBe(403);
-    // Les quatre autres, elles, portent un code du § 15.
-    const avecCode = [ETAPE_CATALOGUE, ETAPE_CURSEUR, ETAPE_PROVENANCE, ETAPE_EXECUTION];
-    console.info(`[garde codes] ${String(avecCode.length)} étapes porteuses d'un code mesurées`);
-    expect(avecCode.length).toBe(4);
-    for (const ancrage of avecCode) {
-      expect(ancrage.code, ancrage.cle).not.toBeNull();
-      expect(ERROR_CODES, ancrage.cle).toContain(ancrage.code);
-    }
   });
 
   it("fabrique un verdict en LISANT l'ancrage — jamais un numéro à la main", () => {

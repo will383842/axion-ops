@@ -69,8 +69,8 @@ describe("TÉMOIN — § 12 : les deux populations d'`argHash` se distinguent-el
 
     // ── (b) Un appel qui passe l'étape 8 : l'affineur pose l'empreinte validée.
     const apres = journalNeuf();
-    await avecJournal(apres.journal, ENTETE, (affiner) => {
-      affiner(ARG_HASH_VALIDE);
+    await avecJournal(apres.journal, ENTETE, ({ affinerArgHash }) => {
+      affinerArgHash(ARG_HASH_VALIDE);
       return Promise.resolve<Terminaison<string>>({
         genre: "succès",
         valeur: "ok",

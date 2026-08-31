@@ -30,7 +30,7 @@ import type { ContenuLigne } from "./vocabulaire.js";
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * LES SEIZE CHAMPS COUVERTS, DANS L'ORDRE DÉCLARÉ PAR `ops_audit`.
+ * LES DIX-SEPT CHAMPS COUVERTS, DANS L'ORDRE DÉCLARÉ PAR `ops_audit`.
  *
  * L'ordre n'a aucune incidence sur l'empreinte — `canonicalStringify` trie les
  * clés — mais il rend la confrontation au schéma lisible.
@@ -57,6 +57,12 @@ export const CHAMPS_COUVERTS = [
   "partialSources",
   "durationMs",
   "outcome",
+  // ADR 0017 — CE QUI EST SORTI, à côté de ce qui a été décidé (`decision`) et
+  // de ce qui est revenu (`outcome`). Il ENTRE dans l'empreinte, et c'est tout
+  // l'intérêt : hors empreinte, un « oui, l'envoi est parti » se repasserait à
+  // « non » après coup sans casser la chaîne. La fenêtre où cela ne coûte rien
+  // est celle d'aujourd'hui — aucune ligne réelle n'existe.
+  "externalEffect",
 ] as const satisfies ReadonlyArray<keyof ContenuLigne>;
 
 export type ChampCouvert = (typeof CHAMPS_COUVERTS)[number];

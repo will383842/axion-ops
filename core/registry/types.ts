@@ -7,6 +7,7 @@
  */
 
 import type { AdapterMode, DataClass } from "../types.js";
+import type { Verdict } from "../adapter-kit/verdict.js";
 import type { ProfileName } from "../profiles/index.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -223,6 +224,43 @@ export const MOTIFS_REFUS = [
    *    refus existe pour fermer.
    */
   "id_innommable_par_un_scope",
+  /**
+   * Un outil déclare un `governanceFields` qui ne désigne AUCUNE propriété de
+   * son schéma d'entrée — ADR 0016, garde G3.
+   *
+   * ═══ POURQUOI CELUI-CI REFUSE, LÀ OÙ UN `idFields` SANS EFFET EST SEULEMENT
+   *     ANNONCÉ (ADR 0015, garde G2) ═══
+   *
+   * La différence n'est pas de degré, elle est de nature :
+   *
+   *  · un `idFields` sans effet est une déclaration que le socle **IGNORE**.
+   *    Depuis l'ADR 0015, rien à l'entrée n'en dépend ; elle est inoffensive, et
+   *    la refuser rejetterait de vrais outils — un `messageId: z.string()` n'a
+   *    rien d'illégitime ;
+   *  · un `governanceFields` sans effet est une déclaration que son auteur
+   *    **CROIT APPLIQUÉE**. Elle donne l'apparence d'un périmètre couvert sur la
+   *    branche 1 de l'étape 11 — la seule qu'aucune confirmation ne rattrape
+   *    (§ 20). Une faute de frappe y coûte la surveillance entière, en silence.
+   *
+   * C'est la faute que ce lot referme partout : une garde verte parce qu'elle ne
+   * regarde rien.
+   */
+  "champ_de_gouvernance_introuvable",
+  /**
+   * Un outil déclare DEUX FOIS le même champ de gouvernance.
+   *
+   * ⚠️ IL A SON PROPRE MOTIF, ET CE N'EST PAS UNE COQUETTERIE. Le ranger sous
+   *    `champ_de_gouvernance_introuvable` ferait dire au refus le CONTRAIRE de
+   *    la cause : un nom répété est parfaitement trouvable. Un motif qui ment
+   *    sur la cause fait chercher au mauvais endroit, et c'est la deuxième règle
+   *    du § 15 — un refus doit dire quoi corriger.
+   *
+   * Le doublon n'est pas dangereux en lui-même : l'union dédoublonne, et la
+   * surveillance est la même. Il est refusé parce qu'il signale une liste
+   * RECOPIÉE À LA MAIN — donc relue par personne — sur la déclaration qui
+   * commande la seule branche de l'étape 11 qu'aucune confirmation ne rattrape.
+   */
+  "champs_de_gouvernance_en_double",
 ] as const;
 
 export type MotifRefus = (typeof MOTIFS_REFUS)[number];
@@ -231,6 +269,36 @@ export type MotifRefus = (typeof MOTIFS_REFUS)[number];
 export interface Refus {
   readonly motif: MotifRefus;
   readonly detail: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CE QUI EST DIT SANS ÊTRE REFUSÉ — ADR 0015, garde G2
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * UNE GARDE QUI ANNONCE SANS REFUSER.
+ *
+ * ═══ POURQUOI UN CANAL À PART, PLUTÔT QU'UN REFUS DE PLUS OU RIEN DU TOUT ═══
+ *
+ * L'ADR 0015 a retiré à `idFields` tout effet sur la surveillance du § 20. Un
+ * champ sans lecteur est un champ qui dérive : plus personne ne le relit, et sa
+ * fausseté ne coûte plus rien à qui l'écrit — jusqu'au jour où le § 31 s'en sert
+ * pour purger `recordIds` sur une liste qui ne correspond à rien.
+ *
+ * Le registre lui redonne donc un lecteur, **sans lui rendre un pouvoir**. Il
+ * DIT ce qui est sans effet, avec le remède ; il ne refuse pas. « On n'interdit
+ * pas ce qu'on ignore », et un refus rejetterait de vrais outils.
+ *
+ * ⚠️ LE VERDICT PORTE SON PLANCHER, ET IL VAUT 1. Un manifeste dont AUCUN
+ *    `idFields` n'a été confronté rend cette garde muette : `mesures` vaut zéro,
+ *    et c'est `anomaliesCompletes()` — jamais la couleur — qui le dit. Une garde
+ *    qui n'a rien regardé est verte pour la pire des raisons.
+ */
+export interface GardeAnnoncee {
+  /** Le nom sous lequel la garde s'annonce, tel qu'il apparaît en console. */
+  readonly nom: string;
+  /** Le compte mesuré, son plancher, et ce que la garde a trouvé. */
+  readonly verdict: Verdict;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -285,6 +353,25 @@ export interface LigneOpsTool {
    * frontière du registre.
    */
   readonly profiles: readonly ProfileName[];
+  /**
+   * `ops_tool.governanceFields` — les champs d'entrée que l'outil DÉCLARE de
+   * gouvernance (ADR 0016).
+   *
+   * ⚠️ IL EST RECOPIÉ DU MANIFESTE, ET C'EST LÉGITIME — au contraire de
+   *    `trustTier` ou de `bytes`. Une déclaration qui ne peut que RESSERRER se
+   *    croit sur parole : un dépôt tiers hostile n'a aucun intérêt à
+   *    s'auto-restreindre, et s'il le fait il se punit lui-même. C'est l'exacte
+   *    asymétrie de l'ADR 0015 / ADR 0016, et la seule chose à en retenir.
+   *
+   * ⚠️ CE QUE LE SOCLE EN FAIT N'EST PAS DE LE REMPLACER PAR LE FILET, MAIS DE
+   *    L'UNIR À LUI. `FAMILLES_GOUVERNANCE` reste, et la reconnaissance par le
+   *    nom continue d'être annoncée : voir `cumulerChampsDeGouvernance()` de
+   *    `core/adapter-kit/champs-declares.ts`.
+   *
+   * 🔧 La colonne correspondante de `prisma/schema.prisma` n'est pas dans le
+   *    périmètre qui écrit cette ligne — voir l'ADR 0016, point 2.
+   */
+  readonly governanceFields: readonly string[];
   /** § 14, correction 3 — bascule de console, SANS redéploiement. */
   readonly enabled: boolean;
   /**
@@ -302,10 +389,21 @@ export type ResultatEnregistrement =
       readonly refus: readonly Refus[];
       /** Combien d'outils ont été inspectés avant le refus. */
       readonly outilsInspectes: number;
+      /**
+       * Ce que l'admission a MESURÉ sans le refuser (ADR 0015, garde G2).
+       *
+       * Il est rendu sur LES DEUX branches, y compris celle du refus : un
+       * exploitant qui corrige un refus doit voir du même coup ce qui, dans son
+       * manifeste, est écrit sans effet — sinon il le corrigera au tour suivant,
+       * et chaque tour coûte un cycle de build dans un autre dépôt.
+       */
+      readonly annonces: readonly GardeAnnoncee[];
     }
   | {
       readonly admis: true;
       readonly adaptateur: LigneOpsAdapter;
       readonly outils: readonly LigneOpsTool[];
       readonly outilsInspectes: number;
+      /** Voir la branche du refus : le canal est le même, et il est rendu toujours. */
+      readonly annonces: readonly GardeAnnoncee[];
     };

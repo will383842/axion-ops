@@ -34,6 +34,11 @@ import { DATA_CLASSES, rangDataClass } from "../types.js";
 import { octetsCanoniques } from "../adapter-kit/json.js";
 import { nomComplet, prefixeDe } from "../adapter-kit/manifest.js";
 import { analyserFermeture, chercherChampsDAutorisation } from "../adapter-kit/fermeture.js";
+import {
+  analyserChampsDeclares,
+  motifGovernanceFieldIntrouvable,
+  remedeIdFieldSansEffet,
+} from "../adapter-kit/champs-declares.js";
 import type { SceauProfils } from "../adapter-kit/profils.js";
 import type { Manifeste } from "../adapter-kit/manifest.js";
 import { OUTIL_CLOTURE } from "../audit/vocabulaire.js";
@@ -42,6 +47,7 @@ import { octetsDeLaDefinition, type DefinitionOutil, type ProfileName } from "..
 import { clesReserveesAuSocle, empreinteDuManifesteRecu, entreePourId } from "./lock.js";
 import { clesDePremierNiveau, lireManifesteRecu } from "./manifeste-recu.js";
 import type {
+  GardeAnnoncee,
   LigneOpsAdapter,
   LigneOpsTool,
   Refus,
@@ -137,6 +143,56 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
   const refuses: Refus[] = [];
 
   // ───────────────────────────────────────────────────────────────────────────
+  //  LES DEUX GARDES QUI ANNONCENT — ADR 0015 (G2) et ADR 0016 (G3)
+  // ───────────────────────────────────────────────────────────────────────────
+  //
+  // ⚠️ LES COMPTEURS SONT DÉCLARÉS ICI, ET `annonces()` EST APPELÉE À CHAQUE
+  //    SORTIE — y compris aux quatre sorties anticipées. Un canal d'annonce
+  //    rempli seulement sur le chemin nominal serait VIDE exactement quand
+  //    l'exploitant en a le plus besoin, et un tableau vide se lit « rien à
+  //    signaler » alors qu'il veut dire « la garde n'a pas tourné ». Le plancher
+  //    du `Verdict` est ce qui distingue les deux, et il ne le fait que si le
+  //    verdict est rendu.
+  let idFieldsDeclares = 0;
+  let idFieldsConfrontes = 0;
+  let idFieldsFermes = 0;
+  const idFieldsSansEffet: string[] = [];
+
+  let gouvernanceDeclares = 0;
+  let gouvernanceConfrontes = 0;
+  let gouvernanceIntrouvables = 0;
+
+  const annonces = (): readonly GardeAnnoncee[] => [
+    {
+      nom:
+        `idFields sans effet (§ 20, ADR 0015) — ${String(idFieldsDeclares)} déclaré(s), ` +
+        `${String(idFieldsConfrontes)} confronté(s) au schéma, ${String(idFieldsFermes)} ` +
+        "fermé(s) par lui",
+      // Le plancher vaut 1 : un manifeste dont AUCUN `idFields` n'a été
+      // confronté rend cette garde muette, et c'est `anomaliesCompletes()` qui
+      // doit le dire — jamais la couleur.
+      verdict: { mesures: idFieldsConfrontes, plancher: 1, anomalies: idFieldsSansEffet },
+    },
+    {
+      nom:
+        `champs de gouvernance déclarés (§ 20, ADR 0016) — ${String(gouvernanceDeclares)} ` +
+        `déclaré(s), ${String(gouvernanceConfrontes)} confronté(s) au schéma, ` +
+        `${String(gouvernanceIntrouvables)} introuvable(s)`,
+      // ⚠️ PLANCHER À ZÉRO, ET C'EST LA SEULE GARDE DE CE FICHIER QUI EN PORTE
+      //    UN. Le champ est OBLIGATOIRE et sa valeur neutre PORTE UN NOM
+      //    (`AUCUN_CHAMP_DE_GOUVERNANCE`) : « zéro déclaré » est donc une phrase
+      //    ÉCRITE par l'auteur de l'outil, pas un silence — c'est tout l'objet de
+      //    l'ADR 0016 sur ce point. Un plancher à 1 punirait ici la déclaration
+      //    correcte de n'avoir rien à déclarer.
+      //
+      //    Ce qui garde ce cas n'est pas ce plancher : c'est le refus
+      //    `champ_de_gouvernance_introuvable`, plus bas, et le schéma FERMÉ de
+      //    `manifeste-recu.ts` qui exige le champ.
+      verdict: { mesures: gouvernanceDeclares, plancher: 0, anomalies: [] },
+    },
+  ];
+
+  // ───────────────────────────────────────────────────────────────────────────
   //  0 · L'empreinte, prise sur le document BRUT, avant toute validation
   // ───────────────────────────────────────────────────────────────────────────
   let empreinteRecue: string | null = null;
@@ -183,7 +239,7 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
   const manifeste: Manifeste | null = lecture.manifeste;
   if (manifeste === null) {
     refuses.push(refus("manifeste_malforme", lecture.verdict.anomalies.join(" · ")));
-    return { admis: false, refus: refuses, outilsInspectes: 0 };
+    return { admis: false, refus: refuses, outilsInspectes: 0, annonces: annonces() };
   }
 
   const outilsInspectes = manifeste.tools.length;
@@ -209,7 +265,7 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
           "(« zoho-mail ») ou portez le préfixe dans le NOM de l'outil (« mail.send »).",
       ),
     );
-    return { admis: false, refus: refuses, outilsInspectes };
+    return { admis: false, refus: refuses, outilsInspectes, annonces: annonces() };
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -225,7 +281,7 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
           "version il admettrait.",
       ),
     );
-    return { admis: false, refus: refuses, outilsInspectes };
+    return { admis: false, refus: refuses, outilsInspectes, annonces: annonces() };
   }
 
   if (empreinteRecue !== null && empreinteRecue !== epingle.manifestSha) {
@@ -466,6 +522,75 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
         ),
       );
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  7 quater · LES DEUX DÉCLARATIONS DU § 09 (ADR 0015 et ADR 0016)
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // ⚠️ LA MÊME FONCTION QUE LE BUILD — `analyserChampsDeclares()`, appelée
+    //    aussi par `analyserDefinition()` de `core/adapter-kit/manifest.ts`.
+    //    L'écrire deux fois ferait deux définitions de « le schéma referme ce
+    //    champ », et le build accepterait ce que l'admission refuse — ou
+    //    l'inverse, ce qui est pire (ADR 0003).
+    //
+    // Les deux déclarations sont traitées de façon OPPOSÉE, et c'est la seule
+    // chose à retenir de cette paire d'ADR :
+    //
+    //  · `governanceFields` RESSERRE → on le croit, donc un nom qui ne désigne
+    //    rien est une ANOMALIE : son auteur le croit appliqué ;
+    //  · `idFields` ne RETIRE plus rien → on l'ignore, donc un nom sans effet
+    //    est seulement ANNONCÉ. On n'interdit pas ce qu'on ignore.
+    const declares = analyserChampsDeclares(outil.inputSchema, {
+      idFields: outil.idFields,
+      governanceFields: outil.governanceFields,
+    });
+
+    // ── ADR 0016, garde G3 — REFUS ──────────────────────────────────────────
+    gouvernanceDeclares += declares.governanceFieldsDeclares;
+    gouvernanceConfrontes += declares.governanceFieldsConfrontes.length;
+    gouvernanceIntrouvables += declares.governanceFieldsIntrouvables.length;
+
+    if (declares.governanceFieldsEnDouble.length > 0) {
+      refuses.push(
+        refus(
+          "champs_de_gouvernance_en_double",
+          `« ${ou} » : governanceFields en double — ` +
+            `${declares.governanceFieldsEnDouble.join(", ")}. Un nom répété ne surveille pas ` +
+            "deux fois ; il indique une liste recopiée à la main, donc relue par personne.",
+        ),
+      );
+    }
+    for (const nom of declares.governanceFieldsIntrouvables) {
+      refuses.push(
+        refus(
+          "champ_de_gouvernance_introuvable",
+          `« ${ou} » : ` +
+            motifGovernanceFieldIntrouvable(nom, declares.nomsDistincts, declares.nomsDuSchema),
+        ),
+      );
+    }
+
+    // ── ADR 0015, garde G2 — ANNONCE, jamais refus ──────────────────────────
+    idFieldsDeclares += declares.idFieldsDeclares;
+    idFieldsConfrontes += declares.idFieldsConfrontes.length;
+    idFieldsFermes += declares.idFieldsFermes.length;
+
+    for (const champ of declares.idFieldsSansEffet) {
+      idFieldsSansEffet.push(
+        `« ${ou} » : ${remedeIdFieldSansEffet(champ.nom)} ` +
+          `Chemin(s) mesuré(s) : ${champ.chemins.join(", ")}.`,
+      );
+    }
+    for (const nom of declares.idFieldsIntrouvables) {
+      idFieldsSansEffet.push(
+        `« ${ou} » : idFields déclare « ${nom} », qui n'est une propriété d'AUCUN ` +
+          `sous-schéma d'entrée (${String(declares.nomsDistincts)} nom(s) distinct(s) ` +
+          `confronté(s)${
+            declares.nomsDuSchema.length > 0 ? ` : ${declares.nomsDuSchema.join(", ")}` : ""
+          }). La déclaration ne nomme rien : le § 31 purgerait \`recordIds\` sur une liste ` +
+          "qui ne correspond à aucun champ. Corriger le nom, ou retirer la déclaration.",
+      );
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -517,7 +642,7 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
   }
 
   if (refuses.length > 0) {
-    return { admis: false, refus: refuses, outilsInspectes };
+    return { admis: false, refus: refuses, outilsInspectes, annonces: annonces() };
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -582,10 +707,17 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
       effect: outil.effect,
       dataClass: outil.dataClass,
       profiles: profils,
+      // ⚠️ RECOPIÉ DU MANIFESTE, ET C'EST LÉGITIME — au contraire de `trustTier`
+      //    (fixé côté socle) et de `bytes` (recalculé). Une déclaration qui ne
+      //    peut que RESSERRER se croit sur parole : un dépôt tiers hostile n'a
+      //    aucun intérêt à s'auto-restreindre, et s'il le fait il se punit
+      //    lui-même. Elle a été confrontée au schéma juste au-dessus (garde G3),
+      //    donc chaque nom écrit ici désigne bien une propriété d'entrée.
+      governanceFields: [...outil.governanceFields],
       enabled: definition.enabled,
       retireDeLaListe: definition.retireDeLaListe,
     };
   });
 
-  return { admis: true, adaptateur, outils, outilsInspectes };
+  return { admis: true, adaptateur, outils, outilsInspectes, annonces: annonces() };
 }

@@ -14,15 +14,30 @@
  * `effect` de cette nature ?* Le niveau de politique, la confirmation présentée,
  * l'état console, la provenance de la session — rien de tout cela n'entre ici.
  *
- * ═══ LE TROU DU § 15, LAISSÉ VISIBLE ═══
+ * ═══ LE TROU DU § 15 — NOMMÉ AU LOT 1c, BRANCHÉ PAR LA RECETTE ═══
  *
- * `ETAPE_SCOPES.code` vaut `null`, et c'est dérivé d'`APPEL_STEPS` : le § 11
- * donne à cette étape un **403 nu**, et le § 15 n'énumère AUCUN code JSON-RPC
- * pour un scope insuffisant. Ce module ne bouche pas le trou avec un code voisin
- * — `policy_denied` mentirait sur la cause (la politique n'a rien refusé),
- * `unauthenticated` mentirait autrement (le jeton est parfaitement valide, il
- * est seulement trop étroit). Le message, lui, dit ce qu'il faut faire ensuite,
- * comme le § 15 l'exige de tout refus.
+ * `ETAPE_SCOPES.code` valait `null` jusqu'au lot 1c : le § 11 donne à cette
+ * étape un **403**, et le § 15 n'énumère AUCUN code JSON-RPC pour un scope
+ * insuffisant. Les TROIS refus ci-dessous sortaient donc indiscernables les uns
+ * des autres pour le comptage du § 24, et indiscernables d'un refus de
+ * politique.
+ *
+ * Le trou n'a pas été bouché par un code voisin — `policy_denied` mentirait sur
+ * la couche (la politique n'a même pas été consultée, elle est à l'étape 10),
+ * `unauthenticated` mentirait sur l'issue (le jeton est parfaitement valide, il
+ * est seulement trop étroit), `tool_disabled` mentirait deux fois. Il a été
+ * NOMMÉ : `ERROR_CODES` porte `scope_insufficient`, `APPEL_STEPS` le donne à
+ * l'étape 5, et `ops/codes-hors-tableau.ts` tient l'écart au document — un code
+ * ajouté sans motif écrit y rougit le jour même.
+ *
+ * ⚠️ CE MODULE N'ÉCRIT TOUJOURS AUCUN CODE. Les trois refus passent par
+ *    `refuse(ETAPE_SCOPES, …)`, qui LIT `APPEL_STEPS`. Le branchement s'est
+ *    donc fait sans qu'une ligne de ce fichier bouge — c'est la propriété que
+ *    l'ancrage existe pour tenir, et une garde de `etape-05-scopes.spec.ts`
+ *    confronte les 20 verdicts au tableau plutôt qu'à une constante écrite.
+ *
+ * ⚠️ LE `403` DU § 11 RESTE. Le code JSON-RPC nomme la cause ; il ne remplace
+ *    pas le statut, et `statutHttp` n'a pas bougé.
  *
  * ═══ LES QUATRE DÉCISIONS DE CE FICHIER ═══
  *
@@ -231,8 +246,8 @@ function estUnScopeDuSocle(valeur: string): boolean {
  *    Le message nomme le scope MANQUANT — ce qu'il faut demander — et rien
  *    d'autre. Une garde du `.spec.ts` le mesure, avec un témoin qui rougit.
  *
- * Trois refus, tous en `ETAPE_SCOPES.code` — c'est-à-dire `null`, le 403 nu du
- * § 11 :
+ * Trois refus, tous en `ETAPE_SCOPES.code` — c'est-à-dire `scope_insufficient`
+ * depuis la Recette du lot 1c, sous le 403 du § 11 :
  *
  *  · le jeton porte un scope que le jeton d'appel ne porte jamais (§ 19.2) ;
  *  · la correspondance exige un scope hors du § 19.2, ou un scope qu'un jeton

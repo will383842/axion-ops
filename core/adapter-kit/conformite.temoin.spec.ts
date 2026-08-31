@@ -28,6 +28,7 @@ import { executerHarnais, MOTIFS_ACCES_SECRET } from "./conformite.js";
 import type { EntreeHarnais, RapportHarnais } from "./conformite.js";
 import { definirOutil } from "./types.js";
 import type { DefinitionAdaptateur, DefinitionOutil } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "./types.js";
 
 const PROFILS = ["courrier", "dev", "admin", "audit"] as const;
 
@@ -67,6 +68,7 @@ function outilTemoin(): DefinitionOutil<Profil> {
     maxBytes: 256,
     compaction: { free: ["extrait"], tier2: ["detailHref"], aggregateBy: null },
     idFields: ["submissionId"],
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     fixtureMax: "fixtures/inbox-max.json",
     handler: () => ({ submissionId: "s1", extrait: "…" }),
   });

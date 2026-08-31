@@ -34,6 +34,7 @@ import { ADAPTER_MODES, DATA_CLASSES, EFFECTS } from "../types.js";
 import type { AdapterMode, DataClass, Effect } from "../types.js";
 import { canoniser, empreinteCanonique, octetsCanoniques, versValeurJson } from "./json.js";
 import { analyserFermeture } from "./fermeture.js";
+import { analyserChampsDeclares, motifGovernanceFieldIntrouvable } from "./champs-declares.js";
 import { verifierFormeDuSceau } from "./profils.js";
 import type { SceauProfils } from "./profils.js";
 import type { ObjetJson, ValeurJson } from "./json.js";
@@ -51,7 +52,25 @@ import type { Verdict } from "./verdict.js";
 //  La forme du manifeste
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** Version du FORMAT du manifeste — distincte de celle de l'adaptateur. */
+/**
+ * Version du FORMAT du manifeste — distincte de celle de l'adaptateur.
+ *
+ * ⚠️ **ELLE RESTE À 1 ALORS QUE LA FORME A CHANGÉ DEUX FOIS**, et c'est
+ *    délibéré : `profilesVersion`/`profilesSha` au lot 1b (ADR 0004),
+ *    `governanceFields` au lot 1c (ADR 0016). La raison est que le schéma de
+ *    `core/registry/manifeste-recu.ts` est **FERMÉ** : un document d'avant est
+ *    refusé pour ce qu'il est — un manifeste à qui il manque un champ
+ *    obligatoire — avec le nom du champ manquant. L'incrémenter rendrait un
+ *    message plus court et MOINS actionnable (« version 1 attendue, 2 reçue »),
+ *    et ferait vivre deux formats là où il n'y a jamais eu qu'un producteur.
+ *
+ * ⚠️ **TOUTE EMPREINTE ÉPINGLÉE BOUGE À CHACUN DE CES AJOUTS.** Les deux ont été
+ *    faits AVANT tout épinglage réel : `adapters.lock.json` n'existe encore qu'en
+ *    exemple, et ses `manifestSha` y sont des marque-places. Après le premier
+ *    épinglage véritable, un champ de plus exigerait de revalider à la main
+ *    chaque `manifestSha` de chaque dépôt tiers — c'est le motif qui a fait
+ *    poser `profilesSha` au lot 1b, et c'est le même ici.
+ */
 export const VERSION_MANIFESTE = 1;
 
 /** Un outil, vu du fil JSON-RPC. */
@@ -74,6 +93,18 @@ export interface ManifesteOutil {
     readonly aggregateBy: string | null;
   };
   readonly idFields: readonly string[];
+  /**
+   * § 09 étendu par l'**ADR 0016** — les champs d'entrée que l'outil DÉCLARE de
+   * gouvernance. Obligatoire ; valeur neutre nommée
+   * `AUCUN_CHAMP_DE_GOUVERNANCE`.
+   *
+   * ⚠️ IL ENTRE DANS `bytes`, DONC DANS `manifestSha`, DONC DANS
+   *    `adapters.lock.json` — voir la note de `Manifeste.profilesSha`, dont le
+   *    motif vaut mot pour mot : le champ est posé MAINTENANT, avant tout
+   *    épinglage réel. Après le premier, l'ajouter aurait exigé de revalider à
+   *    la main chaque `manifestSha` de chaque dépôt tiers.
+   */
+  readonly governanceFields: readonly string[];
   /**
    * Taille en octets UTF-8 du JSON canonique de CETTE entrée, `bytes` exclu.
    *
@@ -385,11 +416,6 @@ export function analyserDefinition<TProfile extends string>(
 
     analyserCompaction(outil.compaction, ou, anomalies);
 
-    const idEnDouble = doublons(outil.idFields);
-    if (idEnDouble.length > 0) {
-      anomalies.push(`${ou} : idFields en double — ${idEnDouble.join(", ")}.`);
-    }
-
     const entree = schemaJson(outil.input, "input", `${ou}, schéma d'entrée`, anomalies);
     const sortie = schemaJson(outil.output, "output", `${ou}, schéma de sortie`, anomalies);
 
@@ -415,6 +441,41 @@ export function analyserDefinition<TProfile extends string>(
           }. Un champ d'autorisation glissé dans la charge utile y passerait en ` +
             `silence. Fermez le schéma avec \`.strict()\` (\`additionalProperties: false\`) ` +
             "ou `unevaluatedProperties: false`.",
+        );
+      }
+
+      // ═══ LES DEUX DÉCLARATIONS DU § 09, CONFRONTÉES AU SCHÉMA ═══
+      //
+      // ⚠️ LA MÊME FONCTION QUE LE REGISTRE — `analyserChampsDeclares()`. Le
+      //    harnais tourne dans la CI de l'ADAPTATEUR, le registre dans celle du
+      //    SOCLE ; deux implémentations feraient que le build accepte ce que
+      //    l'admission refuse (ADR 0003, appliqué à deux champs de plus).
+      //
+      // Ce que le BUILD en tire, et ce qu'il n'en tire pas :
+      //  · `governanceFields` introuvable → ANOMALIE (ADR 0016, garde G3). Un
+      //    nom qui ne désigne aucune propriété est un no-op MUET, et son auteur
+      //    le croit appliqué : c'est la seule branche de l'étape 11 qu'aucune
+      //    confirmation ne rattrape qui reste alors découverte.
+      //  · `idFields` sans effet → RIEN ICI (ADR 0015, garde G2). L'annonce est
+      //    faite par l'admission, qui la rend à l'exploitant ; le build ne
+      //    refuse pas un `messageId: z.string()`, qui n'a rien d'illégitime.
+      const declares = analyserChampsDeclares(entree, {
+        idFields: outil.idFields,
+        governanceFields: outil.governanceFields,
+      });
+
+      if (declares.idFieldsEnDouble.length > 0) {
+        anomalies.push(`${ou} : idFields en double — ${declares.idFieldsEnDouble.join(", ")}.`);
+      }
+      if (declares.governanceFieldsEnDouble.length > 0) {
+        anomalies.push(
+          `${ou} : governanceFields en double — ${declares.governanceFieldsEnDouble.join(", ")}.`,
+        );
+      }
+      for (const nom of declares.governanceFieldsIntrouvables) {
+        anomalies.push(
+          `${ou} : ` +
+            motifGovernanceFieldIntrouvable(nom, declares.nomsDistincts, declares.nomsDuSchema),
         );
       }
     }
@@ -452,6 +513,7 @@ export function analyserDefinition<TProfile extends string>(
         aggregateBy: outil.compaction.aggregateBy,
       },
       idFields: [...outil.idFields],
+      governanceFields: [...outil.governanceFields],
     } as const;
 
     outils.push({ ...sansBytes, bytes: octetsCanoniques(sansBytes) });

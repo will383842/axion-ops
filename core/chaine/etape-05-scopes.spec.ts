@@ -316,8 +316,12 @@ describe("core/chaine/etape-05-scopes — « le jeton du connecteur ne le porte 
         `[garde ops:policy] refus à l'étape ${String(verdict.etape)} : ${verdict.message}`,
       );
       expect(verdict.etape).toBe(ETAPE_SCOPES.numero);
-      // § 15 — aucun code pour un scope insuffisant : le 403 nu du § 11.
-      expect(verdict.code).toBeNull();
+      // Le code est LU dans l'ancrage — `scope_insufficient` depuis la Recette
+      // du lot 1c. On le confronte à l'ancrage plutôt qu'à une constante
+      // écrite : ce qui doit être garanti est que ce refus-ci ne sort pas par
+      // un chemin qui écrirait son code à la main.
+      expect(verdict.code).toBe(ETAPE_SCOPES.code);
+      expect(verdict.code).toBe("scope_insufficient");
       expect(verdict.message).toContain("ops:policy");
       // § 15, deuxième règle — dire ce qu'il faut faire ensuite.
       expect(verdict.message).toContain("route dédiée");
@@ -491,9 +495,13 @@ describe("core/chaine/etape-05-scopes — le numéro et le code sont DÉRIVÉS d
     expect(verdicts).toBe(EFFECTS.length * OPS_SCOPES.length);
     expect(anomalies).toEqual([]);
     expect(ETAPE_SCOPES.numero).toBe(officielle?.numero);
-    // Le trou du § 15 reste VISIBLE : aucun code JSON-RPC pour un scope
-    // insuffisant, un 403 nu au § 11. Le jour où le CDC le nomme, ceci rougit.
-    expect(officielle?.refus).toBeNull();
+    // Le trou du § 15 a été NOMMÉ au lot 1c et BRANCHÉ par sa Recette : les 20
+    // verdicts ci-dessus l'ont tous confronté à `APPEL_STEPS`, donc le module
+    // ne l'écrit toujours pas lui-même — c'est la propriété gardée ici.
+    expect(officielle?.refus).toBe("scope_insufficient");
+    // Le 403 du § 11 n'a pas bougé : le code nomme la cause, il ne remplace pas
+    // le statut. Un branchement qui aurait aussi déplacé le statut aurait changé
+    // ce que le transport rend, sans qu'aucun § ne le demande.
     expect(officielle?.statutHttp).toBe(403);
   });
 });

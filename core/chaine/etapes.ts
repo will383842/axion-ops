@@ -282,10 +282,11 @@ export interface ScopesEtablis {
 /**
  * ÉTAPE 5 — les scopes du jeton couvrent-ils l'`effect` épinglé de l'outil ?
  *
- * Refuse avec le code `ETAPE_SCOPES.code`, qui vaut `null` : le § 11 lui donne
- * un 403 et le § 15 ne nomme aucun code. Le message, lui, doit dire quel scope
- * manquait — sans jamais énumérer ceux que le jeton porte, qui sont une
- * information sur le porteur.
+ * Refuse avec le code `ETAPE_SCOPES.code`, qui vaut `scope_insufficient` depuis
+ * la Recette du lot 1c : le § 11 lui donne un 403, le § 15 ne nommait aucun
+ * code, et l'écart est tenu par `ops/codes-hors-tableau.ts`. Le message, lui,
+ * doit dire quel scope manquait — sans jamais énumérer ceux que le jeton porte,
+ * qui sont une information sur le porteur.
  */
 export type EtapeScopes = (contexte: ContexteScopes) => VerdictEtape<ScopesEtablis>;
 
@@ -321,8 +322,26 @@ export interface OutilDuCatalogue extends DefinitionOutil {
   readonly compaction: AnnotationsCompaction;
   /** § 13.3 — le plafond de sortie de cet outil, en octets. */
   readonly maxBytes: number;
-  /** § 09/§ 12 — les champs porteurs d'identifiants, DÉCLARÉS par l'outil. */
+  /**
+   * § 09/§ 12 — les champs porteurs d'identifiants, DÉCLARÉS par l'outil.
+   *
+   * ⚠️ **ILS N'EXONÈRENT PLUS RIEN À L'ÉTAPE 11 — ADR 0015.** Ce champ sert au
+   *    § 12 (`recordIds`, leur purge à la même échéance qu'`argHash`), pas au
+   *    § 20 : ce qui referme un champ d'entrée est le SCHÉMA, et lui seul. Voir
+   *    `core/adapter-kit/types.ts`, `idFields`.
+   *
+   * 🔧 **À RETIRER DE `ContexteProvenance` PAR LE CONSTRUCTEUR ②**, avec le
+   *    paramètre `idFields` d'`analyserArgumentsDuSchema()` : tant que la
+   *    signature l'accepte, un appelant peut le renseigner et rouvrir le trou.
+   */
   readonly idFields: readonly string[];
+  /**
+   * 🔧 **CHAMP À AJOUTER PAR LE CONSTRUCTEUR ③ — ADR 0016.**
+   * `governanceFields: readonly string[]`, propagé depuis `ops_tool`, cumulé
+   * PAR UNION avec la reconnaissance par nom de `FAMILLES_GOUVERNANCE`. Une
+   * déclaration ne peut qu'AJOUTER des champs surveillés. Voir
+   * `core/adapter-kit/types.ts`, `ChampsDeGouvernanceDeclares`.
+   */
 }
 
 /**
@@ -540,6 +559,17 @@ export interface IndexProvenance {
  *    interdit `reply` et `forward`, et une simple reformulation la contournait.
  *    Le socle raisonne donc sur la PROVENANCE, jamais sur la forme : ce
  *    contexte ne porte AUCUN texte à comparer.
+ *
+ * ⚠️ **TOUT CE CONTEXTE S'ANCRE SUR `sessionId`, ET C'EST LE VERROU N° 1 DU
+ *    § 20 — ADR 0014.** Un appelant qui renouvelle sa session entre la lecture
+ *    et l'appel suivant annule cette étape en entier : l'index reste peuplé, la
+ *    marque reste vivante, elle est simplement cherchée au mauvais endroit, et
+ *    aucun compte ne bouge. Le `sessionId` est donc ÉTABLI PAR LE SOCLE et
+ *    jamais accepté d'un appelant — voir `core/identite/session.ts`.
+ *
+ * 🔧 **TYPE À RESSERRER PAR LE CONSTRUCTEUR ① :** `sessionId: SessionId`, le
+ *    type marqué de `core/identite/`. Tant qu'il est une `string`, la règle
+ *    ci-dessus est une consigne, pas une propriété.
  */
 export interface ContexteProvenance {
   readonly sessionId: string;
@@ -566,6 +596,14 @@ export interface ContexteProvenance {
    * donc pas confirmables — ils sont refusés, session marquée, quel que soit le
    * niveau de politique. C'est la seule branche de cette étape qu'aucune
    * confirmation humaine ne rattrape.
+   *
+   * ⚠️ **CE BOOLÉEN EST DÉRIVÉ DE DEUX SOURCES CUMULÉES — ADR 0016.** La
+   *    reconnaissance PAR LE NOM (`FAMILLES_GOUVERNANCE`) laissait échapper
+   *    9 noms sur 20 confrontés, et un motif ne prouve que l'absence de la forme
+   *    écrite. L'outil DÉCLARE donc ses champs de gouvernance
+   *    (`governanceFields`, § 09), et le socle prend l'UNION des deux. La
+   *    déclaration ne peut qu'AJOUTER : elle ne retire jamais un champ que le
+   *    nom avait retenu.
    */
   readonly porteUnArgumentDeGouvernance: boolean;
   /** § 12, règle 1 — le niveau CALCULÉ à l'appel (étape 10, déjà passée). */

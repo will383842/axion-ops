@@ -263,8 +263,17 @@ export interface OptionsIndexProvenance {
  *    ne partagent pas leurs marques : une session servie tantôt par l'une,
  *    tantôt par l'autre, verrait sa garde s'appliquer une fois sur deux. Le § 23
  *    ne décrit qu'un conteneur en production, et le CDC ne nomme aucun magasin
- *    partagé pour cet index — c'est un écart porté au rapport, pas une propriété
- *    de ce code.
+ *    partagé pour cet index.
+ *
+ * ✅ **CE N'EST PLUS UN ÉCART, C'EST UNE BORNE DÉCIDÉE — ADR 0018.** Le socle est
+ *    **mono-instance en v1**, et deux gardes le tiennent : un verrou exclusif
+ *    pris au démarrage — une seconde instance NE DÉMARRE PAS — et un healthcheck
+ *    qui rend 503 dès que ce verrou n'est plus tenu. Voir `core/instance/`.
+ *
+ * ⚠️ **SI LE SOCLE PASSE UN JOUR À DEUX INSTANCES, LE § 20 EST À ROUVRIR AVANT.**
+ *    Pas après : le jour où un réplica est ajouté, cette garde-ci se vide en
+ *    silence, et le seul signal serait un index qui reste petit pendant que le
+ *    trafic monte — c'est-à-dire un signal que personne ne regarde.
  */
 export class IndexProvenanceMemoire implements IndexProvenance {
   readonly #sessions = new Map<string, MarquageSession>();
@@ -607,6 +616,19 @@ export const etape11Provenance: EtapeProvenance = (
  *    porter un ». La couverture réelle se lit dans le compte annoncé par
  *    {@link AnalyseArguments.motifsAppliques} et dans la liste des champs
  *    confrontés — jamais dans la couleur d'une garde.
+ *
+ * 📏 **CE QUE CETTE BORNE COÛTE, MESURÉ AU LOT 1b : 9 noms sur 20 confrontés
+ *    échappaient** — `emailTo`, `adresseDeReponse`, `envoyerA`, `validUntil`,
+ *    `maxAge`, `dateDebut`, `scheduledFor`, `profil`, `toolset`. Sur la branche
+ *    que le § 20 dit inconditionnelle.
+ *
+ * ✅ **LA PARADE EST DÉCIDÉE — ADR 0016 :** l'outil DÉCLARE ses champs de
+ *    gouvernance dans son manifeste (`governanceFields`, § 09), et le socle prend
+ *    l'UNION des deux sources. Ce tableau RESTE, en filet : une déclaration ne
+ *    peut qu'AJOUTER des champs surveillés, jamais en retirer un que le nom avait
+ *    retenu. C'est l'exact inverse d'`idFields` (ADR 0015), et la différence est
+ *    la seule chose à retenir : on peut croire une déclaration qui resserre, on
+ *    ne peut jamais croire une déclaration qui desserre.
  */
 export const FAMILLES_GOUVERNANCE = [
   {
@@ -907,6 +929,26 @@ export function familleDeGouvernance(nom: string): string | null {
  *    `porteUnArgumentDeGouvernance` à `true`, avec `schemaIllisible: true`. Un
  *    schéma qu'on ne sait pas lire est le cas où il faut refuser, pas celui où
  *    il faut supposer.
+ *
+ * 🔴 **`idFields` DÉSARME CETTE FONCTION DEPUIS LE MANIFESTE — ADR 0015.**
+ *    Déclarer `idFields: ["requete"]` sur un `{"type":"string"}` suffit à
+ *    retirer le champ de `libres`, donc à éteindre la garde d'exfiltration
+ *    depuis un dépôt tiers. Or le § 20 pose que « l'étiquetage se décide côté
+ *    socle, JAMAIS sur déclaration ». Témoin :
+ *    `core/epreuve/exfiltration-par-les-arguments.temoin.spec.ts`, « `idFields`
+ *    qui désigne un champ de texte libre » — le seul des huit schémas témoins
+ *    qui passe encore.
+ *
+ * 🔧 **CE QUE LE CONSTRUCTEUR ② FAIT ICI :** le paramètre `idFields` DISPARAÎT,
+ *    et avec lui le `identifiants.has(nom)` du corps. Ce qui referme un champ
+ *    est le schéma, et `estTexteLibre()` le sait déjà : un `enum`, un `const`,
+ *    un `format` contraignant, un `pattern` ancré qui rejette la prose, un type
+ *    non textuel. La déclaration ne pouvait qu'AFFAIBLIR cette dérivation ;
+ *    elle ne pouvait rien lui apprendre.
+ *
+ * ⚠️ NE PAS LE REMPLACER PAR UN PARAMÈTRE FACULTATIF. Une signature qui accepte
+ *    encore la liste laisse un appelant la renseigner, et rouvre le trou sans
+ *    qu'aucune garde ne rougisse.
  *
  * @param idFields § 09 — les champs porteurs d'identifiants, DÉCLARÉS par
  *        l'outil. Ils ne sont pas des arguments libres, quel que soit leur type.

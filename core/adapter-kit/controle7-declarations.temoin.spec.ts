@@ -77,6 +77,7 @@ import { analyserFermeture, chercherChampsDAutorisation, sousSchemas } from "./f
 import { octetsCanoniques, type ValeurJson } from "./json.js";
 import { creerAdapterKit } from "./kit.js";
 import type { Manifeste } from "./manifest.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "./types.js";
 
 /** DÉRIVÉES de `core/types.ts` — jamais écrites ici. */
 const CLES = lireClesDAutorisation().toutes;
@@ -249,6 +250,7 @@ function manifesteAvecSchema(inputSchema: ValeurJson): Manifeste {
     maxBytes: 32768,
     compaction: { free: ["extrait"], tier2: [], aggregateBy: null },
     idFields: ["submissionId"],
+    governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
     fixtureMax: "fixtures/inbox-max.json",
     handler: () => ({ submissionId: "s1", extrait: "…" }),
   } as never);

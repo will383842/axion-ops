@@ -111,6 +111,7 @@ import {
 
 import { ETAPES_REVENDIQUEES } from "../chaine/index.js";
 import { SCELLEUR_TEMOIN } from "../audit/fixtures.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0 · Le décor — aucun secret réel, aucun réseau, une horloge figée
@@ -176,6 +177,7 @@ const outilLecture = kit.definirOutil<z.ZodObject, z.ZodObject>({
   maxBytes: 32_768,
   compaction: { free: [], tier2: [], aggregateBy: null },
   idFields: ["submissionId"],
+  governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
   fixtureMax: "fixtures/inbox-max.json",
   handler: () => ({ submissionId: "s1" }),
 });
@@ -194,6 +196,7 @@ const outilEnvoi = kit.definirOutil<z.ZodObject, z.ZodObject>({
   maxBytes: 8_192,
   compaction: { free: [], tier2: [], aggregateBy: null },
   idFields: ["messageId"],
+  governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
   fixtureMax: "fixtures/envoi-max.json",
   handler: () => ({ messageId: "m1" }),
 });
@@ -447,7 +450,7 @@ async function executerAppel(
       policyLevel: niveau,
       argHash: argHashEntete ?? "0".repeat(64),
     },
-    async (affiner): Promise<Terminaison<unknown>> => {
+    async ({ affinerArgHash }): Promise<Terminaison<unknown>> => {
       if (appel.lever === true) throw new Error("panne simulée de l'adaptateur");
 
       // ── ÉTAPE 0 — le coffre. `core/vault` (§ 23). ────────────────────────
@@ -510,7 +513,7 @@ async function executerAppel(
           //    confirmation du § 20 se lie, donc celle que `ops_audit.argHash`
           //    doit porter pour que le journal et le jeton désignent le MÊME
           //    appel.
-          affiner(argHashValide);
+          affinerArgHash(argHashValide);
           appel.espionArgHash?.(argHashValide);
 
           // ── ÉTAPE 9 — le curseur. AUCUN MODULE DE `core/` NE LA PORTE. ───

@@ -11,6 +11,7 @@ import type { ProfileName } from "../profiles/index.js";
 import { ErreurGardeAveugle, enregistrerAdaptateur } from "./enregistrer.js";
 import { empreinteDuManifesteProduit } from "./lock.js";
 import { MOTIFS_REFUS, type EntreeVerrou, type VerrouAdaptateurs } from "./types.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 
 /**
  * TÉMOINS — L'ADMISSION D'UN MANIFESTE VENU D'AILLEURS SAIT-ELLE ROUGIR ?
@@ -64,6 +65,7 @@ function manifesteTemoin(): Manifeste {
           maxBytes: 4096,
           compaction: { free: ["extrait"], tier2: [], aggregateBy: null },
           idFields: ["submissionId"],
+          governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
           fixtureMax: "fixtures/inbox.json",
           handler: () => ({ submissionId: "s1", extrait: "…" }),
         }),

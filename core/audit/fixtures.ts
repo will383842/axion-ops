@@ -20,6 +20,7 @@ import { JournalMemoire } from "./memoire.js";
 import { creerScelleurJournal } from "../sceau/index.js";
 import type { Horloge, ScelleurJournal } from "./ports.js";
 import type { ContenuLigne, LigneAudit } from "./vocabulaire.js";
+import { EFFET_EXTERIEUR_NON_SURVENU } from "./vocabulaire.js";
 
 /**
  * LA CLÉ DE SCELLEMENT DES TÉMOINS (ADR 0002).
@@ -87,6 +88,11 @@ export function contenuTemoin(rang: number, surcharge: Partial<ContenuLigne> = {
     partialSources: [],
     durationMs: 12,
     outcome: "ok",
+    // ADR 0017 — une ligne témoin est une LECTURE réussie : rien n'en est sorti.
+    // Les gardes qui veulent l'autre population la demandent par surcharge, et
+    // c'est justement ce que ce champ rend possible : sans lui, « l'effet est
+    // parti » n'était exprimable nulle part dans une ligne.
+    externalEffect: EFFET_EXTERIEUR_NON_SURVENU,
   };
   return { ...base, ...surcharge };
 }

@@ -176,7 +176,8 @@ de commanditaire, pas de constructeur.
 
 > ⚠️ **MISE À JOUR — le lot 1b a posé UNE des deux, pas les deux.**
 > `ops_audit.argHashValidated` est en place (§ 4.6 de `docs/ETAT.md`, refermé),
-> et l'empreinte chaînée compte désormais **seize** champs. La colonne de
+> et l'empreinte chaînée compte **dix-sept** champs — seize au lot 1b, plus
+> `externalEffect` que l'ADR 0017 y a fait entrer. La colonne de
 > version de clé de scellement, elle, **reste ouverte**.
 >
 > L'écart est donc à porter tel quel : la recommandation « les deux ensemble »

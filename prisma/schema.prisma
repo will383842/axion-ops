@@ -50,7 +50,7 @@ enum AdapterMode {
 /// (fail-closed, avec une ligne d'historique `setBy: "boot"`).
 enum PolicyLevel {
   brouillon
-  confirme @map("confirmé")
+  confirme  @map("confirmé")
   libre
 }
 
@@ -77,7 +77,7 @@ model OpsSecret {
   id String @id @default(cuid())
 
   /// Composant 1 de l'AAD.
-  name String
+  name    String
   /// Composant 2 de l'AAD. Plusieurs versions d'un même `name` coexistent.
   version Int
 
@@ -381,6 +381,32 @@ model OpsAudit {
   durationMs Int
 
   outcome String
+
+  /// UN EFFET OBSERVABLE DE L'EXTÉRIEUR A-T-IL EU LIEU ? (ADR 0017, § 20, O6)
+  ///
+  /// ⚠️ CE N'EST PAS `outcome`, ET LES DEUX NE SE REMPLACENT PAS. `outcome`
+  ///    décrit CE QUI REVIENT — la charge servie, et ce qu'il a fallu en faire.
+  ///    Cette colonne dit CE QUI EST SORTI. Les loger dans le même mot est la
+  ///    faute que le § 13.2 dénonce déjà pour `truncated` / `sourceIncomplete`.
+  ///
+  /// ⚠️ ELLE NE SE DÉDUIT JAMAIS D'`effect`. Un `send` refusé à l'étape 10 n'a
+  ///    rien envoyé : la déduction serait vraie sur la moitié des lignes et
+  ///    fausse sur l'autre, sans qu'on puisse dire laquelle. Elle est posée par
+  ///    un CLIQUET sans argument, depuis le seul point où l'adaptateur a
+  ///    répondu (`core/chaine`, étape 14), et elle ne redescend jamais.
+  ///
+  /// ⚠️ ELLE ENTRE DANS L'EMPREINTE CHAÎNÉE (`core/audit/canonique.ts`,
+  ///    `CHAMPS_COUVERTS`). C'est pour cela qu'elle est posée MAINTENANT :
+  ///    aucune base ne tourne, aucune ligne n'existe. Hors empreinte, un
+  ///    « l'envoi est parti » se repasserait à `false` après coup sans qu'une
+  ///    seule vérification ne rougisse.
+  ///
+  /// ⚠️ BORNE ÉCRITE AVEC LA MESURE : un adaptateur qui LÈVE APRÈS avoir envoyé
+  ///    est indiscernable d'un adaptateur qui lève avant. Cette colonne dit ce
+  ///    que le socle SAIT, pas tout ce qui est sorti. Le reste est le rôle de
+  ///    la ligne d'INTENTION, aujourd'hui NON ARMÉE (ADR 0017, « ce qui reste
+  ///    ouvert »).
+  externalEffect Boolean
 
   /// `selfHash` de la ligne précédente. `null` sur la toute première ligne.
   prevHash String?

@@ -9,7 +9,7 @@
  * MÉTHODE — on ne cherche pas « du contenu » (impossible à définir), on exige
  * une FORME pour chaque champ couvert. Une phrase, un extrait d'e-mail, un nom
  * de personne : tous portent des espaces, ou dépassent une longueur d'identifiant.
- * Aucun des seize champs couverts n'a de raison légitime d'en porter.
+ * Aucun des dix-sept champs couverts n'a de raison légitime d'en porter.
  *
  * La table des formes est un `Record<ChampCouvert, Forme>` : ajouter un champ
  * couvert sans lui déclarer de forme est une ERREUR DE COMPILATION. C'est la
@@ -126,6 +126,12 @@ const FORMES: Record<ChampCouvert, Forme> = {
   // dont le plus long champ fait 88 caractères.
   partialSources: { genre: "liste-identifiants", maxCar: 256, maxElements: 64 },
   durationMs: { genre: "entier-positif", max: 86_400_000 },
+  // ADR 0017 — même motif que `argHashValidated` : un booléen ne transporte pas
+  // de contenu, mais il transporte un `undefined`, une chaîne « false » ou un
+  // `0`. Ce champ entre dans l'empreinte chaînée ; une valeur non booléenne y
+  // produirait un canonique stable et faux, et l'affirmation « aucun effet
+  // extérieur » serait alors indiscernable d'un champ jamais posé.
+  externalEffect: { genre: "booléen" },
 };
 
 /** Les numéros d'étape admis, DÉRIVÉS de `APPEL_STEPS` (§ 11). */

@@ -5,6 +5,153 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 1c — cinq décisions d'architecture, et la moitié de leur couture — 2026-08-31
+
+L'épreuve adverse du lot 1b avait montré que **la garde la plus importante du
+socle — l'anti-exfiltration du § 20 — pouvait être désarmée de deux façons**, et
+les agents avaient refusé de trancher seuls : ce sont des décisions
+d'architecture, pas des correctifs. Ce lot les **tranche** — cinq ADR — et en
+**coud une partie**.
+
+> ⚠️ **CORRECTION DE CETTE ENTRÉE PAR LA RECETTE.** Elle a d'abord annoncé
+> « aucune implémentation », « il n'écrit aucune logique et aucune garde »,
+> « 838 verts » et « aucun test ajouté, supprimé ni modifié ». Les quatre
+> énoncés sont **contredits par le diff qu'ils décrivent**, et l'épreuve
+> adverse les a mesurés : **douze** fichiers de gardes créés (onze par les
+> constructeurs, un par la Recette), **dix** fichiers TypeScript de production
+> neufs, l'ADR 0017 entièrement implémentée (colonne Prisma `externalEffect`,
+> entrée dans `CHAMPS_COUVERTS`, cliquet à l'étape 14), et **+139 tests**. Ce qui suit est la mesure corrigée, avec sa date et son
+> périmètre — le chiffre nu était périmé le jour même, puisque quatre
+> constructeurs écrivaient en parallèle.
+
+### Les cinq décisions
+
+| ADR      | Décision                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------- |
+| **0014** | Le `sessionId` est **établi par le socle**, jamais accepté du client. Type marqué, fabrique unique. |
+| **0015** | `idFields` n'exonère plus rien : **seul le schéma referme** un champ d'entrée.                      |
+| **0016** | L'outil **déclare** ses champs de gouvernance ; union avec le nom, jamais soustraction.             |
+| **0017** | `outcome` ne gagne **aucune** valeur ; `externalEffect` devient une colonne de l'empreinte chaînée. |
+| **0018** | Le socle est **mono-instance en v1**, tenu par un verrou au démarrage ET un healthcheck à 503.      |
+
+### Deux corrections de cap par rapport à l'énoncé du lot
+
+- **Le `sessionId` n'est PAS dérivé du `jti`** (ADR 0014). Mesure : le jeton
+  d'accès vit **1 h** (§ 19.1), une marque de provenance **4 h**
+  (`TTL_MARQUAGE_MS`). Une session dérivée du `jti` s'effacerait trois fois par
+  TTL, sur un rafraîchissement que le client conduit tout seul — c'est-à-dire
+  qu'elle rendrait au client, par la petite porte, le renouvellement qu'on lui
+  retire. La session suit **l'octroi**, et `ops_token` gagne la colonne.
+- **`outcome` ne gagne aucune valeur** (ADR 0017). L'arbitrage annoncé — « quelle
+  valeur ajouter, sachant qu'elle rompt le format » — n'avait pas lieu d'être :
+  `OUTCOMES` définit **déjà** `erreur` comme « incompactable
+  (`result_too_large`) ». C'est la dérivation qui violait la définition écrite. Le
+  champ ajouté est ailleurs, et il répond à une autre question : **ce qui est
+  sorti**, pas ce qui est revenu.
+
+### Ce qui est posé, et ce qui est ÉCRIT
+
+**Posé** — `ChampsDeGouvernanceDeclares` et `AUCUN_CHAMP_DE_GOUVERNANCE`
+(`core/adapter-kit/types.ts`) · `PorteurDEffetExterieur` et
+`EFFET_EXTERIEUR_NON_SURVENU` (`core/audit/vocabulaire.ts`) ·
+`SignalEffetExterieur` et `AffineursDAppel` (`core/audit/journal.ts`).
+
+**Écrit, et non seulement déclaré** — `core/identite/` (fabrique de sessions,
+forme du § 31, liste des frappeurs) · `core/chaine/identite.ts` ·
+`core/adapter-kit/champs-declares.ts` (fermeture d'un champ, cumul de
+gouvernance) · `ops/codes-hors-tableau.ts` · `ops/alertes.ts` ·
+`ops/mono-instance.ts` · la colonne Prisma `OpsAudit.externalEffect`, son entrée
+dans `CHAMPS_COUVERTS` et le cliquet de l'étape 14. `core/instance/verrou.ts`,
+lui, ne porte **que des déclarations** : l'arbitre `deciderDemarrageMonoInstance`
+que sa prose nomme **n'existe pas encore** — la moitié « constater » de l'ADR
+0018 est écrite, la moitié « empêcher » ne l'est pas, et un `it.fails` le
+mesure.
+
+Les champs obligatoires sont posés **à côté** des types qu'ils rejoindront, et
+non fusionnés : les fusionner aurait fait partir le lot rouge, et le premier
+réflexe aurait été de les rendre optionnels — c'est-à-dire la forme sous laquelle
+une décision redevient un oubli.
+
+### Ce que la RECETTE a fait, et ce qu'elle n'a pas fait
+
+**Ce qu'elle a fait.**
+
+- **`scope_insufficient` est BRANCHÉ.** `APPEL_STEPS[5].refus` le porte, et les
+  **quatre branches de refus** de `core/chaine/etape-05-scopes.ts` le rendent —
+  mesuré en faisant refuser l'étape quatre fois et en LISANT le code rendu, pas
+  en relisant le tableau. Le module de l'étape n'a pas bougé d'une ligne :
+  `refuse()` LIT le code dans l'ancrage. Le `403` du § 11 est inchangé.
+  L'`it.fails` d'`ops/codes-hors-tableau.spec.ts` a **basculé en `it()`** — ni
+  supprimé, ni affaibli : c'est le signe du progrès. Le canal
+  `enAttenteDeBranchement` est désormais **vide** pour les deux écarts assumés.
+- **Trois gardes fermées par ce lot ont été ÉPROUVÉES par un témoin posé dans
+  le code RÉEL, puis restaurées** (empreintes md5 confrontées avant/après) —
+  voir le tableau ci-dessous. Les trois ont rougi.
+- **Trois documents comptaient « seize » champs couverts ; l'empreinte en
+  compte dix-sept** depuis que l'ADR 0017 y a fait entrer `externalEffect`.
+  Corrigés — et surtout, `core/audit/prose-de-l-empreinte.spec.ts` **confronte
+  désormais la prose à `CHAMPS_COUVERTS.length`** : le dix-huitième champ fera
+  rougir les trois phrases le jour même. Aucune garde ne lisait ces chiffres,
+  et c'est exactement pour cela qu'ils avaient dérivé.
+
+**Ce qu'elle n'a pas fait, et pourquoi.** La **couture** des ADR 0015 et 0016
+dans `core/chaine` reste **ouverte** : `analyserArgumentsDuSchema()` porte
+toujours son paramètre `idFields` et son `identifiants.has(nom) continue`, et
+elle n'a toujours **aucun** paramètre pour recevoir `governanceFields`. Les deux
+ADR ont atterri côté **manifeste et registre** — la déclaration est confrontée
+au schéma, son absence d'effet est **dite** — et pas côté **décision**. Ce sont
+des modifications de signature dont les ADR nomment l'ordre et les
+conséquences ; elles appartiennent aux constructeurs ② et ③, et les
+`it.fails` de `core/epreuve/lot1c-la-couture-manquante.temoin.spec.ts` et de
+`core/epreuve/verrous-du-paragraphe-20.temoin.spec.ts` les portent nommément.
+
+### Les trois témoins de la Recette
+
+| Garde éprouvée                  | Témoin posé dans le code réel                                             | Ce qui a rougi                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Souveraineté du `sessionId`     | `sessionDuJetonRelu()` frappe une session à la volée au lieu de la relire | 3 tests d'`identite.spec.ts`, dont G1 : « le rafraîchissement ne blanchit plus » → `autorise`  |
+| Étiquetage `idFields`           | la boucle d'annonce d'`enregistrer.ts` ne pousse plus rien                | `registry/champs-declares.temoin.spec.ts` : « 0 ligne(s) » au lieu de 1, admission muette      |
+| Cumul des champs de gouvernance | `cumulerChampsDeGouvernance()` remplace au lieu d'unir                    | 7 tests sur 3 fichiers ; `perdus : 11` annoncé, les 11 champs retenus par le nom disparaissent |
+
+### Mesures de fin de lot — 2026-08-31, après la Recette
+
+| Gate                   | Résultat                                                         |
+| ---------------------- | ---------------------------------------------------------------- |
+| `pnpm typecheck`       | vert                                                             |
+| `pnpm lint`            | vert                                                             |
+| `pnpm format:check`    | vert **sur tout le dépôt**                                       |
+| `pnpm prisma:validate` | vert (URL stub `stub.invalid`)                                   |
+| `pnpm test`            | **977 verts, 17 `it.fails`, 1 `.todo`, 0 rouge** (838 au lot 1b) |
+
+**76 fichiers de gardes, et aucun sans compte annoncé** — mesuré deux fois, et
+les deux mesures sont écrites parce qu'elles ne disent pas la même chose : `0`
+fichier sans aucune annonce `console.*`, et `0` fichier dont les annonces ne
+porteraient **aucun nombre**. La seconde est la vraie : une annonce sans chiffre
+est une couleur.
+
+**11 étapes applicables au JSON-RPC, 11 revendiquées par un module propriétaire,
+0 orpheline** ; **5** de ces modules vivent dans `core/chaine` et **existent sur
+le disque**, 0 fantôme ; `etapesNonImplementees()` rend **0**.
+
+⚠️ **LA FORMULE « 14 ÉTAPES AVEC UN MODULE PROPRIÉTAIRE CHACUNE » N'EST LA
+MESURE DE RIEN**, et elle circule. Le registre porte **15** entrées (les 14 du
+§ 11, plus l'étape 0 du § 23) ; **4** d'entre elles sont « HTTP seul » et
+attendent `core/transport/`, qui n'existe pas ; **5** ont un module livré. Le
+lot 1b écrivait la chose exactement — « les quatorze étapes ont un
+PROPRIÉTAIRE, et les cinq de `core/chaine` sont IMPLÉMENTÉES » — et c'est la
+reprise abrégée qui a transformé un périmètre d'observation en garantie.
+
+⚠️ **LES 17 `it.fails` SE LISENT PAR LEUR LISTE, JAMAIS PAR LEUR NOMBRE.** Deux
+`it.fails` peuvent très bien être deux autres : celui de la Recette a basculé
+(18 → 17) pendant que d'autres arrivaient. Chacun porte l'attente d'un défaut
+**nommé et encore ouvert** — couture des ADR 0015/0016, resserrement du type
+`SessionId` en aval, `dependentSchemas` absent du parcours de fermeture,
+`idempotencyKey` hors schéma, section critique de `JournalMemoire`, arbitre du
+verrou mono-instance, ligne d'intention non armée, `tool` brut perdant sa ligne
+de journal.
+
+---
+
 ## Lot 1b, seconde moitié — l'orchestrateur et les quatorze étapes — 2026-08-31
 
 La première moitié (ci-dessous) avait **posé les interfaces** des cinq étapes du
@@ -196,14 +343,14 @@ tiers.
 
 ### Correctifs et chaîne d'intégration (même lot)
 
-| Ce qui est posé                                | Ce que ça ferme                                                                                                  |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `core/audit/roles.ts` + `roles.spec.ts`        | La moitié CODE de l'ADR 0002 : qui écrit, qui supprime. Rien, côté socle, ne refusait une purge qui insère.      |
-| Grammaire de `scope` **tranchée**              | `adapterId` ne porte AUCUN point. `scopeCouvre()` passe par `scopeDomine()` : une seule dérivation (ETAT § 4.4). |
-| Refus `id_innommable_par_un_scope` au registre | Un manifeste étranger pouvait s'enregistrer sous `zoho.mail` : sa politique portait sur l'adaptateur `zoho`.     |
-| `ops_audit.argHashValidated`                   | Les deux populations d'`argHash` (ETAT § 4.6). ⚠️ Elle ENTRE dans l'empreinte chaînée — seize champs couverts.   |
-| `.github/workflows/ci.yml` + `ops/`            | La CI n'existait pas (ETAT § 3.3). Aucune `continue-on-error`, et une garde LIT le YAML pour l'exiger.           |
-| `core/limits/memoire.ts`                       | Quatre copies divergentes des dépôts en mémoire, dans quatre fichiers de gardes.                                 |
+| Ce qui est posé                                | Ce que ça ferme                                                                                                                         |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/audit/roles.ts` + `roles.spec.ts`        | La moitié CODE de l'ADR 0002 : qui écrit, qui supprime. Rien, côté socle, ne refusait une purge qui insère.                             |
+| Grammaire de `scope` **tranchée**              | `adapterId` ne porte AUCUN point. `scopeCouvre()` passe par `scopeDomine()` : une seule dérivation (ETAT § 4.4).                        |
+| Refus `id_innommable_par_un_scope` au registre | Un manifeste étranger pouvait s'enregistrer sous `zoho.mail` : sa politique portait sur l'adaptateur `zoho`.                            |
+| `ops_audit.argHashValidated`                   | Les deux populations d'`argHash` (ETAT § 4.6). ⚠️ Elle ENTRE dans l'empreinte chaînée (`CHAMPS_COUVERTS`, dix-sept champs aujourd'hui). |
+| `.github/workflows/ci.yml` + `ops/`            | La CI n'existait pas (ETAT § 3.3). Aucune `continue-on-error`, et une garde LIT le YAML pour l'exiger.                                  |
+| `core/limits/memoire.ts`                       | Quatre copies divergentes des dépôts en mémoire, dans quatre fichiers de gardes.                                                        |
 
 **La CI sait rougir, et c'est mesuré.** `ops/temoin-ci.ts` fabrique un défaut
 par gate, exige que chacune échoue, retire le défaut et exige que chacune

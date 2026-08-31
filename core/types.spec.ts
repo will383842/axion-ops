@@ -227,9 +227,11 @@ describe("core/types — les énumérations fermées", () => {
       ["POLICY_LEVELS (§ 20)", POLICY_LEVELS, 3],
       ["OPS_SCOPES (§ 19.2)", OPS_SCOPES, 5],
       // 13 au § 15, PLUS `vault_locked` — écart du § 23 tranché au lot 1b
-      // (ADR 0005). Le plancher porte le compte réel, pas celui du tableau du
-      // CDC : c'est ici, et dans l'ADR, que l'écart se lit.
-      ["ERROR_CODES (§ 15 + vault_locked)", ERROR_CODES, 14],
+      // (ADR 0005) — PLUS `scope_insufficient`, écart du § 11 / § 15 tranché au
+      // lot 1c. Le plancher porte le compte réel, pas celui du tableau du CDC :
+      // c'est ici, dans l'ADR et dans `ops/codes-hors-tableau.ts` — qui refuse
+      // désormais tout code ajouté SANS motif écrit — que l'écart se lit.
+      ["ERROR_CODES (§ 15 + vault_locked + scope_insufficient)", ERROR_CODES, 15],
     ];
 
     let total = 0;
@@ -242,7 +244,7 @@ describe("core/types — les énumérations fermées", () => {
     }
 
     console.info(`[garde énumération] ${String(total)} valeurs mesurées au total`);
-    expect(total).toBe(30);
+    expect(total).toBe(31);
   });
 });
 

@@ -20,9 +20,10 @@ export {
 export { MOTIF_EMPREINTE, versValeurJson } from "./json.js";
 export type { ObjetJson, ValeurJson } from "./json.js";
 
-export { IDEMPOTENCIES, PAGINATIONS, definirOutil } from "./types.js";
+export { AUCUN_CHAMP_DE_GOUVERNANCE, IDEMPOTENCIES, PAGINATIONS, definirOutil } from "./types.js";
 export type {
   AnnotationsCompaction,
+  ChampsDeGouvernanceDeclares,
   DefinitionAdaptateur,
   DefinitionOutil,
   Idempotency,
@@ -30,6 +31,27 @@ export type {
   ReferenceSecret,
   SpecOutil,
 } from "./types.js";
+
+export {
+  FAMILLE_DECLAREE_PAR_L_OUTIL,
+  FORMATS_CONTRAIGNANTS,
+  PROFONDEUR_VALEUR,
+  TEMOINS_DE_PROSE,
+  analyserChampsDeclares,
+  cumulerChampsDeGouvernance,
+  estValeurLibre,
+  motifGovernanceFieldIntrouvable,
+  occurrencesDuSchema,
+  patternReferme,
+  remedeIdFieldSansEffet,
+} from "./champs-declares.js";
+export type {
+  ChampConfronte,
+  CumulGouvernance,
+  DeclarationsOutil,
+  OccurrenceChamp,
+  VerdictChampsDeclares,
+} from "./champs-declares.js";
 
 export {
   ErreurManifeste,

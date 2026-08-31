@@ -111,6 +111,34 @@
  *    les nomme au lieu de les laisser manquants en silence.
  *  · Il n'écrit aucune ligne de journal : le § 11 en fait un INVARIANT DE
  *    SORTIE, tenu par l'orchestrateur.
+ *
+ * ═══ ⚠️ CE FICHIER PORTE, SANS LE VOIR, LA VÉRITÉ D'`ops_audit.externalEffect` ═══
+ *
+ * ADR 0017 — `ops_audit` porte désormais TROIS dimensions du même appel : ce qui
+ * a été décidé (`decision`), ce qui est revenu (`outcome`), et CE QUI EST SORTI
+ * (`externalEffect`). La troisième est posée par un CLIQUET que l'orchestrateur
+ * tire dans la clôture `contexte.executer()` — donc à l'instant précis, marqué
+ * plus bas, où « L'EFFET EXTÉRIEUR A LIEU ICI ».
+ *
+ * Il en découle une propriété que ce fichier doit tenir, et qui n'est écrite
+ * dans aucune signature :
+ *
+ *   `contexte.executer()` est appelé **UNE fois** sur chaque chemin qui va
+ *   jusqu'à l'adaptateur, et **ZÉRO fois** sur ceux qui refusent avant lui.
+ *
+ * Zéro appel sur un chemin servi rendrait le défaut de l'ADR 0017 à l'identique
+ * — une ligne bien formée disant qu'il ne s'est rien passé. Deux appels seraient
+ * deux effets extérieurs pour un seul appel d'outil, comptés une fois. La garde
+ * « l'adaptateur est appelé UNE fois, et le cliquet en dépend »
+ * (`etape-14-execution.spec.ts`) parcourt les quatre paliers ET le refus
+ * `result_too_large`, et annonce son compte.
+ *
+ * ⚠️ ET LA BORNE, ÉCRITE AVEC LA MESURE : si `executer()` LÈVE après avoir
+ *    réellement envoyé, le cliquet n'est jamais tiré — la clôture ne rend pas.
+ *    Ce champ dit ce que le socle SAIT, pas tout ce qui est sorti. C'est le trou
+ *    que la ligne d'INTENTION (`PorteeDIntention`, `orchestrateur.ts`) couvre, et
+ *    elle est NON ARMÉE : décision écrite, pas oubli (ADR 0017, « ce qui reste
+ *    ouvert »).
  */
 
 import type { AnnotationsCompaction } from "../adapter-kit/types.js";
@@ -1069,6 +1097,10 @@ export const executerEtape14: EtapeExecution = async (
   if (anomalies.length > 0) throw new ErreurContexteExecutionIncoherent(anomalies);
 
   // ⚠️ L'EFFET EXTÉRIEUR A LIEU ICI, ET NULLE PART AILLEURS DANS CE FICHIER.
+  //    C'est aussi le seul point d'où `ops_audit.externalEffect` peut devenir
+  //    vrai : l'orchestrateur a enveloppé cette clôture d'un cliquet (ADR 0017).
+  //    UN appel, et un seul — voir l'en-tête, « ce fichier porte, sans le voir,
+  //    la vérité d'`ops_audit.externalEffect` ».
   const charge = await contexte.executer();
 
   // La charge est confrontée à son contrat AVANT d'être touchée : `items`,

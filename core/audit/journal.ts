@@ -31,7 +31,13 @@
  * interdit. La panne de journal est une panne du socle.
  */
 
-import type { AppelStep, Effect, PolicyLevel } from "../types.js";
+import {
+  APPEL_STEPS,
+  type AppelStep,
+  type AppelStepKey,
+  type Effect,
+  type PolicyLevel,
+} from "../types.js";
 import { verifierAucunContenu, ErreurContenuJournal } from "./contenu.js";
 import { calculerSelfHash } from "./canonique.js";
 import type { Horloge, JournalStore, ScelleurJournal } from "./ports.js";
@@ -40,6 +46,7 @@ import type { ContenuLigne, Decision, LigneEcrite, Outcome, Terminaison } from "
 import {
   ARG_HASH_NON_LU,
   ARG_HASH_NON_VALIDE,
+  EFFET_EXTERIEUR_NON_SURVENU,
   OUTIL_INCONNU,
   VERSION_INCONNUE,
 } from "./vocabulaire.js";
@@ -200,6 +207,41 @@ export function enteteAvantIdentification(principal: string, sessionId: string):
  */
 export type AffineurDEntete = (argHashValide: string) => void;
 
+/**
+ * LE SIGNAL D'EFFET EXTÉRIEUR — ADR 0017, câblé au lot 1d.
+ *
+ * ⚠️ **C'EST UN CLIQUET, ET IL NE PREND AUCUN ARGUMENT.** Une fonction
+ *    `(survenu: boolean) => void` pourrait REPASSER la ligne à `false` : un
+ *    chemin de sortie écrit six mois plus tard effacerait le fait qu'un envoi
+ *    est parti, et personne ne le verrait. Ici, ce qui est signalé ne se
+ *    dé-signale pas — la seule direction possible est celle qui accuse.
+ *
+ * ⚠️ **UN SEUL APPELANT.** L'orchestrateur l'appelle juste après le retour de
+ *    l'adaptateur, et seulement quand `estEffetExterieur(outil.effect)` est vrai.
+ *    C'est le motif d'{@link AffineurDEntete} : « il n'existe qu'UN endroit où la
+ *    valeur change ». Deux appelants seraient deux occasions de désaccord, et le
+ *    compilateur n'en verrait aucune.
+ */
+export type SignalEffetExterieur = () => void;
+
+/**
+ * CE QUE LE CORPS REÇOIT — ADR 0017, câblé au lot 1d.
+ *
+ * C'est le paramètre UNIQUE de `corps` : `corps: (affineurs: AffineursDAppel)
+ * => Promise<Terminaison<T>>`. Un objet plutôt qu'un second paramètre
+ * positionnel, pour qu'un troisième affineur — il y en aura — n'oblige personne
+ * à relire l'ordre des arguments.
+ *
+ * ⚠️ CE QUE CET OBJET N'EST PAS : un sac de réglages. Chacun de ses membres est
+ *    un point de MUTATION de la ligne qui sera écrite, et il n'existe qu'UN
+ *    endroit où chacun mute. C'est ce qui rend l'affirmation « la ligne dit ce
+ *    qui s'est passé » démontrable plutôt que crue sur parole.
+ */
+export interface AffineursDAppel {
+  readonly affinerArgHash: AffineurDEntete;
+  readonly signalerEffetExterieur: SignalEffetExterieur;
+}
+
 /** Ce que `avecJournal` rend : la terminaison, ET la ligne qui l'atteste. */
 export interface AppelJournalise<T> {
   readonly terminaison: Terminaison<T>;
@@ -210,7 +252,62 @@ export interface AppelJournalise<T> {
 //  L'invariant
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** Le triplet écrit selon la terminaison. Dérivé, jamais choisi au cas par cas. */
+/**
+ * LE NUMÉRO DE L'ÉTAPE D'EXÉCUTION — DÉRIVÉ, JAMAIS ÉCRIT `14`.
+ *
+ * `issue()` a besoin de savoir si l'étape qui refuse est celle où l'effet
+ * extérieur a déjà eu lieu. Écrire `14` à la main rendrait la dérivation fausse
+ * à la première étape insérée au § 11, et rien ne le dirait : le journal
+ * continuerait d'écrire un triplet cohérent, simplement faux d'un rang.
+ *
+ * La clé est typée `AppelStepKey` — union FERMÉE : une clé renommée dans
+ * `APPEL_STEPS` est une erreur de COMPILATION ici. Le `find` ne peut donc
+ * échouer qu'au prix d'une incohérence interne au tableau, et il échoue alors
+ * BRUYAMMENT, au chargement du module, plutôt que de laisser un `undefined`
+ * rendre la comparaison éternellement fausse — c'est-à-dire de rendre le défaut
+ * de l'ADR 0017 à l'identique, en silence.
+ */
+function numeroDEtape(cle: AppelStepKey): AppelStep {
+  const etape = APPEL_STEPS.find((candidate) => candidate.cle === cle);
+  if (etape === undefined) {
+    throw new Error(`§ 11 — aucune étape ne porte la clé « ${cle} » dans APPEL_STEPS`);
+  }
+  return etape.numero;
+}
+
+/**
+ * L'étape après laquelle plus rien n'est annulable : celle où l'adaptateur est
+ * appelé. C'est la SEULE dont un refus arrive APRÈS l'effet extérieur.
+ */
+const ETAPE_DE_L_EXECUTION: AppelStep = numeroDEtape("execution");
+
+/**
+ * Le triplet écrit selon la terminaison. Dérivé, jamais choisi au cas par cas.
+ *
+ * ✅ **LE MENSONGE DE L'ADR 0017 EST REFERMÉ ICI.** La dérivation ne regardait
+ *    que le GENRE de la terminaison : `refus` ⇒ `outcome: "non-exécuté"`. Or
+ *    l'étape 14 est la seule dont le refus arrive APRÈS l'effet extérieur —
+ *    `result_too_large` se prononce sur ce qui SORT, pas sur ce qui s'est passé.
+ *    Un `send` PARTI dont la réponse dépassait le plafond était donc journalisé
+ *    « refusé / non-exécuté » : la ligne existait, l'invariant tenait, elle était
+ *    fausse, et une revue des effets extérieurs conduite sur `ops_audit` ne le
+ *    voyait jamais.
+ *
+ * ⚠️ **AUCUNE VALEUR N'A ÉTÉ AJOUTÉE À `OUTCOMES`, ET C'EST LE POINT.** Le
+ *    vocabulaire était déjà juste : il définit `erreur` comme « incompactable
+ *    (`result_too_large`), amont injoignable, ou exception », et `non-exécuté`
+ *    comme « refusé AVANT l'étape 14 : rien n'a tourné ». C'est cette fonction
+ *    qui violait les deux définitions à la fois. Un mot de plus aurait rompu
+ *    l'empreinte chaînée pour un mot qui existait.
+ *
+ * ⚠️ **ET CE TRIPLET NE DIT TOUJOURS PAS SI UN EFFET EST SORTI.** Il n'aurait
+ *    pas pu : un refus d'étape 14 n'est qu'une des deux fuites de l'objectif O6.
+ *    L'autre — une exception levée APRÈS le retour de l'adaptateur — sort en
+ *    `decision: "interrompu"` / `outcome: "erreur"`, un couple parfaitement
+ *    ordinaire qu'aucune valeur d'`outcome` ne distinguerait. C'est
+ *    `externalEffect`, posé par le cliquet, qui répond à cette question-là, et
+ *    il la pose sur TOUTES les lignes, `autorisé` compris.
+ */
 function issue(terminaison: Terminaison<unknown> | null): {
   decision: Decision;
   stepDenied: AppelStep | null;
@@ -221,7 +318,14 @@ function issue(terminaison: Terminaison<unknown> | null): {
     return { decision: "interrompu", stepDenied: null, outcome: "erreur" };
   }
   if (terminaison.genre === "refus") {
-    return { decision: "refusé", stepDenied: terminaison.etape, outcome: "non-exécuté" };
+    return {
+      decision: "refusé",
+      stepDenied: terminaison.etape,
+      // La BORNE d'`OUTCOMES`, tenue : « refusé AVANT l'étape 14 : rien n'a
+      // tourné ». Un refus PRONONCÉ PAR l'étape d'exécution n'est pas antérieur
+      // à elle — l'adaptateur a répondu, et c'est sa réponse qu'on refuse.
+      outcome: terminaison.etape === ETAPE_DE_L_EXECUTION ? "erreur" : "non-exécuté",
+    };
   }
   return { decision: "autorisé", stepDenied: null, outcome: terminaison.outcome };
 }
@@ -234,18 +338,25 @@ function issue(terminaison: Terminaison<unknown> | null): {
  *
  *  · le corps rend un `Succes`  → `decision: "autorisé"`, `stepDenied: null` ;
  *  · le corps rend un `Refus`   → `decision: "refusé"`, `stepDenied` = LE NUMÉRO
- *                                 de l'étape (§ 11), `outcome: "non-exécuté"` ;
+ *                                 de l'étape (§ 11), `outcome: "non-exécuté"` —
+ *                                 SAUF le refus de l'étape d'exécution, qui vaut
+ *                                 `erreur` (ADR 0017, voir `issue`) ;
  *  · le corps LÈVE              → `decision: "interrompu"`, `outcome: "erreur"`,
  *                                 la ligne est écrite, PUIS l'exception repart.
  *
  * L'exception repart telle quelle : le socle ne transforme pas une panne en
  * refus. Un refus est une décision, une panne n'en est pas une, et les
  * confondre falsifierait la métrique du § 24 qui compte les refus.
+ *
+ * ⚠️ ET LES TROIS CHEMINS ÉCRIVENT LE MÊME `externalEffect` : il est lu par
+ *    `ecrire()`, une fonction unique par laquelle passent le retour normal, le
+ *    refus et l'exception. Ce n'est pas un détail d'écriture — c'est ce qui rend
+ *    impossible qu'un chemin de sortie ajouté plus tard oublie de le reporter.
  */
 export async function avecJournal<T>(
   journal: Journal,
   entete: EnteteAppel,
-  corps: (affiner: AffineurDEntete) => Promise<Terminaison<T>>,
+  corps: (affineurs: AffineursDAppel) => Promise<Terminaison<T>>,
 ): Promise<AppelJournalise<T>> {
   const debut = journal.horloge.maintenant();
 
@@ -290,10 +401,33 @@ export async function avecJournal<T>(
   let argHashCourant = entete.argHash;
   let argHashValideCourant: boolean = ARG_HASH_NON_VALIDE;
 
-  const affiner: AffineurDEntete = (argHashValide: string): void => {
+  const affinerArgHash: AffineurDEntete = (argHashValide: string): void => {
     argHashCourant = argHashValide;
     argHashValideCourant = true;
   };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  LE CLIQUET D'EFFET EXTÉRIEUR — ADR 0017
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Il part de `EFFET_EXTERIEUR_NON_SURVENU` et n'en sort que par un appel. Il
+  // n'y a pas de chemin de retour, et c'est délibéré :
+  //
+  //  · UNE FONCTION `(survenu: boolean) => void` POURRAIT REDESCENDRE. Un chemin
+  //    de sortie écrit six mois plus tard effacerait le fait qu'un envoi est
+  //    parti, et personne ne le verrait — la ligne resterait bien formée. Ici, la
+  //    seule direction possible est celle qui ACCUSE.
+  //  · LE FAIT N'EST PAS PORTÉ PAR `Refus`. Il faudrait alors que chacun des
+  //    quinze chemins de terminaison écrive « non » explicitement : quinze
+  //    occasions de se tromper, contre une seule d'accuser. C'est le motif
+  //    d'`ARG_HASH_NON_VALIDE`, appliqué au fait le plus grave du journal.
+  let effetExterieurSurvenu: boolean = EFFET_EXTERIEUR_NON_SURVENU;
+
+  const signalerEffetExterieur: SignalEffetExterieur = (): void => {
+    effetExterieurSurvenu = true;
+  };
+
+  const affineurs: AffineursDAppel = { affinerArgHash, signalerEffetExterieur };
 
   const ecrire = async (terminaison: Terminaison<T> | null): Promise<LigneEcrite> => {
     const fin = journal.horloge.maintenant();
@@ -317,12 +451,17 @@ export async function avecJournal<T>(
       partialSources: succes?.partialSources ?? [],
       durationMs: Math.max(0, fin.getTime() - debut.getTime()),
       outcome,
+      // ⚠️ LU, JAMAIS DÉDUIT. Ni de `decision`, ni d'`outcome`, ni d'`effect` :
+      //    un `send` refusé à l'étape 10 n'a rien envoyé, et l'inverse — un
+      //    envoi parti suivi d'une exception — sort en « interrompu / erreur »,
+      //    couple que rien ne distingue d'une panne survenue avant l'appel.
+      externalEffect: effetExterieurSurvenu,
     });
   };
 
   let terminaison: Terminaison<T>;
   try {
-    terminaison = await corps(affiner);
+    terminaison = await corps(affineurs);
   } catch (erreur: unknown) {
     // La ligne s'écrit AVANT que l'exception ne reparte : une panne journalisée
     // reste une panne, une panne non journalisée est un trou dans O6.

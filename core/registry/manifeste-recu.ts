@@ -70,6 +70,17 @@ const SchemaOutilRecu = z
       })
       .strict(),
     idFields: z.array(z.string()),
+    // ADR 0016 — OBLIGATOIRE, et le schéma est FERMÉ : un manifeste produit
+    // avant le lot 1c ne le porte pas, et il est refusé pour ce qu'il est — un
+    // document dont le socle ne sait pas quels champs sont de gouvernance. Le
+    // rendre facultatif ferait de l'arbitrage un oubli : personne n'aurait à
+    // DIRE qu'il n'en a aucun, et la valeur neutre nommée
+    // `AUCUN_CHAMP_DE_GOUVERNANCE` n'aurait plus de raison d'être.
+    //
+    // ⚠️ `.min(1)` SUR CHAQUE NOM. Une chaîne vide ne désigne aucune propriété :
+    //    la garde G3 la retiendrait comme « introuvable » — juste, mais en
+    //    disant la mauvaise cause. Le refus de forme la nomme mieux.
+    governanceFields: z.array(z.string().min(1)),
     bytes: z.number().int().nonnegative(),
   })
   .strict();

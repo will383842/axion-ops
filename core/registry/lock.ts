@@ -28,6 +28,7 @@ import { z } from "zod/v4";
 import { DATA_CLASSES } from "../types.js";
 import { MOTIF_EMPREINTE, empreinteCanonique, versValeurJson } from "../adapter-kit/json.js";
 import { creerAdapterKit } from "../adapter-kit/kit.js";
+import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 import type { Manifeste } from "../adapter-kit/manifest.js";
 import type { Verdict } from "../adapter-kit/verdict.js";
 import { AUTH_MODES, ENTREE_VERROU_TEMOIN, VERSION_VERROU } from "./types.js";
@@ -81,6 +82,7 @@ export function clesDuManifeste(): readonly string[] {
         maxBytes: 1,
         compaction: { free: [], tier2: [], aggregateBy: null },
         idFields: [],
+        governanceFields: AUCUN_CHAMP_DE_GOUVERNANCE,
         fixtureMax: "temoin.json",
         handler: () => ({}),
       }),

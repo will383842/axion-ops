@@ -51,6 +51,10 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
 
     const manquants: string[] = [];
     let terminaisonsEprouvees = 0;
+    // Combien de refus tombent APRÈS l'effet extérieur. Le § 11 n'en connaît
+    // qu'un ; le compter, plutôt que le supposer, fait rougir cette garde le
+    // jour où une seconde étape passerait de l'autre côté de l'adaptateur.
+    let apresEffetEprouvees = 0;
 
     for (const etape of APPEL_STEPS) {
       const avant = store.toutes().length;
@@ -74,9 +78,19 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
       if (ecrite.stepDenied !== etape.numero) {
         manquants.push(`étape ${String(etape.numero)} : stepDenied = ${String(ecrite.stepDenied)}`);
       }
-      if (ecrite.decision !== "refusé" || ecrite.outcome !== "non-exécuté") {
+      // ⚠️ L'`outcome` ATTENDU SE DÉRIVE, IL NE SE SUPPOSE PAS (ADR 0017). La
+      //    définition d'`OUTCOMES` borne `non-exécuté` à « refusé AVANT l'étape
+      //    14 : rien n'a tourné ». L'étape d'exécution est la seule dont le refus
+      //    arrive APRÈS l'appel de l'adaptateur : son `outcome` est `erreur`,
+      //    mot que le vocabulaire nommait déjà « incompactable
+      //    (`result_too_large`) ». Écrire ici `non-exécuté` pour les quinze
+      //    aurait figé dans une garde le défaut que l'ADR referme.
+      const outcomeAttendu = etape.cle === "execution" ? "erreur" : "non-exécuté";
+      if (etape.cle === "execution") apresEffetEprouvees += 1;
+      if (ecrite.decision !== "refusé" || ecrite.outcome !== outcomeAttendu) {
         manquants.push(
-          `étape ${String(etape.numero)} : ${ecrite.decision}/${ecrite.outcome} inattendu`,
+          `étape ${String(etape.numero)} : ${ecrite.decision}/${ecrite.outcome} inattendu ` +
+            `(attendu refusé/${outcomeAttendu})`,
         );
       }
     }
@@ -95,8 +109,14 @@ describe("core/audit — aucune terminaison ne sort sans ligne (§ 11)", () => {
 
     console.info(
       `[garde invariant] ${String(terminaisonsEprouvees)} terminaisons éprouvées, ` +
-        `${String(store.toutes().length)} lignes écrites`,
+        `${String(store.toutes().length)} lignes écrites, ` +
+        `${String(apresEffetEprouvees)} refus APRÈS l'effet extérieur (outcome « erreur »)`,
     );
+
+    // Plancher-témoin de la correction de l'ADR 0017 : exactement UNE étape
+    // refuse après l'adaptateur. Zéro voudrait dire que la clé « execution » a
+    // été renommée dans `APPEL_STEPS` et que la dérivation ne mord plus.
+    expect(apresEffetEprouvees).toBe(1);
 
     // DÉRIVÉ : une terminaison par étape, plus le succès. Le compte n'est pas
     // recopié — il a bougé une fois (étape 0 du § 23, ajoutée au lot 1b,

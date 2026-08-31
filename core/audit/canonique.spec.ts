@@ -127,6 +127,11 @@ const VARIANTES: Record<ChampCouvert, Partial<ContenuLigne>> = {
   partialSources: { partialSources: ["canal-2"] },
   durationMs: { durationMs: 999 },
   outcome: { outcome: "erreur" },
+  // ADR 0017 — la variante qui compte : c'est le passage de « rien n'est sorti »
+  // à « quelque chose est sorti » qui doit changer l'empreinte. Hors empreinte,
+  // le chemin inverse serait possible APRÈS coup, sans qu'une seule vérification
+  // ne rougisse.
+  externalEffect: { externalEffect: true },
 };
 
 describe("core/audit — les champs couverts par l'empreinte", () => {
@@ -158,10 +163,10 @@ describe("core/audit — les champs couverts par l'empreinte", () => {
 
     console.info(`[garde couverture] ${String(mesures)} champs couverts mesurés`);
 
-    // Plancher-témoin : `ops_audit` en porte seize hors chaînage — quinze au
-    // lot 1, plus `argHashValidated`. Zéro champ
-    // mesuré serait vert sans avoir rien regardé.
-    expect(mesures).toBe(16);
+    // Plancher-témoin : `ops_audit` en porte dix-sept hors chaînage — quinze au
+    // lot 1, plus `argHashValidated` au lot 1b, plus `externalEffect` au lot 1d
+    // (ADR 0017). Zéro champ mesuré serait vert sans avoir rien regardé.
+    expect(mesures).toBe(17);
     expect(mesures).toBe(CHAMPS_COUVERTS.length);
     expect(inertes).toEqual([]);
   });
@@ -180,7 +185,7 @@ describe("core/audit — les champs couverts par l'empreinte", () => {
     expect(a).not.toBe(b);
   });
 
-  it("expose exactement les seize champs couverts, sans doublon", () => {
+  it("expose exactement les dix-sept champs couverts, sans doublon", () => {
     const couverts = champsCouverts(contenuTemoin(1));
     const cles = Object.keys(couverts);
 
