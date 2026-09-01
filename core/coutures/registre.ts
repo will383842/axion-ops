@@ -166,10 +166,86 @@ export type EtatDeCouture = (typeof ETATS_DE_COUTURE)[number];
 //  L'ENTRÉE
 // ═════════════════════════════════════════════════════════════════════════════
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  L'ASSERTION — LE SECOND FAIT, ET C'EST LE FAIT NEUF (ADR 0041)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * **LE NOM D'UN TEST QUI ÉCHOUE SI LA DÉCISION N'A PAS ATTERRI.**
+ *
+ * ═══ POURQUOI CE CHAMP EXISTE — LE DÉFAUT MESURÉ AU LOT 3 ═══
+ *
+ * L'état {@link EtatDeCouture} `cousue` mesure **le nombre d'APPELANTS DE
+ * PRODUCTION d'un symbole**. Il ne mesure PAS que la DÉCISION a atterri, et les
+ * deux se séparent exactement là où personne ne regarde : quand une décision
+ * NEUVE porte sur un symbole DÉJÀ COUSU. Ajouter un champ à `PortsDuService`,
+ * poser un refus dans le bloc de l'étape 7 — le symbole garde ses appelants,
+ * l'entrée reste `cousue`, et la garde reste VERTE sur une décision qui
+ * n'existe nulle part dans le code.
+ *
+ * C'est arrivé DEUX FOIS dans le même lot, sur deux ADR marqués « Statut :
+ * acceptée » : l'ADR 0036 (décision 1, le plafond de 40 à l'étape 7) et
+ * l'ADR 0037 (décisions 2 et 3, `journalDesRefus` et `delaiDeReprise` sur
+ * `PortsDuService`). La garde des coutures n'a rien vu, **et elle avait raison
+ * sur ce qu'elle mesure**. Une garde peut être verte, honnête, et mesurer autre
+ * chose que ce que son lecteur croit.
+ *
+ * ═══ CE QUE CE CHAMP EST, ET CE QU'IL N'EST PAS ═══
+ *
+ * ⚠️ **CE N'EST PAS UNE CHAÎNE RECOPIÉE À LA MAIN.** Un nom de test écrit ici
+ *    et nulle part ailleurs remplacerait une garde aveugle par un registre
+ *    MENTEUR — pire, parce qu'il aurait l'air d'une mesure.
+ *    `verifierLesAssertions` confronte donc CHAQUE champ au disque : le fichier
+ *    doit exister, le test doit y être déclaré sous ce nom EXACT, son corps
+ *    doit porter au moins un `expect(`, et il doit NOMMER ce que
+ *    {@link AssertionDeCouture.nomme} annonce.
+ *
+ * ⚠️ **`null` EST UNE RÉPONSE, PAS UN OUBLI TOLÉRÉ.** Une entrée sans assertion
+ *    n'est ni `cousue` ni `à-coudre` du point de vue de cette mesure-ci : elle
+ *    est **SANS-ASSERTION**, et cet état se COMPTE. Le champ est OBLIGATOIRE
+ *    précisément pour qu'on ne puisse pas inscrire une décision sans avoir
+ *    répondu à la question, et un cliquet interdit au compte de monter.
+ */
+export interface AssertionDeCouture {
+  /**
+   * Le fichier de garde qui porte le test — chemin depuis la racine du dépôt.
+   * Il DOIT se terminer par `.spec.ts` : une assertion portée par un module de
+   * production ne serait pas une assertion, ce serait du code.
+   */
+  readonly fichier: string;
+  /**
+   * Le NOM EXACT du test, tel que `it("…")`, `it.fails("…")` ou `test("…")`
+   * l'écrit — **entre guillemets doubles**, sans guillemet double à l'intérieur.
+   *
+   * ⚠️ LA BORNE, ÉCRITE AVEC LA RÈGLE : la garde cherche une forme LITTÉRALE.
+   *    Un nom composé à l'exécution est introuvable, et la garde le dit par une
+   *    anomalie plutôt que de rendre un vert.
+   */
+  readonly nom: string;
+  /**
+   * Les NOMS que le CORPS du test doit citer — le champ neuf, le code de refus,
+   * la constante dont l'absence défait la décision.
+   *
+   * ⚠️ **C'EST CE CHAMP QUI EMPÊCHE DE POINTER N'IMPORTE QUEL TEST VERT.** Sans
+   *    lui, une entrée pourrait nommer un test qui passe pour une raison
+   *    étrangère à la décision, et le registre redeviendrait une prose. La liste
+   *    ne peut pas être vide : la garde en fait une anomalie.
+   */
+  readonly nomme: readonly string[];
+}
+
 /** Ce que toute entrée porte, quel que soit son état. */
 interface EntreeCommune {
   /** Le numéro de l'ADR, sur quatre chiffres — `"0016"`. Il DOIT désigner un fichier de `docs/adr/`. */
   readonly adr: string;
+  /**
+   * LE SECOND FAIT DU REGISTRE (ADR 0041) — voir {@link AssertionDeCouture}.
+   *
+   * `null` veut dire **SANS-ASSERTION** : aucun test connu ne rougit si cette
+   * décision se défait. C'est une réponse honnête et comptée, jamais un défaut
+   * de remplissage.
+   */
+  readonly assertion: AssertionDeCouture | null;
   /** La décision, en une phrase. C'est elle qu'on lit dans l'annonce de la garde. */
   readonly decision: string;
   /**
@@ -254,6 +330,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/auth/contrat.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 importateur de production mesuré : `core/auth/octroi.ts`, qui rend un `Octroi` depuis " +
       "`echangerLeCode()`. ✅ DEUX PÉREMPTIONS SUCCESSIVES, ET ELLES ONT FONCTIONNÉ TOUTES LES " +
@@ -275,6 +352,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/transport/contrat.ts",
     mesureeAilleurs: "core/transport/stdio/serveur.spec.ts",
+    assertion: null,
     motif:
       "1 importateur de production mesuré : `core/transport/stdio/serveur.ts`, où la fonction " +
       "`frapper()` rend ce type et ne reçoit RIEN de l'enveloppe — c'est la forme la plus " +
@@ -299,6 +377,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/audit/canonique.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "2 appelants de production mesurés : `core/audit/journal.ts` (écriture) et " +
       "`core/audit/verification.ts` (relecture). Les deux bouts de la chaîne passent " +
@@ -312,6 +391,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/audit/canonique.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 lecteur de production mesuré : `core/audit/contenu.ts`, qui parcourt la liste " +
       "pour la garde de contenu du § 31. `core/audit/vocabulaire.ts` la CITE en " +
@@ -326,6 +406,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/audit/verification.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, et c'est attendu : son appelant est l'écran " +
       "Santé de la console (lot 5) et le healthcheck du § 23, dont aucun n'existe. " +
@@ -341,6 +422,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/fermeture.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "2 appelants de production mesurés : `core/adapter-kit/manifest.ts` (côté " +
       "adaptateur) et `core/registry/enregistrer.ts` (côté admission). Les deux côtés " +
@@ -356,6 +438,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/fermeture.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/registry/enregistrer.ts`. " +
       "⚠️ L'ADR 0020 rend cette entrée CRITIQUE : le retrait d'`idempotencyKey` de " +
@@ -371,6 +454,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/profils.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif: "1 appelant de production mesuré : `core/adapter-kit/manifest.ts`.",
   },
   {
@@ -381,6 +465,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/profils.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "✅ 2 appelants de production mesurés : `core/adapter-kit/kit.ts` (LÈVE — c'est l'entrée " +
       "unique de l'énumération dans le kit) et `core/adapter-kit/manifest.ts` (REND UNE " +
@@ -408,6 +493,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/vault/erreurs.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 lecteur de production mesuré : `core/vault/coffre.ts`. Le numéro est DÉRIVÉ " +
       "d'`APPEL_STEPS`, jamais écrit — c'est la moitié de la décision.",
@@ -420,6 +506,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/vault/erreurs.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 lecteur de production mesuré : `core/vault/coffre.ts`. `core/types.ts` le " +
       "cite en commentaire au titre de l'écart assumé ; la garde retire les " +
@@ -431,6 +518,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     adr: "0010",
     decision: "Le poste vocal est un démon pilote (voie B).",
     etat: "hors-code",
+    assertion: null,
     motif:
       "Statut PROPOSÉE — elle attend l'accord de Will (décision W-7), et sa portée est " +
       "`voice/`, lot 8. Aucune conséquence sur `core/` : inscrire un symbole ici " +
@@ -440,6 +528,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     adr: "0011",
     decision: "Les lectures sans session, agrégateur par agrégateur.",
     etat: "hors-code",
+    assertion: null,
     motif:
       "Statut PROPOSÉE, et c'est un INVENTAIRE DE MESURE : aucune décision d'écriture, " +
       "donc aucun symbole à porter. Les travaux préalables vivent dans le dépôt voisin.",
@@ -448,6 +537,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     adr: "0012",
     decision: "La route `/api/mcp` dans Axion-IA, et les gardes qu'elle rencontre.",
     etat: "hors-code",
+    assertion: null,
     motif:
       "Acceptée, mais sa portée est le DÉPÔT VOISIN `axionia` (lot 4a). Un symbole de " +
       "ce dépôt-ci ne peut pas la porter, et une garde d'ici ne peut pas la mesurer.",
@@ -456,6 +546,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     adr: "0013",
     decision: "Les données derrière les huit écrans de la console.",
     etat: "hors-code",
+    assertion: null,
     motif:
       "Statut PROPOSÉE — elle appelle une décision de Will sur les huit manques du § 5. " +
       "Sa portée est le lot 5 ; les modules de `core/` qu'elle nommera sont déjà " +
@@ -471,6 +562,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/identite/session.ts",
     mesureeAilleurs: "core/chaine/identite.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/chaine/identite.ts`. La garantie ne " +
       "vient pas de ce compte mais de la garde G2 de `identite.spec.ts`, qui parcourt " +
@@ -485,6 +577,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/identite/session.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "COUSU AU LOT 1d, et c'est un import qui le prouve — un type ne s'appelle pas. " +
       "Sept modules de production le nomment : `core/types.ts` (ToolContext.sessionId), " +
@@ -508,6 +601,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "membre",
     module: "core/identite/session.ts",
     mesureeAilleurs: "core/chaine/identite.spec.ts",
+    assertion: null,
     motif:
       "0 appelant LIVRÉ mesuré — et c'est le cliquet G2 de `identite.spec.ts` qui " +
       "l'annonce déjà en toutes lettres (« 0 appelant LIVRÉ de relireDepuisLeSocle »). " +
@@ -523,6 +617,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/chaine/etape-11-provenance.ts",
     mesureeAilleurs: "core/epreuve/verrous-du-paragraphe-20.temoin.spec.ts",
+    assertion: null,
     motif:
       "✅ COUSU AU LOT 1d. ⚠️ ET LE COMPTE D'APPELANTS N'EN DIT RIEN — c'est pour ça " +
       "que cette entrée délègue. La couture de cet ADR est un RETRAIT DE PARAMÈTRE : " +
@@ -547,6 +642,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/champs-declares.ts",
     mesureeAilleurs: "core/chaine/gouvernance-declaree.temoin.spec.ts",
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 1d. 1 appelant de production mesuré : " +
       "`core/chaine/etape-11-provenance.ts`, qui construit sa liste `gouvernance` SUR " +
@@ -566,6 +662,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "MOITIÉ « TABLE » — `ops_tool` porte enfin `governanceFields`, le dernier tronçon " +
       "d'une propagation qui existait partout ailleurs.",
     etat: "hors-code",
+    assertion: null,
     motif:
       "⚠️ CETTE MOITIÉ NE PRODUIT AUCUN SYMBOLE DE CE DÉPÔT : elle porte sur `model " +
       "OpsTool` de `prisma/schema.prisma`. Elle est inscrite parce qu'elle est MESURÉE — " +
@@ -591,6 +688,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/audit/journal.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/chaine/orchestrateur.ts`. " +
       "⚠️ IL NE SE VOIT QU'AVEC L'ARGUMENT DE TYPE : l'appel s'écrit " +
@@ -607,6 +705,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/policy/effet.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "3 appelants de production mesurés : `core/chaine/orchestrateur.ts` (le cliquet " +
       "de l'étape 14), `core/audit/cloture.ts` (la ligne de clôture de purge) et " +
@@ -624,6 +723,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/instance/verrou.ts",
     mesureeAilleurs: "core/instance/couture-adr-0018.temoin.spec.ts",
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 1d. 1 appelant de production mesuré : `core/instance/demarrage.ts`, " +
       "où `demarrerLeSocleMonoInstance()` appelle l'arbitre sur le résultat d'`acquerir()` " +
@@ -657,6 +757,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/instance/verrou.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "2 appelants de production mesurés : `core/instance/demarrage.ts` " +
       "(`relireLaSanteMonoInstance`, qui relit le verrou à CHAQUE appel) et " +
@@ -678,6 +779,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/instance/demarrage.ts",
     mesureeAilleurs: "core/instance/demarrage.spec.ts",
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 1 appelant de production mesuré : `ops/main.ts`, qui l'appelle à " +
       "DEUX endroits — au premier battement de la veille (étage 7) et, surtout, dans le " +
@@ -704,6 +806,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/coutures/registre.ts",
     mesureeAilleurs: "core/coutures/registre.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, et c'est ici l'état DÉFINITIF, non une dette : le " +
       "registre est une DONNÉE, dont le seul lecteur légitime est une garde. La mesure " +
@@ -721,6 +824,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/coutures/verifier.ts",
     mesureeAilleurs: "core/coutures/couture.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, et c'est l'état DÉFINITIF : ses deux appelants " +
       "sont des gardes (`registre.spec.ts` pour le dépôt réel, `couture.temoin.spec.ts` " +
@@ -741,6 +845,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/limits/idempotency.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré, et ce n'est PAS celui que ce registre annonçait. " +
       "Il prédisait `core/limits/limites.ts` ; la couture a atterri dans " +
@@ -770,6 +875,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/types.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/adapter-kit/autorisation.ts`, où " +
       "`clesDAutorisationDepuisSource` en fait la valeur par DÉFAUT de son troisième " +
@@ -790,6 +896,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/types.ts",
     mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, et c'est ici l'état DÉFINITIF, non une dette. " +
       "C'est une DONNÉE typée — même statut que ce registre-ci : son seul lecteur " +
@@ -811,6 +918,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/limits/idempotency.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré, et c'est celui que ce registre annonçait : le " +
       "`finally` de l'étape 14 dans `core/chaine/orchestrateur.ts`. Il lit le cliquet " +
@@ -831,6 +939,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/audit/intention.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "À écrire par le constructeur ④, sur le modèle exact d'`estLigneDeCloture`. Ses " +
       "appelants seront `core/audit/verification.ts` (le compteur) et " +
@@ -853,6 +962,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/audit/intention.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "0 appelant de production mesuré : aucun module ne l'importe, `RapportVerification` " +
       "ne porte pas encore ces trois champs et `GENRES_ANOMALIE` pas encore le genre " +
@@ -877,6 +987,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "ops/demarrage/etages.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `ops/demarrage.ts`, où " +
       "l'arbitre `arbitrerLeDemarrage` et la garde `verifierLaCouvertureDesEtages` prennent " +
@@ -896,6 +1007,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "ops/demarrage/etages.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `ops/demarrage.ts`, où " +
       "`RefusDEtage.issue` le porte et où `issueDuRefusDeCoffre` le RETOURNE. ⚠️ ET CETTE " +
@@ -916,6 +1028,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "ops/demarrage.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `ops/main.ts`, dans `conclure()` — la SEULE " +
       "fonction par laquelle toutes les sorties anticipées de la séquence passent. ⚠️ CE " +
@@ -935,6 +1048,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "ops/demarrage.ts",
     mesureeAilleurs: "ops/couverture-des-etages.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production mesuré, ET C'EST LA BONNE VALEUR : cette garde lit le " +
       "SOURCE de la racine, ce qu'un conteneur ne porte pas — il n'embarque que le " +
@@ -957,6 +1071,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/instance/contrat-postgres.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `core/instance/postgres.ts`, " +
       "où `VerrouPostgres.connexion()` le RETOURNE et où `memeSessionQuAlAcquisition` est " +
@@ -981,6 +1096,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/instance/postgres.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `ops/main.ts`, à l'étage 1, AVANT toute " +
       "construction de verrou. ⚠️ UN DRAPEAU SE MET À `false` POUR FAIRE PASSER UN TEST ET " +
@@ -1000,6 +1116,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/instance/postgres.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `ops/main.ts`, qui l'instancie à l'étage 1 quand " +
       "l'URL de base désigne un magasin réel. ⚠️ CE QUE LA GARDE NE PEUT PAS FAIRE, ÉCRIT " +
@@ -1023,6 +1140,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/transport/contrat.ts",
     mesureeAilleurs: "core/transport/http/imports.temoin.spec.ts",
+    assertion: null,
     motif:
       "2 importateurs de production mesurés — `core/transport/http/transport.ts` et " +
       "`core/transport/stdio/serveur.ts` : les deux transports REÇOIVENT le noyau, aucun ne " +
@@ -1044,6 +1162,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/transport/contrat.ts",
     mesureeAilleurs: "core/transport/http/hote.spec.ts",
+    assertion: null,
     motif:
       "1 importateur de production mesuré : `core/transport/http/hote.ts`. ⚠️ ENTRÉE SÉPARÉE " +
       "DE LA PRÉCÉDENTE, PARCE QUE LE MODE DE DÉFAILLANCE EST AUTRE : le noyau unique se perd " +
@@ -1065,6 +1184,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/http/amont.ts",
     mesureeAilleurs: "core/transport/http/amont.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/http/transport.ts`. ⚠️ CE QUI TIENT " +
       "L'ORDRE N'EST PAS CETTE FONCTION MAIS SA SIGNATURE — elle ne reçoit AUCUN corps, donc " +
@@ -1086,6 +1206,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/http/couverture.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `creerTransportHttp` l'appelle avant toute autre " +
       "chose, si bien qu'une étape « HTTP seul » sans exécutant fait LEVER la construction du " +
@@ -1108,6 +1229,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/auth/ressource.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `core/auth/audience.ts`, où le " +
       "type ANNOTE la table `CONTROLES` — `Readonly<Record<CleDeContrainteDAudience, …>>`. " +
@@ -1128,6 +1250,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/auth/audience.ts",
     mesureeAilleurs: "core/auth/audience.spec.ts",
+    assertion: null,
     motif:
       "2 appelants de production mesurés : `core/auth/configuration.ts` (l'étage 3, sur la " +
       "valeur de configuration) et `core/auth/octroi.ts` (au MONTAGE de l'émetteur). ⚠️ LE " +
@@ -1149,6 +1272,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/http/audience.ts",
     mesureeAilleurs: "core/transport/http/audience.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/http/amont.ts`, à l'étape 3. " +
       "⚠️ ENTRÉE DISTINCTE DE LA PRÉCÉDENTE, ET LA DISTINCTION EST CELLE QUE L'ADR 0026 POSE : " +
@@ -1172,6 +1296,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/auth/contrat.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 1 importateur de production mesuré : `core/auth/scopes.ts`, où " +
       "`VerdictDeScopesDemandes` l'ÉTEND. ⚠️ L'EXTENSION EST UNE DÉCISION, PAS UNE COMMODITÉ : " +
@@ -1193,6 +1318,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/auth/scopes.ts",
     mesureeAilleurs: "core/auth/scopes.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/auth/octroi.ts`, dans `preparerUneAutorisation` " +
       "— c'est-à-dire AVANT qu'un code d'autorisation soit rendu, et non à l'échange. ⚠️ LE " +
@@ -1215,6 +1341,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/auth/empreinte.ts",
     mesureeAilleurs: "core/auth/empreinte.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/auth/octroi.ts`, au montage — l'émetteur reçoit " +
       "le COFFRE et construit le calcul, plutôt que de recevoir le calcul tout fait : une " +
@@ -1237,6 +1364,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/auth/depot.ts",
     mesureeAilleurs: "core/auth/schema.spec.ts",
+    assertion: null,
     motif:
       "2 importateurs de production mesurés : `core/auth/octroi.ts` et `core/auth/memoire.ts`. " +
       "⚠️ LA MESURE DE FOND EST AILLEURS, ET ELLE EST NOMMÉE : la garde déléguée CONFRONTE " +
@@ -1257,6 +1385,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/auth/octroi.ts",
     mesureeAilleurs: "core/auth/octroi.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production mesuré, ET C'EST LA VALEUR ATTENDUE AUJOURD'HUI : le montage " +
       "de l'émetteur appartient à la racine de composition, et `ops/main.ts` ne sert encore " +
@@ -1279,6 +1408,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/auth/configuration.ts",
     mesureeAilleurs: "core/auth/configuration.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `ops/main.ts`, à l'étage 3, sur les quatre réglages " +
       "que `reglagesDepuisLEnvironnement` extrait de l'environnement — liste DÉRIVÉE de " +
@@ -1299,6 +1429,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "MOITIÉ « TABLE » — `ops_token` gagne `grantId` et `sessionId`, avec leur " +
       "migration ET leur lecteur dans le même geste.",
     etat: "hors-code",
+    assertion: null,
     motif:
       "⚠️ CETTE MOITIÉ NE PRODUIT AUCUN SYMBOLE DE CE DÉPÔT : elle porte sur `model OpsToken` " +
       "de `prisma/schema.prisma`. ✅ LES DEUX COLONNES ONT ATTERRI AU LOT 2, AVEC LEUR LECTEUR " +
@@ -1323,6 +1454,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/auth/routes.ts",
     mesureeAilleurs: "core/auth/routes.spec.ts",
+    assertion: null,
     motif:
       "0 lecteur de production mesuré, ET C'EST LA VALEUR ATTENDUE : cette constante existe " +
       "pour être lue par une GARDE, pas par un module — `ops/acces/politique-de-chemins.ts` " +
@@ -1344,6 +1476,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "ops/acces/politique-de-chemins.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif:
       "0 appelant de production mesuré : la garde de cohérence appartient au constructeur du " +
       "lot 2. ⚠️ ET LE COMPTE D'APPELANTS NE SERA JAMAIS LA MESURE DE FOND, il faut l'écrire " +
@@ -1365,6 +1498,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/auth/contrat.ts",
     mesureeAilleurs: "core/epreuve/lot1d-canaux-du-contexte.temoin.spec.ts",
+    assertion: null,
     motif:
       "✅ COUSUE AU LOT 2. 2 importateurs de production mesurés : `core/auth/principal.ts` (qui " +
       "le FABRIQUE) et `core/auth/octroi.ts` (qui le REÇOIT). ⚠️ CETTE ENTRÉE PORTE LA MOITIÉ " +
@@ -1387,6 +1521,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/auth/principal.ts",
     mesureeAilleurs: "core/auth/principal.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/auth/octroi.ts`, deux fois — à la préparation " +
       "de l'autorisation ET à l'échange du code. ⚠️ LA SECONDE CONFRONTATION EST DÉLIBÉRÉE, " +
@@ -1409,6 +1544,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/audit/contenu.ts",
     mesureeAilleurs: "core/audit/contenu.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production mesuré : ses deux appelants sont l'étape 4 " +
       "(`core/transport/http.ts`) et l'étape 6 (`core/chaine/etape-06-outil.ts`), qui " +
@@ -1433,6 +1569,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/http/principal.ts",
     mesureeAilleurs: "core/transport/http/principal.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/http/amont.ts`, à l'étape 4 — là où " +
       "`ops_token` est relue, donc là où le principal est LU, donc là où il se juge. ⚠️ CETTE " +
@@ -1454,6 +1591,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "Une étape rend le code de sa CAUSE quand elle en connaît un ; l'ancrage " +
       "`APPEL_STEPS[n].refus` n'en est que le DÉFAUT. `stepDenied`, lui, vient toujours de l'ancrage.",
     etat: "hors-code",
+    assertion: null,
     motif:
       "⚠️ AUCUN SYMBOLE NEUF : la décision se pose dans `refuser()` et dans le `case 13:` de " +
       "`core/chaine/orchestrateur.ts`, sur des symboles qui existent déjà et qui appartiennent " +
@@ -1474,6 +1612,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/http/codes.ts",
     mesureeAilleurs: "core/transport/http/amont.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/http/amont.ts`, dans le `refuser()` local " +
       "de `franchirLAmont`. ⚠️ LE MODULE EST SÉPARÉ D'`amont.ts` POUR QUE LA COUTURE SOIT " +
@@ -1501,8 +1640,12 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     etat: "cousue",
     symbole: "verifierAucuneFuite",
     genre: "fonction",
-    module: "core/transport/http/reponse.ts",
+    // ⚠️ LE SYMBOLE A DÉMÉNAGÉ AU LOT 4 (ADR 0044). Ce champ ne décrit pas
+    //    l'ADR 0033 : il dit où le DÉFINISSEUR se trouve aujourd'hui, pour que
+    //    la garde ne le compte pas comme son propre appelant.
+    module: "core/transport/anti-fuite.ts",
     mesureeAilleurs: "core/transport/http/transport.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/http/transport.ts`, sur le chemin de " +
       "scellement par lequel passe TOUTE réponse — succès compris. ⚠️ LE COMPTE D'APPELANTS NE " +
@@ -1526,6 +1669,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/types.ts",
     mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, et c'est ici l'état DÉFINITIF, non une dette — " +
       "même lecture que `STATUT_DES_CANAUX_DE_CONTEXTE` sous l'ADR 0020 : c'est une DONNÉE " +
@@ -1547,6 +1691,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/types.ts",
     mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, état DÉFINITIF — même lecture que ci-dessus. " +
       "⚠️ ENTRÉE SÉPARÉE DE SA JUMELLE, ET LE MODE DE DÉFAILLANCE EST AUTRE : les six " +
@@ -1566,6 +1711,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/types.ts",
     mesureeAilleurs: "core/canaux-du-contexte.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 importateur de production MESURÉ, état DÉFINITIF : c'est la forme d'une donnée de " +
       "garde. ⚠️ TROISIÈME ENTRÉE, PARCE QU'UN QUATRIÈME RÉGIME AURAIT ÉTÉ LA MAUVAISE " +
@@ -1591,6 +1737,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/stdio/cadrage.ts",
     mesureeAilleurs: "core/transport/stdio/cadrage.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/stdio/serveur.ts`, qui monte le " +
       "découpeur au montage du démon et lui remet chaque morceau de flux. ⚠️ LE COMPTE " +
@@ -1612,6 +1759,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/stdio/protocole.ts",
     mesureeAilleurs: "core/transport/stdio/etapes-exercees.temoin.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/stdio/serveur.ts`, sur la seule " +
       "branche `resultat.refus !== null`. ⚠️ CE QUI FAIT FOI EST LA MESURE APPARIÉE, PAS " +
@@ -1633,6 +1781,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/transport/stdio/protocole.ts",
     mesureeAilleurs: "core/transport/stdio/serveur.spec.ts",
+    assertion: null,
     motif:
       "1 lecteur de production mesuré : `core/transport/stdio/serveur.ts`, qui la nomme dans " +
       "le message de refus — la liste rendue au client est celle de ce qui est ADMIS, jamais " +
@@ -1655,6 +1804,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/stdio/etapes-exercees.ts",
     mesureeAilleurs: "core/transport/stdio/etapes-exercees.temoin.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `core/transport/stdio/serveur.ts`, dans " +
       "`rapportDeCouverture()` — l'écran Santé (§ 22) et le § 24 doivent pouvoir dire quelles " +
@@ -1677,6 +1827,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/transport/stdio/serveur.ts",
     mesureeAilleurs: "core/transport/stdio/serveur.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `ops/service.ts`, dans `monterLeService()`, qui reçoit " +
       "les flux de `ops/index.ts` et ne les nomme jamais lui-même. ⚠️ CETTE ENTRÉE A PORTÉ " +
@@ -1701,6 +1852,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "ops/service.ts",
     mesureeAilleurs: "ops/service.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production mesuré : `ops/index.ts`. C'est le geste qui ferme le manque " +
       "du lot 2 — « les deux transports sont écrits, et rien ne les monte ». DÉBRANCHÉ, " +
@@ -1718,6 +1870,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "membre",
     module: "ops/demarrage.ts",
     mesureeAilleurs: "ops/service.spec.ts",
+    assertion: null,
     motif:
       "2 appelants de production mesurés : `ops/main.ts` (le healthcheck le republie) et " +
       "`ops/service.ts` (le montage le LIT et refuse). ⚠️ AVANT CE LOT, IL AVAIT ZÉRO " +
@@ -1741,6 +1894,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/adapter-kit/capacite.ts",
     mesureeAilleurs: "core/adapter-kit/champs-declares.temoin.spec.ts",
+    assertion: null,
     motif:
       "1 lecteur de production MESURÉ : `core/adapter-kit/champs-declares.ts`, qui l'IMPORTE " +
       "et la lit à DEUX endroits — la quatrième condition de `mesurerLaCapacite()` et " +
@@ -1768,6 +1922,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/adapter-kit/capacite.ts",
     mesureeAilleurs: "core/adapter-kit/champs-declares.temoin.spec.ts",
+    assertion: null,
     motif:
       "1 importateur de production MESURÉ : `core/adapter-kit/champs-declares.ts`, où " +
       "`mesurerLaCapacite` le REMPLIT et où `patternReferme` ne lit plus que son champ " +
@@ -1793,6 +1948,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/champs-declares.ts",
     mesureeAilleurs: "core/adapter-kit/champs-declares.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, et le compte n'est PAS la mesure : son unique " +
       "appelant est `estValeurLibre`, dans le module qui le DÉFINIT, donc exclu du comptage " +
@@ -1817,22 +1973,30 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     decision:
       "§ 14 — le plafond de 40 outils SERVIS se refuse À L'ÉTAPE 7, dans le même " +
       "bloc qu'`estServi`, en LISANT l'étape et le code que le verdict porte déjà.",
-    etat: "à-coudre",
+    etat: "cousue",
     symbole: "mesurerBudgetProfil",
     genre: "fonction",
     module: "core/profiles/budget.ts",
     mesureeAilleurs: "core/profiles/budget.spec.ts",
+    assertion: {
+      fichier: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+      nom: "le bloc de l'étape 7 de l'orchestrateur lit PLAFOND_OUTILS_PAR_PROFIL",
+      nomme: ["PLAFOND_OUTILS_PAR_PROFIL", "estServi(outil, profil)"],
+    },
     motif:
-      "0 appelant de production MESURÉ sur les 130 modules émis par le build. ⚠️ LA RÈGLE " +
-      "EST ÉCRITE, ÉPROUVÉE, DOCUMENTÉE — ET COUSUE NULLE PART : le seul endroit du dépôt " +
-      "où le plafond se refuse effectivement est un TEST, " +
-      "`core/__tests__/integration.spec.ts`, qui RÉIMPLÉMENTE la règle sous le commentaire " +
-      "« le plafond se refuse ICI, pas seulement en CI ». Un test qui réimplémente éprouve " +
-      "son propre sosie. ⚠️ AGGRAVANT MESURÉ : aucune entrée du registre ne portait ce " +
-      "sujet, donc la garde qui existe pour repérer ce cas précis était aveugle à " +
-      "celui-là. Cette entrée est le geste qui le rend trouvable. ⚠️ LE SECOND PLAFOND du " +
-      "§ 14 — les octets de définitions — vit dans le MÊME verdict, donc au même endroit " +
-      "non appelé, et il n'a jamais été confronté séparément.",
+      "✅ COUSUE AU LOT 4 — 1 appelant de production MESURÉ : `core/chaine/orchestrateur.ts`, " +
+      "dans le bloc de l'étape 7, après `estServi` et avant `franchir`. L'entrée a passé un " +
+      "lot entier en `à-coudre` avec 0 appelant, honnêtement. ⚠️ CE QUI A CHANGÉ, ET CE QUI " +
+      "NE CHANGE PAS : l'étape et le code du refus sont LUS dans le verdict " +
+      "(`etapeDeRefus`, `codeDeRefus`), jamais réécrits — `tool_not_in_profile` reste EXACT " +
+      "pour l'appartenance et INEXACT pour le plafond, et c'est le MESSAGE qui distingue " +
+      "les deux, puisque c'est lui que l'appelant lit (§ 15, écart assumé). ⚠️ LA MESURE " +
+      "AVEUGLE REFUSE AUSSI : à l'étape 7, un inventaire vide contredit l'étape 6, et le " +
+      "message NOMME la contradiction plutôt que le plafond — sinon le plafond se " +
+      "mesurerait sur zéro outil et ne pourrait plus jamais mordre. ⚠️ LE SECOND PLAFOND du " +
+      "§ 14 — les octets de définitions — vit dans le MÊME verdict et est désormais refusé " +
+      "par le même geste ; il n'a toujours PAS été confronté séparément : personne n'a " +
+      "construit un catalogue sous 40 outils et au-dessus du plafond d'octets.",
   },
   {
     adr: "0036",
@@ -1844,6 +2008,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/manifest.ts",
     mesureeAilleurs: "core/registry/enregistrer.temoin.spec.ts",
+    assertion: null,
     motif:
       "2 appelants de production mesurés : `core/adapter-kit/conformite.ts` (contrôle C13.3, " +
       "AU BUILD) et `core/registry/enregistrer.ts` (contrôle 7 ter bis, À L'ADMISSION, motif " +
@@ -1872,6 +2037,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/adapter-kit/conformite.ts",
     mesureeAilleurs: "core/adapter-kit/conformite.temoin.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ, ET CE ZÉRO EST LE RÉGIME NORMAL : le harnais tourne " +
       "dans la CI de l'ADAPTATEUR, et `adapters/` est vide. ⚠️ LE DÉFAUT QUE CETTE ENTRÉE " +
@@ -1904,6 +2070,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "constante",
     module: "core/transport/http/amont.ts",
     mesureeAilleurs: "core/transport/http/amont.spec.ts",
+    assertion: null,
     motif:
       "2 lecteurs de production mesurés, dont `core/transport/http/transport.ts`, qui y " +
       "retombe quand le montage ne fournit rien. ⚠️ LE COMPTEUR QUI DEVAIT DIRE L'ABSENCE " +
@@ -1926,6 +2093,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/transport/contrat.ts",
     mesureeAilleurs: "core/transport/valeurs-servies.spec.ts",
+    assertion: null,
     motif:
       "3 importateurs de production mesurés — `core/transport/valeurs-servies.ts` (la " +
       "dérivation unique), `core/transport/http/transport.ts` et " +
@@ -1950,16 +2118,68 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "ops/service.ts",
     mesureeAilleurs: "ops/service.spec.ts",
+    assertion: {
+      fichier: "ops/service.spec.ts",
+      nom:
+        "un refus d'amont servi par un service RÉELLEMENT MONTÉ écrit une ligne, et " +
+        "refusConsignes l'ADDITIONNE",
+      nomme: ["journalDesRefus", "PortsDuService", "refusConsignes"],
+    },
     motif:
-      "1 importateur de production mesuré : `ops/index.ts`. ⚠️ MESURE QUI FONDE LA " +
-      'DÉCISION : `grep -rn "journalDesRefus" ops` rend ZÉRO, `grep -rn "delaiDeReprise" ' +
-      "ops` rend ZÉRO. Ce n'est pas un oubli de câblage — le type n'offrait AUCUNE fente " +
-      "pour les poser. Conséquences en service : les quatre refus « HTTP seul » n'écrivent " +
-      "aucune ligne (une campagne de jetons contre la porte est invisible), et tout 429 " +
-      "sort sans `Retry-After`, contre le § 11 et le § 15. ⚠️ ET LE `Retry-After` DOIT " +
-      "VENIR D'UN CHAMP, jamais d'une relecture du message français du refus : un en-tête " +
-      "de protocole dérivé d'une phrase casse à la première reformulation, et il casse en " +
-      "silence.",
+      "1 importateur de production mesuré : `ops/index.ts`. ⚠️ MESURE QUI A FONDÉ LA " +
+      "DÉCISION (lot 3) : `grep -rn 'journalDesRefus' ops` rendait ZÉRO, " +
+      "`grep -rn 'delaiDeReprise' ops` rendait ZÉRO. Ce n'était pas un oubli de câblage — " +
+      "le type n'offrait AUCUNE fente pour les poser. ✅ ATTERRIE AU LOT 4 : la fente " +
+      "existe, `monterLeService` la transmet à `creerTransportHttp`, et l'assertion N'EST " +
+      "PLUS UNE DETTE. ⚠️ LES DEUX ÉTATS, TRANSCRITS SUR UNE COPIE PROPRE DE `HEAD` — " +
+      "ROUGE : « statut 401 sur le fil · 0 ligne(s) écrite(s) · ARMÉ : 1 prononcé · 0 " +
+      "consigné », `expected +0 to be 1`. VERT : « 1 ligne écrite par le fil, 2 au total, " +
+      "étapes [2, 2] · ARMÉ : 1 prononcé · 1 consigné · NON ARMÉ : 1 prononcé · 0 consigné " +
+      "· PORT À 2 LIGNES : 2 consignés ». Le dernier compte tue la mutation " +
+      "`refusConsignes += 1` : deux lignes écrites, deux lignes comptées. ⚠️ ET LA GARDE " +
+      "PART DU MONTAGE, jamais de `creerTransportHttp` — une garde qui appellerait le " +
+      "transport directement re-vérifierait ce qui marchait déjà, et laisserait passer " +
+      "exactement ce défaut-ci.",
+  },
+  {
+    adr: "0037",
+    decision:
+      "Le `delaiDeReprise` entre dans les ports du service : tant que la fente " +
+      "n'existe pas, tout 429 servi par un service RÉELLEMENT MONTÉ sort sans " +
+      "`Retry-After`, et « non armé » n'est pas un réglage, c'est une impossibilité.",
+    etat: "cousue",
+    symbole: "PortsDuService",
+    genre: "type",
+    module: "ops/service.ts",
+    mesureeAilleurs: "ops/service.spec.ts",
+    assertion: {
+      fichier: "ops/service.spec.ts",
+      nom:
+        "un 429 servi par un service RÉELLEMENT MONTÉ porte Retry-After, et le non-armé " +
+        "ne le porte pas",
+      nomme: ["delaiDeReprise", "PortsDuService", "retry-after"],
+    },
+    motif:
+      "⚠️ **UNE DÉCISION PAR ENTRÉE, ET C'EST CE DÉDOUBLEMENT QUI RÉPARE LE DÉFAUT.** " +
+      "L'entrée précédente couvrait les décisions 2 ET 3 de l'ADR 0037 sous une seule " +
+      "ligne : une seule assertion ne peut pas voir deux décisions, et celle des deux qui " +
+      "n'était pas nommée aurait pu atterrir seule sans que rien ne le dise. ⚠️ MESURE " +
+      "TRANSCRITE : 7 303 caractères lus dans `ops/service.ts`, interface `PortsDuService` " +
+      "isolée à 533 caractères, `delaiDeReprise` absent. Le symbole ÉTAIT cousu — " +
+      "`ops/index.ts` l'importe —, l'entrée était verte à bon droit, et la décision " +
+      "n'existait nulle part : ajouter un champ à un type déjà importé ne change AUCUN " +
+      "compte d'appelants. C'est le spécimen exact du défaut que l'ADR 0041 ferme. " +
+      "✅ ATTERRIE AU LOT 4, LES DEUX ÉTATS TRANSCRITS SUR UNE COPIE PROPRE DE `HEAD` — " +
+      "ROUGE : « statut 429 sur le fil · Retry-After AUCUN · 0 lecture(s) du port », " +
+      "`expected null to be '37'`. VERT : « Retry-After « 37 » · 1 lecture du port, " +
+      "étape [12] », et le TÉMOIN INVERSE au même montage, port non déclaré : « statut " +
+      "429 · Retry-After AUCUN · écart compté : true ». Sans ce témoin, un transport qui " +
+      "poserait l'en-tête EN DUR satisferait la garde. ⚠️ BORNE ÉCRITE AVEC LA DÉCISION : " +
+      "la production laisse le port `null` — la seule source honnête du délai serait " +
+      "`RefusDetaille.retryAfterSecondes`, que l'orchestrateur ne porte pas à ce jour, et " +
+      "relire le nombre dans le message français est ce que l'ADR 0037 interdit. Le " +
+      "`null` est ÉCRIT et COMPTÉ : `ServiceMonte.portsDAmontNonArmes` le NOMME, et " +
+      "`ops/index.ts` l'annonce à chaque démarrage.",
   },
 
   // ── ADR 0038 ───────────────────────────────────────────────────────────────
@@ -1974,6 +2194,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/policy/desserrage.ts",
     mesureeAilleurs: "core/policy/desserrage.spec.ts",
+    assertion: null,
     motif:
       "0 appelant de production MESURÉ : `console/` est vide, et seuls les ré-exports de " +
       "`core/policy/index.ts` le citent. LE DÉFAUT ÉTAIT DONC LATENT — et il est sur le " +
@@ -2008,6 +2229,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/chaine/orchestrateur.ts",
     mesureeAilleurs: "core/chaine/orchestrateur.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production MESURÉ : `ops/composition/noyau.ts`. LE ZÉRO EST LEVÉ, ET " +
       "C'ÉTAIT LA MESURE DU LOT 2 — « le socle DÉMARRE et ne SERT PAS depuis son propre " +
@@ -2046,6 +2268,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "type",
     module: "core/transport/contrat.ts",
     mesureeAilleurs: "ops/service.spec.ts",
+    assertion: null,
     motif:
       "2 importateurs de production MESURÉS : `ops/service.ts` — dont `PortsDuService.noyau` " +
       "EST désormais une fabrique nullable, plus un noyau nullable — et " +
@@ -2082,6 +2305,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "ops/composition/noyau.ts",
     mesureeAilleurs: "ops/composition/noyau.spec.ts",
+    assertion: null,
     motif:
       "1 appelant de production MESURÉ : `ops/index.ts`. ⚠️ POURQUOI UN DOSSIER À PART, ET " +
       "PAS `ops/index.ts` : la composition écrite dans le point d'entrée serait inéprouvable " +
@@ -2107,6 +2331,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     decision:
       "Le plafond de durée d'un test est POSÉ (30 000 ms, crochets compris) et sa " +
       "marge se SURVEILLE : alerte dès qu'un test dépasse la moitié du plafond.",
+    assertion: null,
     motif:
       "AUCUN SYMBOLE LIVRÉ, et le motif est mesurable : la décision vit dans " +
       "`vitest.config.ts`, que `tsconfig.build.json` exclut par le motif `*.config.ts` — " +
@@ -2135,6 +2360,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     decision:
       "L'ARMEMENT n'écrit plus le seuil : le crochet qui fait rougir un test " +
       "DÉRIVE sa décision du même verdict que la fonction pure, et une garde le vérifie.",
+    assertion: null,
     motif:
       "AUCUN SYMBOLE LIVRÉ : `plafond-de-test.config.ts` et `marge-des-gardes.config.ts` " +
       "sortent tous deux du périmètre livré par le motif `*.config.ts`, dont la garde des " +
@@ -2166,6 +2392,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     genre: "fonction",
     module: "core/coutures/verifier.ts",
     mesureeAilleurs: "core/coutures/couture.temoin.spec.ts",
+    assertion: null,
     motif:
       "⚠️ LE FAIT MESURÉ PAR LA RECETTE, ET C'EST LE CONSTAT N° 1 DU LOT : la suite " +
       "complète N'ÉTAIT PAS REPRODUCTIBLE. Cinq exécutions vertes, puis une rouge, sur un " +
@@ -2185,6 +2412,615 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "`orchestrerAppel` de `cousue` à `à-coudre` fait toujours rougir les TROIS gardes de " +
       "désaccord, dans les DEUX fichiers — en 4 à 37 ms au lieu de plusieurs secondes. Le " +
       "corpus confronté n'a pas changé d'un caractère ; seul le nombre de calculs a changé.",
+  },
+  // ── ADR 0041 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0041",
+    decision:
+      "Chaque entrée du registre porte DEUX faits distincts, jamais confondus : " +
+      "combien de modules de production appellent le symbole, et LE NOM D'UN TEST QUI " +
+      "ÉCHOUE si la décision n'a pas atterri.",
+    etat: "à-coudre",
+    symbole: "verifierLesAssertions",
+    genre: "fonction",
+    module: "core/coutures/verifier.ts",
+    mesureeAilleurs: "core/coutures/couture.temoin.spec.ts",
+    assertion: {
+      fichier: "core/coutures/couture.temoin.spec.ts",
+      nom: "compte les entrées SANS assertion et dérive les ADR qu'aucun test ne voit",
+      nomme: ["verifierLesAssertions", "sans-assertion"],
+    },
+    motif:
+      "0 appelant de production MESURÉ, et c'est l'état DÉFINITIF, non une dette : ses deux " +
+      "appelants sont des gardes (`registre.spec.ts` pour le dépôt réel, " +
+      "`couture.temoin.spec.ts` pour les jeux fabriqués), et une garde n'est pas un module de " +
+      "production — même régime que `verifierLesCoutures`. ⚠️ **ET CETTE ENTRÉE EST L'AUTO- " +
+      "INSCRIPTION QUE LE LOT 3 N'AVAIT PAS FAITE.** Son rapport écrivait, du mécanisme des " +
+      "coutures, « ET JE SUIS LOGÉ À LA MÊME ENSEIGNE » : il mesurait tout le monde et rien de " +
+      "lui-même. Un test de `registre.spec.ts` exige nommément qu'UNE entrée porte ce symbole " +
+      "et qu'elle porte une assertion. ⚠️ LE FAIT MESURÉ À L'ÉCRITURE DE LA GARDE, SUR LE " +
+      "REGISTRE INCHANGÉ : 90 entrées confrontées, 0 avec assertion, 36 ADR inscrits dont 36 " +
+      "n'en portaient AUCUNE. C'est le chiffre qui manquait au projet, et il ne se lisait " +
+      "nulle part parce que rien ne le calculait.",
+  },
+  {
+    adr: "0041",
+    decision:
+      "Une assertion n'est pas une CHAÎNE recopiée : le fichier doit exister, le " +
+      "test doit y être déclaré sous ce nom exact, son corps doit porter un `expect(` et " +
+      "NOMMER ce que la décision a changé.",
+    etat: "à-coudre",
+    symbole: "AssertionDeCouture",
+    genre: "type",
+    module: "core/coutures/registre.ts",
+    mesureeAilleurs: "core/coutures/couture.temoin.spec.ts",
+    assertion: {
+      fichier: "core/coutures/couture.temoin.spec.ts",
+      nom: "rougit sur chacune des six façons dont une assertion peut être fausse",
+      nomme: ["verifierLesAssertions", "CAS_D_ASSERTION", "cousuesNonAtterries"],
+    },
+    motif:
+      "0 importateur de production MESURÉ, et c'est l'état attendu : le type décrit une DONNÉE " +
+      "du registre, que seules des gardes lisent. ⚠️ LE DÉFAUT QUE CE TYPE FERME EST CELUI " +
+      "QU'IL POURRAIT FABRIQUER : un nom de test écrit au registre et nulle part ailleurs " +
+      "remplacerait une garde aveugle par un REGISTRE MENTEUR — pire, parce qu'il aurait " +
+      "l'air d'une mesure. Dix cas fabriqués éprouvent la garde, un par façon d'être faux ; " +
+      "le dixième est le seul qui compte vraiment : il exige que le corps isolé d'un test NE " +
+      "FUIE PAS jusqu'au test voisin, faute de quoi une entrée serait fermée par un nom que " +
+      "porte le test d'à côté.",
+  },
+
+  // ── ADR 0042 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0042",
+    decision:
+      "Le `.env` reste où il est — un `.env` ignoré est la pratique normale — et " +
+      "c'est la GARDE qui manquait : elle rougit si un porteur de secret devient suivi, " +
+      "s'il est présent sans être ignoré, ou si une sonde cesse d'être ignorée.",
+    etat: "à-coudre",
+    symbole: "verifierLeDepotPublic",
+    genre: "fonction",
+    module: "ops/depot-public.ts",
+    mesureeAilleurs: "ops/depot-public.spec.ts",
+    assertion: {
+      fichier: "ops/depot-public.spec.ts",
+      nom: "rougit sur un secret SUIVI, sur un secret NON IGNORÉ, et sur une sonde découverte",
+      nomme: ["verifierLeDepotPublic", "est SUIVI par git", "n'est plus ignoré par git"],
+    },
+    motif:
+      "0 appelant de production MESURÉ, et c'est l'état DÉFINITIF : la garde EST le fichier " +
+      "`.spec.ts`, que `pnpm test` exécute en intégration continue — même régime que " +
+      "`verifierLesCoutures`. La brancher en plus dans `ops/verifier-secrets.ts` " +
+      "dupliquerait le contrôle et coupleraient l'étape des secrets à la présence de git. " +
+      "⚠️ LE CORRECTIF ÉVIDENT ÉTAIT LE MAUVAIS : déplacer le fichier l'emmène dans un " +
+      "répertoire où plus aucune règle ne le couvre, et ne pose AUCUNE garde. On ne déplace " +
+      "pas le risque, on le rend visible. ⚠️ CE QUE LA GARDE A TROUVÉ LE JOUR MÊME, ET QUI " +
+      "N'ÉTAIT PAS LE RISQUE SIGNALÉ : sur 335 chemins confrontés et 6 sondes, TROIS " +
+      "n'étaient pas ignorées — `secrets.json`, `id_rsa`, `prive.pem`. `.gitignore` couvrait " +
+      "`.env` et `.env.*`, et rien d'autre. Les règles manquantes ont été posées ; le " +
+      "verdict est passé de 3 anomalies à 0.",
+  },
+  {
+    adr: "0042",
+    decision:
+      "Les SONDES se confrontent aux règles d'ignorance elles-mêmes, sans exiger " +
+      "que le fichier existe : c'est le seul des trois sens qui morde sur une machine " +
+      "propre, donc en intégration continue.",
+    etat: "à-coudre",
+    symbole: "SONDES",
+    genre: "constante",
+    module: "ops/depot-public.ts",
+    mesureeAilleurs: "ops/depot-public.spec.ts",
+    assertion: {
+      fichier: "ops/depot-public.spec.ts",
+      nom: "exige que chaque SONDE reste ignorée par git, qu'elle existe ou non",
+      nomme: ["SONDES", "NON IGNORÉE"],
+    },
+    motif:
+      "0 lecteur de production MESURÉ : la constante est une DONNÉE que seule la garde lit. " +
+      "⚠️ LA MESURE QUI FONDE CETTE DÉCISION : un dépôt fraîchement cloné ne porte AUCUN " +
+      "`.env`. Les deux autres sens de la garde — « suivi » et « présent non ignoré » — " +
+      "n'ont alors RIEN à confronter, et la garde serait verte en ne regardant rien, " +
+      "c'est-à-dire précisément là où elle est censée protéger. Les six sondes se " +
+      "confrontent à `git check-ignore`, qui répond sur un chemin INEXISTANT : retirer la " +
+      "ligne `.env` de `.gitignore` rougit immédiatement. ⚠️ ET LE CODE DE SORTIE EST LU, " +
+      "JAMAIS ÉCRASÉ : `git check-ignore` sort en 1 quand aucun chemin n'est ignoré — un " +
+      "succès pour nous, une erreur pour l'appelant. Un `|| true` ferait de « git absent » " +
+      "un « rien d'ignoré », c'est-à-dire six anomalies illisibles, ou pire, zéro.",
+  },
+
+  // ── ADR 0043 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0043",
+    decision:
+      "Le refus du plafond se prononce APRÈS `estServi` et AVANT " +
+      "`franchir(ETAPE_PROFIL_CHAINE.numero)` — après, pour ne pas nommer la mauvaise " +
+      "cause ; avant, pour que le journal ne mente pas sur le point d'arrêt.",
+    etat: "cousue",
+    symbole: "PLAFOND_OUTILS_PAR_PROFIL",
+    genre: "constante",
+    module: "core/profiles/budget.ts",
+    mesureeAilleurs: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+    assertion: {
+      fichier: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+      nom: "le bloc de l'étape 7 de l'orchestrateur lit PLAFOND_OUTILS_PAR_PROFIL",
+      nomme: ["PLAFOND_OUTILS_PAR_PROFIL", "estServi(outil, profil)"],
+    },
+    motif:
+      "✅ COUSUE AU LOT 4 — 1 lecteur de production MESURÉ : `core/chaine/orchestrateur.ts` " +
+      "l'importe et le passe en option à `mesurerBudgetProfil`, pour que l'étape 7 NOMME la " +
+      "règle qu'elle applique au lieu de la laisser implicite. Le nombre reste écrit à UN " +
+      "seul endroit — `core/profiles/budget.ts` — donc ce n'est pas une recopie. ⚠️ MESURE " +
+      "TRANSCRITE, AVANT : le bloc de l'étape 7 tenait 453 caractères et ne faisait que " +
+      "`if (!estServi(outil, profil))`. APRÈS : 2 850 caractères, et il nomme " +
+      "`PLAFOND_OUTILS_PAR_PROFIL`. ⚠️ LES DEUX BORNES SONT GARDÉES, et la seconde compte " +
+      "autant : 41 outils servis → refus à l'étape 7 ; 40 → l'appel est SERVI. Sans le " +
+      "témoin inverse, un refus posé sur `>= 0` serait vert. La garde est montée sur " +
+      "l'orchestrateur RÉEL, jamais sur une réimplémentation — celle-ci a QUITTÉ " +
+      "`core/__tests__/integration.spec.ts` du même geste (0 occurrence mesurée).",
+  },
+  {
+    adr: "0043",
+    etat: "hors-code",
+    decision:
+      "La réimplémentation du plafond dans `core/__tests__/integration.spec.ts` est " +
+      "SUPPRIMÉE — et dans cet ordre : poser le refus d'abord, retirer le sosie ensuite.",
+    assertion: {
+      fichier: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+      nom: "la réimplémentation du plafond a QUITTÉ core/__tests__/integration.spec.ts",
+      nomme: ["PLAFOND_OUTILS_PAR_PROFIL", "le SOSIE"],
+    },
+    motif:
+      "AUCUN SYMBOLE LIVRÉ : la décision est un RETRAIT, dans un fichier `.spec.ts` que " +
+      "`tsconfig.build.json` exclut — la garde des coutures en dérive le même critère, donc " +
+      "aucun compte d'appelants ne pourrait la porter. ⚠️ ET C'EST EXACTEMENT LE CAS QUE " +
+      "L'ADR 0041 EXISTE POUR COUVRIR : un retrait ne se mesure pas en appelants, il se " +
+      "mesure par une assertion. Mesure transcrite : 2 occurrences de " +
+      "`PLAFOND_OUTILS_PAR_PROFIL` subsistent dans `integration.spec.ts`, sous le " +
+      "commentaire « le plafond se refuse ICI, pas seulement en CI ». Un test qui " +
+      "réimplémente ce qu'il garde est vert quelle que soit la production. ⚠️ L'ORDRE DES " +
+      "DEUX GESTES EST IMPOSÉ : retirer le sosie AVANT de poser le refus laisserait le " +
+      "dépôt, pendant un temps, sans aucune épreuve du plafond ni en production ni en test.",
+  },
+
+  // ── ADR 0044 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0044",
+    decision:
+      "Le filet anti-fuite du § 20 remonte de `core/transport/http/` à " +
+      "`core/transport/`, prend la réponse SÉRIALISÉE de chaque transport, et les DEUX " +
+      "fils l'appellent — y compris sur le chemin d'exception.",
+    etat: "cousue",
+    symbole: "verifierAucuneFuite",
+    genre: "fonction",
+    module: "core/transport/anti-fuite.ts",
+    mesureeAilleurs: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+    assertion: {
+      fichier: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+      nom: "verifierAucuneFuite vit sous core/transport/ et les DEUX transports l'appellent",
+      nomme: ["verifierAucuneFuite", "core/transport/stdio/"],
+    },
+    motif:
+      "ATTERRI AU LOT 4. Mesure d'AVANT, transcrite : 1 appelant de production, " +
+      "`core/transport/http/transport.ts`, et 0 sous `core/transport/stdio/` sur 6 modules " +
+      "balayés — UN transport sur DEUX. Mesure d'APRÈS : le définisseur est " +
+      "`core/transport/anti-fuite.ts`, et 2 appelants de production le nomment — " +
+      "`core/transport/http/transport.ts` et `core/transport/stdio/serveur.ts`. ⚠️ **CETTE " +
+      "ENTRÉE EST LE SPÉCIMEN DU DÉFAUT QUE L'ADR 0041 FERME, ET IL FAUT LE GARDER ÉCRIT " +
+      "APRÈS LA CORRECTION** : pendant tout un lot, le symbole était réellement cousu, " +
+      "l'entrée verte à bon droit, et la décision nulle part. Un compte d'appelants ne " +
+      "distingue pas « appelé par un transport » de « appelé par les deux ». C'est " +
+      "l'assertion qui le dit. ⚠️ CE QU'ELLE MESURE, ET SA BORNE : elle lit des FORMES sur " +
+      "le disque — fichier présent, appelant trouvé. Que le filet MORDE sur les deux fils " +
+      "est mesuré ailleurs, par `core/transport/anti-fuite.spec.ts`, qui met la MÊME entrée " +
+      "devant les deux transports. ⚠️ PREUVE TRANSCRITE DU CORRECTEUR : la garde d'équivalence " +
+      "exécutée contre l'état d'AVANT rend `4 failed | 2 passed`, et les 4 échecs nomment " +
+      "TOUS « → stdio » — 4 valeurs ressorties sur le fil stdio, 0 côté HTTP. Après la " +
+      "remontée : 6 verts, 0 valeur ressortie, 8 sorties relues.",
+  },
+
+  // ── ADR 0044 · seconde décision ────────────────────────────────────────────
+  {
+    adr: "0044",
+    decision:
+      "Les valeurs sensibles d'un appel sont DÉRIVÉES UNE FOIS pour les deux fils — " +
+      "les trois canaux de protocole du § 20 et les chaînes de l'`input` —, chaque transport " +
+      "n'y AJOUTANT que ce qui lui est propre.",
+    etat: "cousue",
+    symbole: "valeursSensiblesDeLAppel",
+    genre: "fonction",
+    module: "core/transport/anti-fuite.ts",
+    mesureeAilleurs: "core/transport/anti-fuite.spec.ts",
+    assertion: {
+      fichier: "core/transport/anti-fuite.spec.ts",
+      nom: "la MÊME entrée sur les DEUX transports ne fait paraître ni jeton ni secret",
+      nomme: ["valeursSensiblesDeLAppel", "surLesDeuxFils"],
+    },
+    motif:
+      "2 appelants de production mesurés : `core/transport/http/transport.ts` et " +
+      "`core/transport/stdio/serveur.ts`. ⚠️ **CETTE ENTRÉE EXISTE PARCE QUE LE SILENCE DES " +
+      "DEUX FILS NE PROUVE RIEN SI CHACUN COMPOSE SA PROPRE LISTE.** Tant que la collecte " +
+      "était écrite dans `transport.ts`, « la même entrée sur les deux transports » n'était " +
+      "qu'une phrase : rien n'obligeait le fil stdio à confronter le jeton de confirmation, " +
+      "et il ne le confrontait pas. C'est le défaut déjà payé par `valeurs-servies.ts` " +
+      "(ADR 0037, § 4) — deux dérivations d'un même fait finissent par se contredire, et " +
+      "c'est la seconde qui ne suit jamais. ⚠️ MESURE TRANSCRITE : 3 canaux de protocole " +
+      "dérivés de la table (`NOMS_DES_CANAUX_SENSIBLES`), 4 entrées confrontées × 2 " +
+      "transports = 8 sorties relues, 0 valeur ressortie. ⚠️ SA BORNE, ÉCRITE AVEC ELLE : le " +
+      "filet compare des CHAÎNES. Une valeur qui sortirait tronquée, ré-encodée ou hachée " +
+      "lui échappe — c'est un plancher de détection, jamais une preuve d'absence de fuite.",
+  },
+
+  // ── ADR 0045 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0045",
+    etat: "hors-code",
+    decision:
+      "La migration initiale entre au dépôt (`migrate dev --create-only`, relue), " +
+      "et le script d'ajout-seul se chaîne APRÈS `prisma migrate deploy` — ordre écrit, " +
+      "non convenu oralement.",
+    assertion: {
+      fichier: "core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts",
+      nom: "prisma/migrations/ porte une migration initiale, et le SQL se chaîne après elle",
+      nomme: ["prisma/migrations/", "schema.prisma"],
+    },
+    motif:
+      "AUCUN SYMBOLE TYPESCRIPT LIVRÉ, et le motif est mesurable : la décision vit dans " +
+      "`prisma/`, que le programme TypeScript ne balaie pas — aucun compte d'appelants ne " +
+      "peut la porter. ⚠️ LE FAIT MESURÉ : 10 modèles déclarés au schéma, matérialisables " +
+      "par **0 chemin reproductible**. `prisma/migrations/` n'existe pas. Conséquence en " +
+      "chaîne, et c'est elle qui compte : `prisma/sql/0001-ops-audit-append-only.sql` se " +
+      "déclare lui-même « s'applique APRÈS `prisma migrate deploy` » — il n'y a RIEN après " +
+      "quoi s'appliquer. Le seul verrou qui rende une réécriture d'`ops_audit` visible " +
+      "(ADR 0002) n'est appliqué par rien : un compte disposant d'UPDATE retire une tranche, " +
+      "recalcule la chaîne, et `verifierChaine` rend `valide = true` sur un journal amputé. " +
+      "⚠️ LA BORNE, ÉCRITE AVEC LA DÉCISION : cet ADR ne rend pas le socle déployable. Le " +
+      "rôle de connexion, la sauvegarde et la restauration éprouvée vivent hors de ce dépôt " +
+      "PUBLIC et n'y entreront jamais.",
+  },
+  // -- ADR 0046 ---------------------------------------------------------------
+  {
+    adr: "0046",
+    decision:
+      "Le provisionnement du coffre constate l'état AVANT de regarder la clé, et " +
+      "REFUSE un coffre déjà créé : l'ordre des deux contrôles EST la décision.",
+    etat: "à-coudre",
+    symbole: "provisionnerLeCoffre",
+    genre: "fonction",
+    module: "ops/vault-init.ts",
+    mesureeAilleurs: "ops/vault-init.spec.ts",
+    assertion: {
+      fichier: "ops/vault-init.spec.ts",
+      nom: "refuse un coffre DÉJÀ CRÉÉ avant même de regarder la clé, et ne pose rien",
+      nomme: ["provisionnerLeCoffre", "coffre-déjà-créé"],
+    },
+    motif:
+      "0 appelant de production MESURÉ hors de son propre module : `executerLeProvisionnement` " +
+      "l'appelle depuis le MÊME fichier, et le définisseur est exclu par construction. C'est " +
+      "l'état attendu d'un programme d'exploitation — son unique appelant est le bloc " +
+      "d'entrée, sous la garde `estLeProgrammeLance`. ⚠️ CE QU'AUCUN COMPTE D'APPELANTS NE " +
+      "PORTERAIT : l'ORDRE des deux contrôles. L'inverser laisse la fonction, ses appelants " +
+      "et sa signature intacts, et fabrique le pire message possible — sur un coffre déjà " +
+      "créé dont la clé a été oubliée, « pose une clé », c'est-à-dire l'invitation exacte à " +
+      "re-sceller des lignes qu'aucune clé n'ouvrirait plus. ⚠️ MUTATION TRANSCRITE : la " +
+      "condition « l'état n'est pas absent » remplacée par « l'état est ouvert » → le test " +
+      "rougit, « expected 'sceau-non-posé' to be 'coffre-déjà-créé' ». Restaurée : vert.",
+  },
+  {
+    adr: "0046",
+    decision:
+      "Le message qui refuse le démarrage nomme une commande qui EXISTE : le " +
+      "programme de provisionnement IMPORTE la constante au lieu de recopier son texte.",
+    etat: "cousue",
+    symbole: "COMMANDE_DE_PROVISION",
+    genre: "constante",
+    module: "core/vault/demarrage.ts",
+    mesureeAilleurs: "ops/gestes-nommes.spec.ts",
+    assertion: {
+      fichier: "ops/gestes-nommes.spec.ts",
+      nom: "confronte chaque commande pnpm nommée dans le code aux scripts déclarés",
+      nomme: ["verifierLesCommandesNommees", "ops:vault:init"],
+    },
+    motif:
+      "1 appelant de production mesuré, `ops/vault-init.ts`, et c'est le fait : le programme " +
+      "qui EXÉCUTE le geste importe le nom du geste au lieu de le recopier. ⚠️ LE FAIT " +
+      "MESURÉ AVANT : la constante valait « pnpm ops:vault:init », le socle refusait de " +
+      "démarrer en la nommant mot pour mot (§ 25, « LE MESSAGE NOMME LA COMMANDE »), et " +
+      "`package.json` ne déclarait AUCUN script de ce nom — la commande tapée rendait " +
+      "« command not found ». Le fichier le disait dans un commentaire, au seul endroit que " +
+      "personne ne lit au moment où il sert : au milieu d'un incident, socle à terre. " +
+      "⚠️ ET UN COMPTE D'APPELANTS NE L'AURAIT JAMAIS DIT : la constante avait déjà un " +
+      "lecteur, `decisionDeDemarrage`, dans son propre module. C'est l'EXISTENCE DU SCRIPT " +
+      "qui manquait, pas un branchement, et seule une assertion pouvait la voir.",
+  },
+  {
+    adr: "0046",
+    decision:
+      "Le geste se RÉPÈTE sur un dépôt jetable, et le rapport le DIT — pour que " +
+      "« sceau posé » ne se lise jamais « sceau posé EN BASE ».",
+    etat: "à-coudre",
+    symbole: "ARGUMENT_DE_REPETITION",
+    genre: "constante",
+    module: "ops/vault-init.ts",
+    mesureeAilleurs: "ops/vault-init.spec.ts",
+    assertion: {
+      fichier: "ops/vault-init.spec.ts",
+      nom: "en RÉPÉTITION, éprouve la clé sur un dépôt jetable et le DIT",
+      nomme: ["ARGUMENT_DE_REPETITION", "répétition : true"],
+    },
+    motif:
+      "0 lecteur de production MESURÉ hors de son propre module, et c'est l'état attendu : " +
+      "la constante est lue par `executerLeProvisionnement`, dans le même fichier. ⚠️ CE " +
+      "MODE N'EST PAS UN CONFORT DE DÉVELOPPEMENT, ET LA MESURE LE DIT : c'est le SEUL des " +
+      "deux modes que ce dépôt puisse exécuter aujourd'hui — aucune base n'y tourne — et il " +
+      "répond AVANT l'incident à la question qui coûte le plus cher, « ma clé est-elle bien " +
+      "formée ? ». ⚠️ LE DANGER QU'IL PORTE EST NOMMÉ AVEC LUI : un mode d'essai qui " +
+      "annoncerait « sceau posé » sans dire qu'il a écrit dans le vide ferait croire à un " +
+      "coffre provisionné. Le rapport porte donc le fait, et la ligne de synthèse l'écrit.",
+  },
+  {
+    adr: "0046",
+    etat: "hors-code",
+    decision:
+      "Le programme ne GÉNÈRE PAS la clé : le § 25 exige qu'elle soit séquestrée " +
+      "hors machine AVANT d'être posée, et un outil qui la fabrique invite à sauter le " +
+      "séquestre.",
+    assertion: {
+      fichier: "ops/vault-init.spec.ts",
+      nom: "ne fabrique AUCUNE clé : aucune génération d'aléa n'entre dans ops/vault-init.ts",
+      nomme: ["ops/vault-init.ts", "randomBytes", "openssl rand -base64 32"],
+    },
+    motif:
+      "AUCUN SYMBOLE NE PEUT PORTER CETTE DÉCISION : c'est une ABSENCE, et aucune fonction " +
+      "n'atteste qu'une autre n'existe pas. Aucun compte d'appelants ne la mesurerait, et " +
+      "c'est exactement le cas que l'ADR 0041 existe pour couvrir. La garde lit donc le " +
+      "SOURCE et confronte SIX formes de génération d'aléa — `randomBytes`, " +
+      "`randomFillSync`, `generateKeySync`, `getRandomValues`, `randomUUID`, `Math.random`. " +
+      "⚠️ ET ELLE EXIGE L'ISSUE, PAS SEULEMENT L'INTERDIT : le fichier doit DIRE où en " +
+      "produire une, faute de quoi l'interdiction serait un mur nu qu'on contourne. " +
+      "⚠️ MUTATION TRANSCRITE : la mention retirée → le test rougit, « expected … to " +
+      "contain 'openssl rand -base64 32' ». Restaurée : vert. ⚠️ LA BORNE : cette garde " +
+      "mesure des FORMES ÉCRITES. Une génération obtenue par un nom composé à l'exécution " +
+      "lui échapperait ; le compte des formes cherchées est ANNONCÉ pour que cette borne se " +
+      "lise au lieu de se deviner.",
+  },
+  {
+    adr: "0046",
+    decision:
+      "Chaque commande `pnpm …` nommée dans un message du socle est CONFRONTÉE " +
+      "aux scripts réellement déclarés, commentaires retirés, et la garde SAIT rougir.",
+    etat: "à-coudre",
+    symbole: "verifierLesCommandesNommees",
+    genre: "fonction",
+    module: "ops/gestes-nommes.ts",
+    mesureeAilleurs: "ops/gestes-nommes.spec.ts",
+    assertion: {
+      fichier: "ops/gestes-nommes.spec.ts",
+      nom: "SAIT rougir : une commande nommée sans script déclaré est une anomalie",
+      nomme: ["verifierLesCommandesNommees", "introuvables"],
+    },
+    motif:
+      "0 appelant de production MESURÉ, et c'est l'état DÉFINITIF, non une dette : la garde " +
+      "EST le fichier `.spec.ts`, que `pnpm test` exécute en intégration continue — même " +
+      "régime que `verifierLesCoutures` et `verifierLeDepotPublic`. ⚠️ ELLE LIT LE CODE, " +
+      "PAS LA PROSE : `sansProse` retire les commentaires AVANT toute recherche, sans quoi " +
+      "elle compterait la dizaine de blocs de documentation qui écrivent « pnpm build » ou " +
+      "« pnpm typecheck » — ce qu'on cherche est ce qu'un UTILISATEUR verra. ⚠️ SA BORNE " +
+      "EST ÉCRITE AVEC ELLE ET COMPTÉE : une commande composée à l'exécution ne peut pas " +
+      "être confrontée sans faire tourner le programme ; il y en a DEUX, elles sortent sous " +
+      "`commandesInterpolees`, jamais ignorées en silence. ⚠️ MESURE TRANSCRITE — AVANT : " +
+      "141 modules balayés, 11 scripts déclarés, DEUX INTROUVABLES (`ops:vault:init`, " +
+      "`db:deploy`). APRÈS : 14 scripts, 3 commandes confrontées, 0 introuvable.",
+  },
+  {
+    adr: "0046",
+    decision:
+      "Les dix tables du § 12 sont matérialisables par un chemin reproductible, " +
+      "et l'ORDRE du chaînage est ÉCRIT dans le script de déploiement — jamais convenu " +
+      "oralement.",
+    etat: "à-coudre",
+    symbole: "verifierLaChaineDeMigration",
+    genre: "fonction",
+    module: "ops/gestes-nommes.ts",
+    mesureeAilleurs: "ops/gestes-nommes.spec.ts",
+    assertion: {
+      fichier: "ops/gestes-nommes.spec.ts",
+      nom: "exige les dix tables du schéma dans une migration, et l'ORDRE écrit du chaînage",
+      nomme: ["verifierLaChaineDeMigration", "prisma migrate deploy"],
+    },
+    motif:
+      "0 appelant de production MESURÉ, même régime que la garde précédente. ⚠️ ELLE FERME " +
+      "LA MOITIÉ QUE L'ADR 0045 LAISSAIT OUVERTE : une migration PRÉSENTE ne dit pas que le " +
+      "script d'ajout seul s'applique APRÈS elle. Appliqué en premier, il échouerait sur une " +
+      "table qui n'existe pas encore ; jamais appliqué, le journal en ajout seul de " +
+      "l'ADR 0002 n'est appliqué par rien. ⚠️ LES TABLES ATTENDUES SONT DÉRIVÉES DES `@@map` " +
+      "DU SCHÉMA, jamais recopiées : écrire ici les dix noms du § 12 rendrait la garde verte " +
+      "le jour où une onzième table entrerait au schéma sans migration. ⚠️ MESURE " +
+      "TRANSCRITE — AVANT : 0 migration, moteur NON FIXÉ, 10 tables manquantes, ordre écrit " +
+      "faux, 4 anomalies. APRÈS : 1 migration, moteur `postgresql`, 10 tables créées sur 10, " +
+      "ordre écrit vrai, 0 anomalie. ⚠️ CE QU'ELLE NE PROUVE PAS : elle lit des FORMES, ne " +
+      "se connecte à aucune base et ne joue aucune migration — la migration n'a PAS été " +
+      "appliquée, aucune base ne tourne dans ce dépôt.",
+  },
+
+  // ── ADR 0036, décision 2 — l'inventaire devient du chemin NOMINAL ──────────
+  {
+    adr: "0036",
+    decision:
+      "§ 14, correction 3 — `EtatDePilotage.inventaire()` passe du chemin de PANNE au " +
+      "chemin NOMINAL, et il est lu AU PLUS UNE FOIS par appel.",
+    etat: "à-coudre",
+    symbole: "memoiserLInventairePourCetAppel",
+    genre: "fonction",
+    module: "core/chaine/orchestrateur.ts",
+    mesureeAilleurs: "core/__tests__/integration.spec.ts",
+    assertion: {
+      fichier: "core/__tests__/integration.spec.ts",
+      nom: "REFUSE une mesure AVEUGLE, et le message nomme la CONTRADICTION",
+      nomme: ["Contradiction interne au socle", "inventaire VIDE"],
+    },
+    motif:
+      "⚠️ 0 APPELANT EXTERNE, ET C'EST STRUCTUREL, PAS UN OUBLI : le seul appelant possible " +
+      "est son DÉFINISSEUR, `orchestrateur.ts`, et G1 ne compte jamais le définisseur — à " +
+      "raison, sans quoi une fonction récursive et morte annoncerait un appelant. L'axe des " +
+      "appelants ne peut donc rien dire de cette décision-ci ; c'est l'ASSERTION qui porte " +
+      "la mesure, et c'est exactement la séparation des deux faits que l'ADR 0041 a posée. " +
+      "⚠️ LA PROSE QUI DISAIT LE CONTRAIRE A ÉTÉ CORRIGÉE DU MÊME GESTE : le port était " +
+      "documenté « elle n'est appelée QUE quand `profilActif` rend `null` : un chemin de " +
+      "panne, pas le chemin normal ». Cette phrase est devenue fausse le jour où le plafond " +
+      "du § 14 s'est refusé à l'étape 7, et une prose qui survit à sa règle est ce qui fait " +
+      "supprimer la garde suivante. ⚠️ CE N'EST PAS UN CACHE : il meurt avec l'appel. Un " +
+      "cache inter-appels servirait un `enabled` périmé après une bascule de console — " +
+      "exactement la divergence que la correction 3 existe pour fermer.",
+  },
+
+  // ── ADR 0047 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0047",
+    decision:
+      "§ 15 — une panne de JOIGNABILITÉ de l'adaptateur est refusée à l'étape 14 sous " +
+      "`upstream_unavailable`, reconnue au CODE SYSTÈME et jamais au message.",
+    etat: "à-coudre",
+    symbole: "estAmontInjoignable",
+    genre: "fonction",
+    module: "core/chaine/orchestrateur.ts",
+    mesureeAilleurs: "core/__tests__/integration.spec.ts",
+    assertion: {
+      fichier: "core/__tests__/integration.spec.ts",
+      nom: "un adaptateur injoignable est REFUSÉ à l'étape 14, et le code est celui du § 15",
+      nomme: ["CODE_AMONT_INJOIGNABLE", "ECONNREFUSED"],
+    },
+    motif:
+      "⚠️ 0 APPELANT EXTERNE, ET C'EST STRUCTUREL : la fonction est définie et appelée dans " +
+      "`orchestrateur.ts`, et G1 ne compte jamais le définisseur. La preuve vit dans " +
+      "l'ASSERTION (ADR 0041), qui traverse le chemin COMPLET — une `Error` levée par " +
+      "l'adaptateur jusqu'à la ligne d'`ops_audit`. ⚠️ CE QUE CETTE ENTRÉE FERME : " +
+      "`upstream_unavailable` est l'un des TREIZE codes du tableau du § 15, et il n'avait " +
+      "AUCUN site d'émission de production — mesuré sur 139 modules émis par le build, " +
+      "modules de déclaration écartés. Toute panne d'un tiers sortait donc en " +
+      '`decision: "interrompu"`, c\'est-à-dire rangée parmi les défauts DU SOCLE au § 24. ' +
+      "⚠️ NI L'IDEMPOTENCE NI L'INTENTION NE CHANGENT : `issueDeReservation()` ne lit que " +
+      "le cliquet de l'ADR 0017 et `terminaisonRendue`, tous deux inchangés. Un envoi PARTI " +
+      "reste fermé en `done` — ce refus nomme la panne, il ne rouvre aucun rejeu.",
+  },
+  {
+    adr: "0047",
+    decision:
+      "`enAttenteDeBranchement` est DÉRIVÉ des deux côtés, pour les QUINZE codes de " +
+      "l'union, sous DEUX formes d'émission : le littéral et l'ancrage d'`APPEL_STEPS`.",
+    etat: "à-coudre",
+    symbole: "chercherLesSitesDEmission",
+    genre: "fonction",
+    module: "ops/codes-hors-tableau.ts",
+    mesureeAilleurs: "ops/codes-hors-tableau.spec.ts",
+    assertion: {
+      fichier: "ops/codes-hors-tableau.spec.ts",
+      nom: "compte les DEUX formes, et la forme ancrée en trouve que le littéral rate",
+      nomme: ["chercherLesSitesDEmission", "sansProducteur"],
+    },
+    motif:
+      "0 appelant de production MESURÉ : c'est une garde de cohérence entre le code et le " +
+      "document, et la chaîne d'appel ne lit que `ERROR_CODES`. ⚠️ CE QU'ELLE REMPLACE : un " +
+      "champ `enAttenteDeBranchement: boolean` ÉCRIT À LA MAIN sur les deux seuls écarts au " +
+      "§ 15. Il ne pouvait donc rien dire des TREIZE codes DU tableau — et c'est là que " +
+      "dormait `upstream_unavailable`. Un booléen recopié se relit comme une mesure alors " +
+      "qu'il n'est qu'une affirmation. ⚠️ LA FORME ANCRÉE N'EST PAS UN CONFORT : mesuré, le " +
+      "littéral seul laisse SIX codes sans producteur — `cursor_invalid`, " +
+      "`provenance_denied`, `result_too_large`, `scope_insufficient`, `tool_disabled`, " +
+      "`tool_not_in_profile` — que la chaîne prononce tous les jours en LISANT leur " +
+      "ancrage. Un `grep` ne prouve que l'absence de la FORME ÉCRITE. ⚠️ LA BORNE, ÉCRITE " +
+      "AVEC LA RÈGLE : elle mesure des FORMES sur le source, jamais une branche exécutée.",
+  },
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  ADR 0048 — LA GARDE DES ASSERTIONS ATTAQUÉE, ET LE CLIQUET D'IDENTITÉ
+  //
+  //  ⚠️ CES TROIS ENTRÉES FERMENT DES BRÈCHES DE G4 ELLE-MÊME. Une garde posée
+  //     pour interdire qu'une décision soit fermée par un test qui ne rougit
+  //     jamais pouvait être fermée exactement de cette façon-là. Leurs
+  //     assertions sont les tests QUI ONT OUVERT les brèches, écrits par
+  //     l'épreuve du lot 4 en `it.fails`, vus ROUGES en `it()`, puis retirés de
+  //     la dette par la recette.
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    adr: "0048",
+    decision:
+      "Un `expect(` dont l'argument ne confronte que des littéraux ne ferme aucune " +
+      "décision : `expect(1).toBe(1)` compte pour un `expect(` et il est vert quoi " +
+      "qu'il arrive. Un corps qui n'en porte AUCUN de falsifiable est une anomalie.",
+    etat: "à-coudre",
+    symbole: "argumentsDExpect",
+    genre: "fonction",
+    module: "core/coutures/verifier.ts",
+    mesureeAilleurs: "core/epreuve/lot4-la-garde-des-assertions-attaquee.temoin.spec.ts",
+    assertion: {
+      fichier: "core/epreuve/lot4-la-garde-des-assertions-attaquee.temoin.spec.ts",
+      nom: "G4 rougit sur un test dont l'assertion ne peut pas échouer",
+      nomme: ["verifierLesAssertions", "anomalies"],
+    },
+    motif:
+      "0 appelant de PRODUCTION mesuré, et c'est l'état définitif : son unique appelant est " +
+      "`verifierLesAssertions`, qui est elle-même une garde. ⚠️ LE DÉFAUT FERMÉ EST CELUI DE " +
+      "LA GARDE QUI LE FERME. G4 refusait déjà le cas ZÉRO — un corps sans `expect(` — et " +
+      "laissait grand ouvert le cas voisin, qui a exactement la même conséquence et l'air " +
+      "d'une mesure. ⚠️ LE SEUIL EST « AU MOINS UN », JAMAIS « TOUS » : un test légitime mêle " +
+      "des planchers à des comparaisons de constantes, et exiger que chaque `expect(` soit " +
+      "falsifiable rejetterait des gardes correctes — la garde rougirait alors pour la raison " +
+      "du voisin. ⚠️ LA BORNE : l'argument est lu dans `corps.code`, chaînes BLANCHIES ; un " +
+      '`expect("abc")` y devient `expect()`.',
+  },
+  {
+    adr: "0048",
+    decision:
+      "Un test enfermé dans une suite SUSPENDUE — `describe.skip`, `.todo` ou " +
+      "`.only` posé plus haut — ne ferme aucune décision : le lanceur ne l'exécute pas.",
+    etat: "à-coudre",
+    symbole: "suiteSuspendue",
+    genre: "fonction",
+    module: "core/coutures/verifier.ts",
+    mesureeAilleurs: "core/epreuve/lot4-la-garde-des-assertions-attaquee.temoin.spec.ts",
+    assertion: {
+      fichier: "core/epreuve/lot4-la-garde-des-assertions-attaquee.temoin.spec.ts",
+      nom: "G4 rougit sur un test enfermé dans un describe.skip",
+      nomme: ["verifierLesAssertions", "anomalies"],
+    },
+    motif:
+      "0 appelant de PRODUCTION mesuré, même régime que ses voisines de `verifier.ts`. " +
+      "⚠️ UNE GARDE QUI MORD SUR UNE FORME ET PAS SUR SON ÉQUIVALENT SE CONTOURNE SANS QUE " +
+      "PERSONNE L'AIT DÉCIDÉ : G4 mordait sur `it.skip` — par EFFET DE BORD, le test n'y " +
+      "étant plus trouvé sous sa forme exacte — et pas sur la MÊME suspension posée d'un " +
+      "cran au-dessus, où la déclaration reste intacte dans le texte. ⚠️ `.only` EST REFUSÉ " +
+      "AVEC LES DEUX AUTRES, et il est pire : il n'éteint pas le test qu'il porte, il éteint " +
+      "TOUS LES AUTRES du fichier. ⚠️ LA BORNE, MESURÉE : la garde lit la forme ÉCRITE. Un " +
+      "fichier écarté par la configuration du lanceur lui échappe, et aucune garde du dépôt " +
+      "n'interdit ces formes dans un `*.spec.ts` — 0 fichier sur 323 en porte une au " +
+      "2026-09-01 : la porte est ouverte, elle n'est pas empruntée.",
+  },
+  {
+    adr: "0048",
+    decision:
+      "Le cliquet des décisions sans assertion porte sur leur IDENTITÉ, jamais sur " +
+      "leur somme : une somme se compense, une identité entrante se nomme.",
+    etat: "à-coudre",
+    symbole: "identiteDeLEntree",
+    genre: "fonction",
+    module: "core/coutures/verifier.ts",
+    mesureeAilleurs: "core/coutures/registre.spec.ts",
+    assertion: {
+      fichier: "core/coutures/registre.spec.ts",
+      nom: "tient le CLIQUET D'IDENTITÉ des décisions sans assertion, que le total ne peut pas porter",
+      nomme: ["sansAssertionNommees", "assertionsPartagees"],
+    },
+    motif:
+      "0 appelant de PRODUCTION mesuré ; `verifierLesAssertions` seule l'appelle. ⚠️ LE " +
+      "DÉFAUT CENTRAL DU LOT RENTRAIT PAR LA PORTE QUE LE LOT AVAIT POSÉE : inscrire une " +
+      "décision aveugle (+1) et poser une assertion sur une entrée ancienne (−1) laissait " +
+      "`sansAssertion` à 88, les anomalies à zéro et `cousuesNonAtterries` immobile. " +
+      "⚠️ AUCUN CORRECTIF NE POUVAIT SAUVER LE TOTAL, ET C'EST POURQUOI ON EN CHANGE : " +
+      "`sansAssertion` vaut `entrées − avecAssertion`, une SOUSTRACTION, incapable de " +
+      "distinguer un échange d'un ajout. Les deux mesures cohabitent — le total reste " +
+      "annoncé, la liste porte la règle. ⚠️ LA LISTE FIGÉE DE 88 IDENTITÉS EST LE SEUL CAS " +
+      "OÙ CE DÉPÔT ADMET QU'UNE GARDE PORTE SA LISTE : un cliquet n'est pas une règle, c'est " +
+      "un ÉTAT DATÉ dont on interdit l'aggravation, et il est produit par la garde elle-même.",
   },
 ];
 

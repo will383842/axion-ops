@@ -39,7 +39,9 @@ import type {
   CritereDeProduction,
   FichierSoumis,
   RapportDeCouvertureDesAdr,
+  RapportDesAssertions,
   RapportDesCoutures,
+  VerdictDUneAssertion,
   VerdictDUneCouture,
 } from "./contrat.js";
 import type { EntreeDeCouture, GenreDeSymbole } from "./registre.js";
@@ -450,4 +452,494 @@ export function trousDeNumerotation(fichiersAdr: readonly FichierSoumis[]): read
     if (!presents.has(numero)) trous.push(String(numero).padStart(4, "0"));
   }
   return trous;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  G4 — L'ASSERTION : QUEL TEST ROUGIT SI LA DÉCISION SE DÉFAIT ? (ADR 0041)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * LE CORPS D'UN TEST, sous ses DEUX formes — et la distinction est une mesure.
+ *
+ * ⚠️ `brut` porte les chaînes de caractères, `code` les a BLANCHIES. Ce qu'une
+ *    décision NOMME peut parfaitement vivre dans un littéral (un code de refus,
+ *    un nom de champ), donc `nomme` se cherche dans `brut`. Ce qui COMPTE comme
+ *    du code — un `expect(`, la déclaration d'un test voisin — se cherche dans
+ *    `code`, faute de quoi le décor fabriqué par un témoin serait lu comme du
+ *    code et la garde des gardes deviendrait illisible.
+ */
+export interface CorpsDeTest {
+  readonly brut: string;
+  readonly code: string;
+}
+
+/**
+ * ISOLE LE CORPS D'UN TEST NOMMÉ, ou rend `null` quand il n'y parvient pas.
+ *
+ * ⚠️ **`null` N'EST PAS « RIEN À REDIRE » — C'EST UNE ANOMALIE.** Une garde qui
+ *    rendrait une chaîne vide sur un isolement raté ferait passer tous les
+ *    contrôles suivants : zéro nom absent, zéro reproche, vert. C'est le mode
+ *    de défaillance le plus coûteux de tout ce dépôt, et il est refusé ici.
+ *
+ * ⚠️ **DEUX BORNES, ÉCRITES AVEC LA MESURE.** L'équilibrage des accolades saute
+ *    les chaînes et leurs échappements, mais **pas les littéraux d'expression
+ *    régulière** : une accolade échappée dans un motif déséquilibrerait le
+ *    compte. Ce cas rend `null`, donc une anomalie BRUYANTE — jamais un vert.
+ *    Et le corps isolé ne doit contenir AUCUNE autre déclaration de test : si
+ *    l'isolement avait fui jusqu'à la fin du fichier, il en trouverait une, et
+ *    la fuite se voit au lieu de se croire.
+ */
+export function corpsDuTestNomme(source: string, nom: string): CorpsDeTest | null {
+  const nu = sansProse(source);
+  const declaration = new RegExp(
+    `(?<![.\\w])(?:it|test)(?:\\.fails)?\\s*\\(\\s*"${echapper(nom)}"`,
+    "u",
+  );
+  const trouve = declaration.exec(nu);
+  if (trouve === null) return null;
+
+  const debut = nu.indexOf("{", trouve.index + trouve[0].length);
+  if (debut === -1) return null;
+
+  let profondeur = 0;
+  let dansLaChaine: string | null = null;
+  /**
+   * ⚠️ **LE CODE SE CONSTRUIT DANS LA MÊME PASSE QUE L'ÉQUILIBRAGE, ET C'EST LA
+   *    MESURE QUI L'EXIGE.** Le témoin de cette garde FABRIQUE des sources de
+   *    test à l'intérieur de chaînes de caractères : `it("…")`, `expect(…)` et
+   *    des accolades y figurent par construction. Compter ces occurrences
+   *    reviendrait à lire le décor d'un témoin comme du code, et le contrôle
+   *    « l'isolement a-t-il fui ? » rejetterait alors le corps de la garde qui
+   *    éprouve la garde. Les chaînes sont donc BLANCHIES ici — jamais retirées
+   *    du corps brut, où un nom cité en littéral (`"tool_not_in_profile"`) est
+   *    une mention parfaitement légitime de la décision.
+   */
+  let code = "";
+  for (let i = debut; i < nu.length; i += 1) {
+    const c = nu[i] ?? "";
+    if (dansLaChaine !== null) {
+      if (c === "\\") i += 1;
+      else if (c === dansLaChaine) dansLaChaine = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      dansLaChaine = c;
+      continue;
+    }
+    code += c;
+    if (c === "{") profondeur += 1;
+    else if (c === "}") {
+      profondeur -= 1;
+      if (profondeur === 0) {
+        // L'isolement a-t-il fui ? Un corps de test ne déclare jamais un test.
+        if (/(?<![.\w])(?:it|test)(?:\.fails)?\s*\(/u.test(code)) return null;
+        return { brut: nu.slice(debut + 1, i), code };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * BLANCHIT LES CHAÎNES **SANS DÉPLACER UN SEUL CARACTÈRE** — chaque octet de
+ * chaîne devient une espace, les guillemets restent, les sauts de ligne aussi.
+ *
+ * ⚠️ **LA CONSERVATION DES POSITIONS EST TOUTE L'UTILITÉ DE CETTE FONCTION.**
+ *    {@link suiteSuspendue} cherche la déclaration `it("nom")` dans la source
+ *    NUE — le nom vit dans un littéral, il faut donc le lire — puis confronte
+ *    son INDEX aux blocs suspendus repérés sur la source blanchie. Les deux
+ *    lectures ne se comparent que si elles ont la même longueur.
+ *
+ * ⚠️ **POURQUOI BLANCHIR PLUTÔT QUE RETIRER.** Le témoin de cette garde-ci
+ *    FABRIQUE des sources de test à l'intérieur de chaînes : `describe.skip(`
+ *    y figure par construction, en littéral. Sans blanchiment, la garde lirait
+ *    le décor du témoin comme du code et déclarerait suspendu le fichier même
+ *    qui l'éprouve.
+ */
+export function chainesBlanchies(source: string): string {
+  let sortie = "";
+  let dansLaChaine: string | null = null;
+  for (let i = 0; i < source.length; i += 1) {
+    const c = source[i] ?? "";
+    if (dansLaChaine !== null) {
+      if (c === "\\") {
+        sortie += "  ";
+        i += 1;
+        continue;
+      }
+      if (c === dansLaChaine) {
+        dansLaChaine = null;
+        sortie += c;
+        continue;
+      }
+      sortie += c === "\n" ? "\n" : " ";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") dansLaChaine = c;
+    sortie += c;
+  }
+  return sortie;
+}
+
+/**
+ * LE TEST NOMMÉ EST-IL ENFERMÉ DANS UNE SUITE SUSPENDUE ?
+ *
+ * ⚠️ **G4 MORDAIT SUR `it.skip` ET PAS SUR `describe.skip`, ET C'EST LE MÊME
+ *    GESTE.** Sur `it.skip("…")`, la déclaration ne correspond plus à la forme
+ *    cherchée : le test devient « introuvable », donc une anomalie — la garde
+ *    mord, par effet de bord. Posée d'un cran au-dessus, la MÊME suspension
+ *    laisse la déclaration intacte : G4 la trouvait, isolait un corps, comptait
+ *    des `expect(`, et rendait zéro reproche sur un test que vitest n'exécute
+ *    pas. Une garde qui mord sur une forme et pas sur son équivalent se
+ *    contourne sans que personne l'ait décidé.
+ *
+ * ⚠️ **`.only` EST DE LA MÊME FAMILLE, ET IL EST PIRE.** Il n'éteint pas le test
+ *    qu'il porte : il éteint TOUS LES AUTRES du fichier. Un `.only` oublié ferme
+ *    donc des décisions voisines sans qu'aucune d'elles ne le sache. Les trois
+ *    formes sont refusées ensemble.
+ *
+ * ⚠️ **CE QU'ELLE NE VOIT PAS, ET C'EST ÉCRIT AVEC ELLE.** Elle lit du TEXTE :
+ *    une suspension décidée à l'exécution lui échappe, comme lui échappe un
+ *    fichier entier écarté par la configuration du lanceur. Elle ferme la forme
+ *    ÉCRITE, qui est celle qu'un remaniement pose sans y penser.
+ */
+export function suiteSuspendue(source: string, nom: string): boolean {
+  const nu = sansProse(source);
+  const declaration = new RegExp(
+    `(?<![.\\w])(?:it|test)(?:\\.\\w+)?\\s*\\(\\s*"${echapper(nom)}"`,
+    "u",
+  );
+  const trouve = declaration.exec(nu);
+  if (trouve === null) return false;
+
+  const masque = chainesBlanchies(nu);
+  const suspension = /(?<![.\w])(?:describe|suite)\s*\.\s*(?:skip|todo|only)\s*\(/gu;
+  let ouverture: RegExpExecArray | null;
+  while ((ouverture = suspension.exec(masque)) !== null) {
+    const debut = masque.indexOf("{", ouverture.index + ouverture[0].length);
+    if (debut === -1) continue;
+    let profondeur = 0;
+    for (let i = debut; i < masque.length; i += 1) {
+      if (masque[i] === "{") profondeur += 1;
+      else if (masque[i] === "}") {
+        profondeur -= 1;
+        if (profondeur === 0) {
+          if (trouve.index > debut && trouve.index < i) return true;
+          break;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * LES ARGUMENTS DE CHAQUE `expect(` D'UN CORPS, un par appel.
+ *
+ * ⚠️ **L'ÉQUILIBRAGE DES PARENTHÈSES SE FAIT SUR `corps.code`**, donc sur un
+ *    texte dont les chaînes sont déjà blanchies : une parenthèse citée dans un
+ *    message ne déséquilibre rien. Un appel dont la parenthèse ne se referme pas
+ *    rend un argument tronqué — jamais une exception, jamais un silence.
+ */
+export function argumentsDExpect(code: string): readonly string[] {
+  const trouves: string[] = [];
+  const appel = /\bexpect\s*\(/gu;
+  let debut: RegExpExecArray | null;
+  while ((debut = appel.exec(code)) !== null) {
+    const ouvert = debut.index + debut[0].length;
+    let profondeur = 1;
+    let i = ouvert;
+    for (; i < code.length && profondeur > 0; i += 1) {
+      if (code[i] === "(") profondeur += 1;
+      else if (code[i] === ")") profondeur -= 1;
+    }
+    trouves.push(code.slice(ouvert, i - 1));
+  }
+  return trouves;
+}
+
+/**
+ * L'IDENTITÉ D'UNE ENTRÉE, quel que soit son état — ce qu'on met dans une liste
+ * qu'un cliquet fige.
+ *
+ * ⚠️ **UN NUMÉRO D'ADR NE SUFFIT PAS** : un même ADR porte plusieurs décisions,
+ *    et deux d'entre elles ont des sorts différents. Le second terme est donc le
+ *    discriminant de l'état — le symbole quand il y en a un, le dossier attendu
+ *    pour une couture `à-nommer`, la décision elle-même pour une `hors-code`,
+ *    qui n'a rien d'autre à nommer.
+ */
+export function identiteDeLEntree(entree: EntreeDeCouture): string {
+  if (entree.etat === "cousue" || entree.etat === "à-coudre") {
+    return `${entree.symbole} (ADR ${entree.adr})`;
+  }
+  if (entree.etat === "à-nommer") return `${entree.dossierAttendu} (ADR ${entree.adr})`;
+  return `${entree.decision} (ADR ${entree.adr})`;
+}
+
+/** Le test nommé est-il déclaré `it.fails` — une dette, non une garde vivante ? */
+export function testEnDette(source: string, nom: string): boolean {
+  return new RegExp(`(?<![.\\w])(?:it|test)\\.fails\\s*\\(\\s*"${echapper(nom)}"`, "u").test(
+    sansProse(source),
+  );
+}
+
+/**
+ * LA GARDE DES ASSERTIONS — **le second fait du registre, celui qui manquait.**
+ *
+ * Elle rougit dans les DEUX sens, et le second est celui qui rend la première
+ * moitié inutile si on l'oublie :
+ *
+ *  · **une assertion nommée et ABSENTE du dépôt** — fichier introuvable, test
+ *    introuvable, nom composé à l'exécution : le registre MENT, et un registre
+ *    menteur est pire qu'une garde aveugle, parce qu'il a l'air d'une mesure ;
+ *  · **un test PRÉSENT qui ne fait échouer personne** — un corps sans un seul
+ *    `expect(`, ou un corps qui ne NOMME rien de ce que la décision a changé.
+ *    Sans ce second sens, on fermerait n'importe quelle entrée en pointant le
+ *    premier test vert venu.
+ *
+ * Trois reproches de cohérence ferment les échappatoires restantes : une
+ * assertion portée par autre chose qu'un `.spec.ts` (ce serait du code, pas une
+ * garde), une liste `nomme` vide (une assertion sans objet), et une entrée
+ * `cousue` dont l'assertion est un `it.fails` — déclarer une décision atterrie
+ * en la gardant par une dette est une contradiction dans les termes.
+ *
+ * ⚠️ **CE QU'ELLE NE PROUVE PAS, ET C'EST ÉCRIT AVEC ELLE.** Elle mesure des
+ *    FORMES sur le disque : elle ne fait pas tourner le test, donc elle ne peut
+ *    pas savoir si la mutation de la décision le tue réellement. Cette
+ *    preuve-là s'obtient en MUTANT, et le lot qui pose une assertion la
+ *    transcrit — état ROUGE avant, état VERT après. G4 rend impossible qu'une
+ *    assertion soit une chaîne ; elle ne rend pas inutile de la muter.
+ */
+export function verifierLesAssertions(
+  fichiers: readonly FichierSoumis[],
+  registre: readonly EntreeDeCouture[],
+): RapportDesAssertions {
+  const parChemin = new Map(fichiers.map((fichier) => [fichier.chemin, fichier.source]));
+  const verdicts: VerdictDUneAssertion[] = [];
+  const anomalies: string[] = [];
+  const fichiersOuverts = new Set<string>();
+  const cousuesNonAtterries: string[] = [];
+  const sansAssertionNommees: string[] = [];
+  const usagesParAssertion = new Map<string, number>();
+  const adrAvecAssertion = new Set<string>();
+  const adrInscrits = new Set<string>();
+  let avecAssertion = 0;
+  let enDetteTotal = 0;
+  let nomsExiges = 0;
+  let nomsEnLitteralSeulTotal = 0;
+
+  for (const entree of registre) {
+    adrInscrits.add(entree.adr);
+    const assertion = entree.assertion;
+    if (assertion === null) {
+      /**
+       * ⚠️ **L'IDENTITÉ, PAS SEULEMENT LE COMPTE.** Le total `sansAssertion` se
+       *    compense : une décision aveugle de plus, une assertion posée sur une
+       *    ancienne entrée, et le nombre ne bouge pas. La liste, elle, change.
+       */
+      sansAssertionNommees.push(identiteDeLEntree(entree));
+      verdicts.push({
+        entree,
+        fichierTrouve: false,
+        testTrouve: false,
+        enDette: false,
+        octetsDuCorps: 0,
+        assertionsDansLeCorps: 0,
+        expectsFalsifiables: 0,
+        suspendu: false,
+        nomsAttendus: 0,
+        nomsAbsents: [],
+        nomsEnLitteralSeul: [],
+        anomalies: [],
+      });
+      continue;
+    }
+
+    avecAssertion += 1;
+    adrAvecAssertion.add(entree.adr);
+    const empreinteDeLAssertion = `${assertion.fichier} › ${assertion.nom}`;
+    usagesParAssertion.set(
+      empreinteDeLAssertion,
+      (usagesParAssertion.get(empreinteDeLAssertion) ?? 0) + 1,
+    );
+    const reproches: string[] = [];
+    const ou = `ADR ${entree.adr} · ${assertion.fichier} · « ${assertion.nom} »`;
+
+    if (!assertion.fichier.endsWith(".spec.ts")) {
+      reproches.push(
+        `${ou} : une assertion doit être portée par un fichier « .spec.ts » — ` +
+          "un test porté par un module de production n'est pas une garde, c'est du code",
+      );
+    }
+    if (assertion.nomme.length === 0) {
+      reproches.push(
+        `${ou} : la liste « nomme » est VIDE — une assertion qui n'exige aucun nom du corps ` +
+          "peut désigner n'importe quel test vert, et le registre redevient une prose",
+      );
+    }
+
+    const source = parChemin.get(assertion.fichier);
+    const fichierTrouve = source !== undefined;
+    if (source === undefined) {
+      reproches.push(
+        `${ou} : le fichier d'assertion N'EXISTE PAS parmi les fichiers soumis — ` +
+          "le registre nomme un test que personne ne peut exécuter",
+      );
+    } else {
+      fichiersOuverts.add(assertion.fichier);
+    }
+
+    const corps = source === undefined ? null : corpsDuTestNomme(source, assertion.nom);
+    const testTrouve = corps !== null;
+    if (source !== undefined && corps === null) {
+      reproches.push(
+        `${ou} : aucun test de ce nom EXACT n'y est déclaré, ou son corps n'a pas pu être ` +
+          "isolé (accolades déséquilibrées, ou l'isolement a fui jusqu'à un autre test)",
+      );
+    }
+
+    const enDette = source !== undefined && testEnDette(source, assertion.nom);
+    if (enDette) enDetteTotal += 1;
+    /**
+     * ⚠️ **CE CAS N'EST PAS UNE ANOMALIE — C'EST LE DÉFAUT CENTRAL DU LOT 4, ET
+     *    LE COMPTER EST TOUT L'OBJET DE L'ADR 0041.**
+     *
+     * Une entrée `cousue` dont l'assertion est un `it.fails` dit deux choses
+     * VRAIES en même temps : le symbole A des appelants de production, et la
+     * décision N'A PAS atterri. C'est exactement l'état dans lequel l'ADR 0037
+     * a passé un lot entier — `PortsDuService` importé par `ops/index.ts`,
+     * entrée verte, et ni `journalDesRefus` ni `delaiDeReprise` nulle part.
+     *
+     * En faire un reproche reviendrait à RECONFONDRE les deux faits que cette
+     * garde existe pour séparer, et forcerait à mentir sur l'un pour être vert
+     * sur l'autre. La liste est donc NOMMÉE et RENDUE ; c'est à l'appelant de
+     * tenir le cliquet dessus.
+     */
+    if (enDette && entree.etat === "cousue") {
+      cousuesNonAtterries.push(`${entree.symbole} (ADR ${entree.adr})`);
+    }
+
+    /**
+     * ⚠️ **UNE SUITE SUSPENDUE FERME LA DÉCISION SANS JAMAIS TOURNER.** Le
+     *    reproche est posé même si tout le reste du verdict est irréprochable :
+     *    un corps parfait qu'aucun lanceur n'exécute ne garde rien du tout.
+     */
+    const suspendu = source !== undefined && suiteSuspendue(source, assertion.nom);
+    if (suspendu) {
+      reproches.push(
+        `${ou} : le test est enfermé dans une suite SUSPENDUE (« describe.skip », « .todo » ` +
+          "ou « .only » posé plus haut) — le lanceur ne l'exécute pas, et un test qui ne " +
+          "tourne pas ne fait échouer personne, quelle que soit la qualité de son corps",
+      );
+    }
+
+    const assertionsDansLeCorps =
+      corps === null ? 0 : (corps.code.match(/\bexpect\s*\(/g) ?? []).length;
+    if (corps !== null && assertionsDansLeCorps === 0) {
+      reproches.push(
+        `${ou} : le corps du test ne porte AUCUN « expect( » — un test qui n'assère rien ` +
+          "ne peut faire échouer personne, et il serait vert quoi qu'il arrive",
+      );
+    }
+
+    /**
+     * ⚠️ **LE CAS VOISIN DU CAS ZÉRO, ET IL ÉTAIT GRAND OUVERT.** Refuser un
+     *    corps sans `expect(` ne dit rien d'un corps qui n'en porte que
+     *    d'infalsifiables : `expect(1).toBe(1)` compte pour un, et il est vert
+     *    quoi qu'il arrive. Un argument fait de littéraux seuls ne confronte
+     *    RIEN du dépôt ; il faut au moins un identifiant pour qu'une mutation de
+     *    la décision ait quoi que ce soit à changer.
+     *
+     * ⚠️ **LE SEUIL EST « AU MOINS UN », PAS « TOUS ».** Un test légitime mêle
+     *    des planchers littéraux (`expect(fichiers.length).toBeGreaterThan(0)`,
+     *    dont l'argument est bien un identifiant) à des comparaisons de
+     *    constantes ; exiger que chaque `expect(` soit falsifiable rejetterait
+     *    des gardes correctes. Ce qui est refusé, c'est le corps où AUCUN ne
+     *    l'est.
+     */
+    const expectsFalsifiables =
+      corps === null
+        ? 0
+        : argumentsDExpect(corps.code).filter((argument) => /[A-Za-z_$]/u.test(argument)).length;
+    if (corps !== null && assertionsDansLeCorps > 0 && expectsFalsifiables === 0) {
+      reproches.push(
+        `${ou} : aucun des ${String(assertionsDansLeCorps)} « expect( » du corps ne confronte ` +
+          "autre chose que des littéraux — un test qui ne peut pas échouer ne ferme aucune " +
+          "décision, et il a l'air d'une mesure",
+      );
+    }
+
+    const nomsAbsents =
+      corps === null
+        ? [...assertion.nomme]
+        : assertion.nomme.filter((nom) => !corps.brut.includes(nom));
+    if (corps !== null && nomsAbsents.length > 0) {
+      reproches.push(
+        `${ou} : le corps ne NOMME pas ${nomsAbsents.map((nom) => `« ${nom} »`).join(", ")} — ` +
+          "l'assertion désigne un test qui parle d'autre chose que la décision",
+      );
+    }
+
+    /**
+     * ⚠️ **UNE PART ANNONCÉE, PAS UN REPROCHE — et la distinction est mesurée.**
+     *    `nomme` se cherche dans le corps BRUT, littéraux compris, et c'est
+     *    délibéré : un test qui LIT une source du dépôt y cherche un nom en
+     *    littéral, où il est la mesure elle-même. Un `console.info` le fournit
+     *    tout aussi bien, où il n'est que du décor. G4 ne sait pas trancher
+     *    entre les deux ; elle compte donc la part concernée au lieu de la
+     *    laisser invisible.
+     */
+    const nomsEnLitteralSeul =
+      corps === null
+        ? []
+        : assertion.nomme.filter((nom) => corps.brut.includes(nom) && !corps.code.includes(nom));
+    nomsExiges += assertion.nomme.length;
+    nomsEnLitteralSeulTotal += nomsEnLitteralSeul.length;
+
+    verdicts.push({
+      entree,
+      fichierTrouve,
+      testTrouve,
+      enDette,
+      octetsDuCorps: corps?.brut.length ?? 0,
+      assertionsDansLeCorps,
+      expectsFalsifiables,
+      suspendu,
+      nomsAttendus: assertion.nomme.length,
+      nomsAbsents,
+      nomsEnLitteralSeul,
+      anomalies: reproches,
+    });
+    anomalies.push(...reproches);
+  }
+
+  const sansAssertion = registre.length - avecAssertion;
+  const adrSansAucuneAssertion = [...adrInscrits]
+    .filter((adr) => !adrAvecAssertion.has(adr))
+    .sort();
+
+  return {
+    entreesConfrontees: registre.length,
+    avecAssertion,
+    sansAssertion,
+    enDette: enDetteTotal,
+    parAssertion: {
+      "avec-assertion": avecAssertion - enDetteTotal,
+      "en-dette": enDetteTotal,
+      "sans-assertion": sansAssertion,
+    },
+    adrConfrontes: adrInscrits.size,
+    adrSansAucuneAssertion,
+    cousuesNonAtterries: cousuesNonAtterries.sort(),
+    sansAssertionNommees: sansAssertionNommees.sort(),
+    assertionsPartagees: [...usagesParAssertion.entries()]
+      .filter(([, usages]) => usages > 1)
+      .map(([empreinte, usages]) => `${empreinte} (${String(usages)})`)
+      .sort(),
+    fichiersDAssertionDistincts: fichiersOuverts.size,
+    nomsExiges,
+    nomsEnLitteralSeul: nomsEnLitteralSeulTotal,
+    verdicts,
+    anomalies,
+  };
 }

@@ -3,9 +3,31 @@ node_modules/
 .pnpm-store/
 
 # Secrets — AUCUN secret réel ne doit entrer dans ce dépôt (cf. README, lot 0a)
+#
+# ⚠️ CES LIGNES SONT GARDÉES PAR DU CODE, ET LA GARDE MORD SUR UNE MACHINE
+#    PROPRE (ADR 0042). `ops/depot-public.spec.ts` sonde chacun des chemins
+#    canoniques ci-dessous avec `git check-ignore` — SANS exiger qu'il existe —
+#    et rougit dès qu'une règle disparaît d'ici. Trois d'entre elles manquaient
+#    au 2026-09-01 : un `secrets.json`, une clé SSH ou un `.pem` déposés dans le
+#    répertoire de travail étaient à un `git add .` d'entrer dans l'historique
+#    PUBLIC — d'où on ne les retire pas, on révoque la valeur.
 .env
 .env.*
 !.env.example
+secrets.json
+secrets.yml
+secrets.yaml
+credentials.json
+*-credentials.json
+service-account*.json
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
 
 # Sortie de compilation
 dist/

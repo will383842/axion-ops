@@ -1,0 +1,8 @@
+# Ce fichier est créé et tenu par Prisma. Il fixe le moteur de base de données
+# pour lequel les migrations de ce dossier ont été écrites.
+#
+# ⚠️ NE PAS L'ÉDITER À LA MAIN, ET NE PAS LE RETIRER DU DÉPÔT. Sans lui,
+#    `prisma migrate deploy` ne sait pas contre quel dialecte les fichiers
+#    `migration.sql` ont été produits — et le § 07 exige un PostgreSQL DÉDIÉ,
+#    jamais celui d'Axion-IA.
+provider = "postgresql"

@@ -5,6 +5,156 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 4, RECETTE — la garde des assertions attaquée, et ce qu'elle laissait passer — 2026-09-01
+
+Le lot 4 a posé G4 pour rendre impossible qu'une décision soit déclarée fermée
+sans qu'un test la voie. **Son épreuve a montré que G4 pouvait être fermée par un
+test qui ne peut pas rougir** — c'est-à-dire par le défaut même qu'elle existe
+pour interdire. La recette a fermé trois de ces brèches, chacune vue ROUGE avant
+correction, et laissé les autres NOMMÉES plutôt que discrètes.
+
+### Le chiffre du lot, et ce qu'il ne dit pas
+
+**44 ADR inscrits au registre · 10 portent au moins une décision qu'un test voit
+· 34 n'en portent AUCUNE.** C'est le chiffre neuf du dossier, et il ne dit
+qu'une chose : ces 34 ADR ne sont gardés que par G1 — « le symbole a des
+appelants » — jamais par « la décision a atterri ». Il ne dit pas que les 10
+autres sont sûrs : G4 mesure des **formes sur le disque**, elle ne fait pas
+tourner le test et ne peut pas savoir qu'une mutation de la décision le tue.
+
+### Ce que la recette a fermé — ADR 0048, trois brèches de G4
+
+| brèche                                                             | ROUGE avant                                   | VERT après                                      |
+| ------------------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------- |
+| `expect(1).toBe(1)` satisfaisait « au moins un `expect(` »         | `expected 0 to be greater than or equal to 1` | 1 anomalie · `expectsFalsifiables` compté       |
+| un `it()` dans un `describe.skip` : G4 le trouvait, vitest non     | `expected 0 to be greater than or equal to 1` | `describe.skip → 1` **et** `it.skip → 1`        |
+| le cliquet des « sans assertion » était un TOTAL, donc compensable | `expected 88 to be greater than 88`           | 1 identité ENTRANTE nommée, total inchangé à 88 |
+
+La troisième est la plus instructive : **aucun correctif ne pouvait sauver le
+total.** `sansAssertion` vaut `entrées − avecAssertion` — une soustraction est
+incapable de distinguer un échange d'un ajout. Le cliquet porte donc désormais
+sur l'**identité** (88 identités figées), et le total reste annoncé à côté, pour
+que son incapacité reste lue au lieu d'être corrigée par oubli.
+
+### Ce qui est ANNONCÉ parce que la garde ne sait pas trancher
+
+- **24 des 53 noms exigés ne vivent que dans un littéral.** Un test qui lit une
+  source du dépôt y cherche légitimement un nom en littéral ; un `console.info`
+  le fournit tout aussi bien. G4 ne peut pas, par construction, distinguer une
+  mesure d'un message — elle en compte donc la part.
+- **1 assertion est partagée par deux entrées** (ADR 0036 et 0043, qui portent la
+  même règle). Légitime — et c'est aussi la forme exacte que prend la
+  compensation ci-dessus. Rendue visible, jamais reprochée.
+- **0 fichier sur 323 porte un `.skip` / `.only` / `.todo`.** Aucune garde du
+  dépôt ne l'interdit : la porte est ouverte, elle n'est pas empruntée.
+
+### Ce que la recette a corrigé sans le coder — ADR 0044, § 4
+
+La § 4 de l'ADR 0044 promettait qu'« un `reponseSansFuite` refuse d'expédier une
+réponse dont le filet n'a confronté aucune valeur ». **Ce symbole n'existe nulle
+part et n'a jamais existé** : la propriété n'a pas « survécu à la remontée »,
+elle n'a jamais eu de porteur. Le paragraphe porte désormais sa correction.
+
+Et la règle **n'a pas été reprise telle quelle**, parce qu'elle est dangereuse
+comme elle est écrite : `valeursConfrontees === 0` vaut aussi zéro quand toutes
+les valeurs nommées ont été légitimement écartées pour être plus courtes que le
+seuil. Un en-tête `Host` de sept caractères suffit — poser `refuser si
+valeursConfrontees === 0` dans les deux transports ferait refuser **toutes** les
+réponses du socle. Le refus juste distingue les deux cas ; la dette reste nommée,
+avec cette distinction écrite dedans.
+
+### Les sept points du lot 3
+
+**Cinq fermés** — la fente `journalDesRefus`/`delaiDeReprise` sur
+`PortsDuService` (0037) ; le plafond de 40 à l'étape 7 et le sosie supprimé
+(0043) ; `prisma/migrations/` et le chaînage du script d'ajout seul (0045) ; le
+filet anti-fuite remonté et appelé par les DEUX transports (0044) ;
+`upstream_unavailable` a enfin un émetteur (0047). **Un fermé partiellement** —
+le registre et sa garde (0041 puis 0048) : le mécanisme existe et mord, trois de
+ses brèches sont refermées, une reste nommée. **Un déplacé, pas fermé** — le
+`.env` (0042) : la garde existe et morde, mais ses 6 sondes sont écrites à la
+main quand `.gitignore` porte 16 règles de secret ; **11 ne sont exercées par
+aucune sonde**, et l'avertissement en tête du fichier affirme le contraire à
+celui qui l'édite. Dette nommée, correctif écrit : dériver les sondes.
+
+### Mesuré
+
+`156 fichiers · 1 724 tests verts · 34 dettes nommées · 0 rouge` — quatre gates
+vertes, **44 ADR dont 41 acceptées**, 112 entrées au registre, 24 assertions,
+0 anomalie sur G1, G2 et G4. Le socle **démarre et sert** :
+`7 étages franchis · tools/list servi · tools/call refusé à l'étape 6 · code 0`.
+`pnpm ops:vault:init` existe désormais et répond : `0` avec clé, `1` sans, et un
+refus NOMMÉ sur le chemin base tant que `prisma generate` n'a pas tourné.
+
+**Des 31 dettes nommées héritées de `b8718f7`, ZÉRO n'a été fermée.** Le lot 4 en
+a ajouté 6, la recette en a fermé 3. Le compte monte de 31 à 34, et c'est écrit
+ici plutôt que dilué dans un total.
+
+---
+
+## Lot 4 — le second fait du registre : une décision n'est fermée que si une assertion la voit — 2026-09-01
+
+Le lot 1d avait construit une garde de couture pour rendre impossible le défaut
+« une décision écrite, testée, documentée, et jamais branchée ». **Elle tourne,
+elle annonce ses comptes, elle est verte.** Et **deux ADR du lot 3 — 0036 et
+0037, toutes deux marquées « Statut : acceptée » — ne sont pas atterries.**
+
+La garde n'a rien vu, **et elle avait raison sur ce qu'elle mesure** : l'état
+`cousue` compte les **appelants de production d'un symbole**, jamais
+l'atterrissage d'une décision. Les deux se séparent exactement là où personne ne
+regarde — quand une décision NEUVE porte sur un symbole **DÉJÀ COUSU**. Ajouter
+un champ à `PortsDuService`, poser un refus dans le bloc de l'étape 7 : le
+symbole garde ses appelants, l'entrée reste verte.
+
+> **Une garde peut être verte, honnête, et mesurer autre chose que ce que son
+> lecteur croit.**
+
+### Le chiffre qui manquait au projet
+
+À l'écriture de la garde, sur le registre inchangé : **90 entrées, 0 assertion,
+36 ADR inscrits dont 36 qu'aucun test ne voit.** Après le lot : 99 entrées,
+**11 avec assertion**, dont **7 en dette nommée**, et **7 ADR sur 41** portent au
+moins une décision qu'un test voit. Le cliquet interdit seulement que le compte
+des `sans-assertion` **monte**.
+
+### Ce qui est neuf
+
+- **ADR 0041 — la garde de couture v2.** Chaque entrée porte désormais deux
+  faits, jamais confondus : `appelants` (inchangé) et **`assertion`**, le nom
+  d'un test qui échoue si la décision n'a pas atterri. L'assertion n'est pas une
+  chaîne : le fichier doit exister et être un `.spec.ts`, le test y être déclaré
+  sous ce nom exact, son corps s'isoler **sans fuir** jusqu'au voisin, porter au
+  moins un `expect(` et **nommer** ce que la décision a changé. **La garde
+  s'inscrit elle-même au registre** — le lot 3 écrivait « ET JE SUIS LOGÉ À LA
+  MÊME ENSEIGNE » ; ce lot-ci refuse cette phrase.
+- **Le défaut central est nommé, pas reproché.** Une entrée `cousue` dont
+  l'assertion est en dette dit **deux vérités à la fois**. La liste sort nommée
+  (`cousuesNonAtterries`, trois entrées aujourd'hui) et un cliquet la garde.
+- **ADR 0042 — le `.env` reste où il est, et la garde se pose.** Déplacer le
+  fichier l'emmène là où plus aucune règle ne le couvre et ne pose aucune garde.
+  `ops/depot-public.ts` rougit dans trois sens, et le troisième — les **sondes**
+  d'ignorance — est le seul qui morde sur une machine propre. **Ce qu'elle a
+  trouvé le jour même n'était pas le risque signalé** : sur 6 sondes, **3
+  n'étaient pas ignorées** (`secrets.json`, `id_rsa`, `prive.pem`).
+- **ADR 0043, 0044, 0045 — trois décisions tranchées pour les correcteurs** : où
+  exactement le plafond de 40 se refuse et dans quel ordre le sosie
+  d'`integration.spec.ts` disparaît ; où remonte le filet anti-fuite pour servir
+  les deux transports ; la migration initiale et ce après quoi le script
+  d'ajout-seul s'applique.
+- **Six dettes NOMMÉES** dans
+  `core/epreuve/lot4-decisions-acceptees-non-atterries.temoin.spec.ts`. Chacune
+  est un `it.fails` inscrit au registre : le retirer sans retirer l'entrée fait
+  rougir G4, et il **rougit le jour où la décision atterrit**.
+
+### Mesuré
+
+`135 fichiers · 1506 tests verts · 37 dettes nommées · 0 rouge` — quatre gates
+vertes, 41 ADR. **Cinq mutations posées, cinq mortes**, restaurations vérifiées à
+l'octet. La première est la démonstration du lot : renommer sur le disque un test
+nommé au registre fait rougir G4 **et laisse G1 parfaitement verte**.
+
+---
+
 ## Lot 3 — fermer les constats, tuer les mutations survivantes, composer la chaîne — 2026-09-01
 
 Le lot 2 s'était terminé sur un jalon manqué, écrit en toutes lettres : **le

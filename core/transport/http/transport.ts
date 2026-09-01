@@ -69,16 +69,17 @@ import {
   STATUT_METHODE_INCONNUE,
   STATUT_SUCCES,
   defiWwwAuthenticate,
+  sortieServieHttp,
   statutDuRefus,
   valeurRetryAfter,
-  verifierAucuneFuite,
 } from "./reponse.js";
-import type {
-  LectureDuDelaiDeReprise,
-  ReponseHttp,
-  ValeurSensible,
-  VerdictDeFuite,
-} from "./reponse.js";
+import type { LectureDuDelaiDeReprise, ReponseHttp } from "./reponse.js";
+// ⚠️ **IMPORTÉ DE `../anti-fuite.js`, PAS DU RÉ-EXPORT DE `./reponse.js`.** Le
+//    filet a quitté la porte HTTP (ADR 0044) : le ré-export existe pour les
+//    appelants d'hier, et un appelant neuf qui l'emprunterait laisserait croire
+//    que le filet appartient encore à un seul des deux fils.
+import { valeursSensiblesDeLAppel, verifierAucuneFuite } from "../anti-fuite.js";
+import type { ValeurSensible, VerdictDeFuite } from "../anti-fuite.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LE CONTRAT DE ROUTE
@@ -207,43 +208,22 @@ export interface TransportHttp {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  LES VALEURS SENSIBLES D'UNE REQUÊTE
+//  LES VALEURS SENSIBLES D'UNE REQUÊTE — DEUX ORIGINES, UNE SEULE DÉRIVATION
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** Au-delà, on cesse de collecter : une charge utile n'est pas un inventaire. */
-const MAX_ARGUMENTS_CONFRONTES = 64;
-/** Profondeur maximale du parcours d'`input`. Une charge cyclique ne boucle pas. */
-const PROFONDEUR_MAX_ARGUMENTS = 8;
-
 /**
- * COLLECTE LES CHAÎNES D'UN `input`, POUR LES CONFRONTER À LA RÉPONSE.
+ * ⚠️ **LA COLLECTE DES VALEURS D'APPEL A QUITTÉ CE FICHIER (ADR 0044).** Elle
+ *    vit dans `core/transport/anti-fuite.ts`, sous le nom
+ *    `valeursSensiblesDeLAppel`, et les DEUX transports l'appellent. Tant
+ *    qu'elle était écrite ici, « la même entrée sur les deux fils » n'était
+ *    qu'une phrase : rien n'obligeait le fil stdio à confronter le jeton de
+ *    confirmation, et il ne le confrontait pas.
  *
- * ⚠️ **CE N'EST PAS UNE INSPECTION DE CONTENU, C'EST L'INVERSE.** On ne demande
- *    pas « cette valeur est-elle personnelle ? » — question à laquelle personne
- *    ne sait répondre — mais « cette valeur-CI, que l'appelant vient d'envoyer,
- *    est-elle ressortie dans la réponse ? ». C'est exactement répondable, et
- *    c'est ce que le § 15 interdit.
- *
- * ⚠️ Le NOM D'OUTIL n'en fait volontairement pas partie : le § 15 exige au
- *    contraire que `tool_disabled` « dise qu'il existe, et où l'activer ». Le
- *    confronter ferait rougir la garde sur le comportement prescrit.
+ *    Ce qui reste PROPRE à ce transport, et qui est poussé ci-dessous par
+ *    `traiter()`, ce sont les deux valeurs que le fil stdio n'a pas : l'en-tête
+ *    `Host` et le jeton porteur. Le § 11 le dit lui-même — les quatre étapes
+ *    « HTTP seul » n'existent pas sur l'autre fil.
  */
-function chainesDeLInput(valeur: unknown, profondeur: number, sortie: string[]): void {
-  if (sortie.length >= MAX_ARGUMENTS_CONFRONTES || profondeur > PROFONDEUR_MAX_ARGUMENTS) return;
-  if (typeof valeur === "string") {
-    sortie.push(valeur);
-    return;
-  }
-  if (Array.isArray(valeur)) {
-    for (const element of valeur) chainesDeLInput(element, profondeur + 1, sortie);
-    return;
-  }
-  if (typeof valeur === "object" && valeur !== null) {
-    for (const membre of Object.values(valeur as Readonly<Record<string, unknown>>)) {
-      chainesDeLInput(membre, profondeur + 1, sortie);
-    }
-  }
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LES CORPS DE RÉPONSE
@@ -387,7 +367,10 @@ export function creerTransportHttp(
       if (porteur !== null) sensibles.push({ nom: "jeton porteur", valeur: porteur });
 
       const sceller = (reponse: ReponseHttp): TraitementHttp => {
-        const fuite = verifierAucuneFuite(reponse, sensibles);
+        // ⚠️ LA RÉPONSE EST CONFRONTÉE **SÉRIALISÉE** (ADR 0044) : c'est ce que
+        //    le fil va réellement porter. Confronter l'objet laisserait passer
+        //    une valeur qu'un sérialiseur recopierait dans un champ d'erreur.
+        const fuite = verifierAucuneFuite(sortieServieHttp(reponse), sensibles);
         const trace: TraceDeTraitement = {
           requestId,
           deadline,
@@ -487,27 +470,12 @@ export function creerTransportHttp(
           });
         }
 
-        // Les valeurs de protocole de l'appel rejoignent les valeurs sensibles.
-        // ⚠️ LE JETON DE CONFIRMATION Y EST NOMMÉMENT : le § 20 interdit qu'il
-        //    reparaisse dans une réponse d'erreur, et c'est le seul endroit du
-        //    socle qui puisse le vérifier — il n'existe qu'ici.
-        if (enveloppe.appel.jetonDeConfirmation !== null) {
-          sensibles.push({
-            nom: "jeton de confirmation",
-            valeur: enveloppe.appel.jetonDeConfirmation,
-          });
-        }
-        if (enveloppe.appel.idempotencyKey !== null) {
-          sensibles.push({ nom: "clé d'idempotence", valeur: enveloppe.appel.idempotencyKey });
-        }
-        if (enveloppe.appel.curseur !== null) {
-          sensibles.push({ nom: "curseur", valeur: enveloppe.appel.curseur });
-        }
-        const arguments_: string[] = [];
-        chainesDeLInput(enveloppe.appel.input, 0, arguments_);
-        arguments_.forEach((valeur, rang) => {
-          sensibles.push({ nom: `argument n° ${String(rang + 1)}`, valeur });
-        });
+        // Les valeurs de protocole de l'appel rejoignent les valeurs sensibles,
+        // par la MÊME dérivation que celle du fil stdio (ADR 0044). Le jeton de
+        // confirmation y est nommément : le § 20 interdit qu'il reparaisse dans
+        // une réponse d'erreur, et le transport est le seul endroit du socle qui
+        // puisse le vérifier.
+        sensibles.push(...valeursSensiblesDeLAppel(enveloppe.appel));
 
         // ══ CE QUE LE TRANSPORT A ÉTABLI, CONFRONTÉ À CE QU'IL DEVAIT ═════
         const etablies: EtapesEtabliesEnAmont = {

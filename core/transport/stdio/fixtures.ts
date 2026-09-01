@@ -260,11 +260,32 @@ export interface ReglagesDuHarnais {
   readonly outils?: readonly OutilDuCatalogue[];
   readonly scopes?: readonly OpsScope[];
   readonly profilActif?: ProfileName | null;
+  /**
+   * L'INVENTAIRE que le PILOTAGE rend, quand il doit différer du catalogue.
+   *
+   * ⚠️ Par défaut il vaut `outils` : le décor dérive les deux de la même liste,
+   *    comme `ops/composition/noyau.ts` le fait en production. Ce levier existe
+   *    pour le seul cas où les deux se CONTREDISENT — l'étape 6 relit l'outil,
+   *    le pilotage rend une liste vide — que l'ADR 0036, décision 3, exige de
+   *    faire refuser. Sans lui, ce cas n'est pas fabricable, donc pas éprouvable.
+   */
+  readonly inventaire?: readonly OutilDuCatalogue[];
   readonly coffreFerme?: boolean;
   readonly validation?: ResultatValidation<unknown>;
   readonly reglagesOutil?: ReglagesDeLOutil;
   readonly charge?: ChargeAdaptateur;
   readonly niveau?: NiveauApplique;
+  /**
+   * CE QUE L'ADAPTATEUR LÈVE au lieu de rendre une charge.
+   *
+   * ⚠️ **`Error`, ET C'EST UNE BORNE DU HARNAIS, PAS DU SOCLE.** `estAmontInjoignable`
+   *    accepte `unknown` — un adaptateur ne lève pas toujours une `Error`, et le
+   *    socle doit tenir sur ce qu'il reçoit. Ce levier-ci est resserré parce que
+   *    la règle de lint du dépôt refuse de rejeter autre chose, et que ce dépôt
+   *    ne porte aucun `eslint-disable`. Le cas « l'adaptateur lève un objet nu »
+   *    est éprouvé en appelant la fonction directement.
+   */
+  readonly panneDeLAdaptateur?: Error;
 }
 
 /** Ce que le harnais rend : un noyau RÉEL, et de quoi lire ce qu'il a écrit. */
@@ -332,7 +353,7 @@ export function fabriquerHarnaisStdio(reglages: ReglagesDuHarnais = {}): Harnais
         );
       },
       inventaire(): Promise<readonly OutilDuCatalogue[]> {
-        return Promise.resolve(outils);
+        return Promise.resolve(reglages.inventaire ?? outils);
       },
     },
     politique: {
@@ -408,6 +429,12 @@ export function fabriquerHarnaisStdio(reglages: ReglagesDuHarnais = {}): Harnais
       };
     },
     appelAdaptateur(): Promise<ChargeAdaptateur> {
+      // ⚠️ LA PANNE EST LEVÉE DEPUIS L'ADAPTATEUR, PAS SIMULÉE PLUS HAUT. C'est
+      //    le seul moyen d'éprouver ce que le socle fait d'une erreur qu'il n'a
+      //    pas fabriquée — voir `estAmontInjoignable` (§ 15).
+      if (reglages.panneDeLAdaptateur !== undefined) {
+        return Promise.reject(reglages.panneDeLAdaptateur);
+      }
       return Promise.resolve(
         reglages.charge ?? {
           items: [{ id: "bonjour" }],

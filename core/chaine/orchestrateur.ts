@@ -166,9 +166,17 @@ import {
   type NiveauApplique,
   type ReferenceOutil,
 } from "../policy/index.js";
-import { estServi, profilLeMoinsExposant, type ProfileName } from "../profiles/index.js";
+import {
+  PLAFOND_OUTILS_PAR_PROFIL,
+  estServi,
+  mesurerBudgetProfil,
+  profilLeMoinsExposant,
+  type ProfileName,
+  type VerdictBudget,
+} from "../profiles/index.js";
 import {
   ETAPES_CHAINE,
+  ETAPE_EXECUTION,
   ETAPE_SCOPES,
   ancrerEtape,
   type AncrageEtape,
@@ -753,8 +761,21 @@ export interface EtatDePilotage {
    * TOUT le catalogue, pour que le profil de repli se DÉRIVE de la surface
    * réellement servie plutôt que d'être élu.
    *
-   * ⚠️ Elle n'est appelée QUE quand `profilActif` rend `null` : c'est un chemin
-   *    de panne, pas le chemin normal.
+   * ⚠️ **CETTE PROSE DISAIT LE CONTRAIRE, ET ELLE EST DEVENUE FAUSSE — ADR 0036,
+   *    décision 2.** Elle écrivait : « elle n'est appelée QUE quand `profilActif`
+   *    rend `null` : c'est un chemin de panne, pas le chemin normal ». Le § 14,
+   *    correction 3, exige que le plafond des OUTILS SERVIS se refuse à
+   *    l'étape 7 — donc sur la liste SERVIE, que seule cette méthode rend, et à
+   *    CHAQUE appel : `ops_tool.enabled` bascule en console SANS
+   *    redéploiement, si bien que la valeur mesurée en CI n'est jamais celle qui
+   *    est servie. Mesurer au démarrage seulement rendrait le plafond aussi faux
+   *    que la CI.
+   *
+   * ⚠️ **ELLE EST APPELÉE AU PLUS UNE FOIS PAR APPEL**, par
+   *    {@link memoiserLInventairePourCetAppel} : le repli de profil et le
+   *    plafond du § 14 se prononcent sur LA MÊME lecture. Ce n'est pas un cache
+   *    — un cache inter-appels réintroduirait exactement la divergence que la
+   *    correction 3 existe pour fermer, et il le ferait en silence.
    */
   inventaire(): Promise<readonly OutilDuCatalogue[]>;
 }
@@ -1235,6 +1256,151 @@ export function memoiserPourCetAppel(source: CatalogueOutils): CatalogueMemoise 
   };
 }
 
+/** Un inventaire mémoïsé, qui ANNONCE combien de lectures il a réellement faites. */
+export interface InventaireMemoise {
+  /** L'inventaire SERVI, lu au plus une fois pendant cet appel. */
+  lire(): Promise<readonly OutilDuCatalogue[]>;
+  /** Nombre de lectures RÉELLES du port sous-jacent. Mesuré, pas supposé. */
+  lectures(): number;
+}
+
+/**
+ * Enveloppe `EtatDePilotage.inventaire` pour que la LISTE SERVIE ne soit lue
+ * qu'une fois PENDANT CET APPEL — ADR 0036, décision 2.
+ *
+ * ⚠️ **CE N'EST PAS UN CACHE, et la distinction est la décision elle-même.** Le
+ *    § 14, correction 3, existe parce qu'`ops_tool.enabled` bascule en console
+ *    sans redéploiement : la liste mesurée hier n'est pas celle qui est servie
+ *    aujourd'hui. Un cache inter-appels rouvrirait ce trou-là, en silence. Ceci
+ *    meurt avec l'appel, et ce qu'il garantit est l'inverse d'un cache : que le
+ *    profil de repli et le plafond du § 14 se prononcent sur LA MÊME lecture,
+ *    au lieu de deux lectures qui peuvent différer au milieu d'une décision.
+ */
+export function memoiserLInventairePourCetAppel(source: EtatDePilotage): InventaireMemoise {
+  let vu: readonly OutilDuCatalogue[] | null = null;
+  let lectures = 0;
+
+  return {
+    async lire(): Promise<readonly OutilDuCatalogue[]> {
+      if (vu !== null) return vu;
+      lectures += 1;
+      vu = await source.inventaire();
+      return vu;
+    },
+    lectures(): number {
+      return lectures;
+    },
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  § 15 — `upstream_unavailable` : L'AMONT INJOIGNABLE A ENFIN UN ÉMETTEUR
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ⚠️ **GARDE DE COMPILATION — `upstream_unavailable` APPARTIENT À `ErrorCode`.**
+ *
+ * Le § 15 l'énumère depuis le premier jour — « Adaptateur ou API tierce
+ * injoignable. Dit lequel, et si c'est transitoire » — et **AUCUN module de
+ * production ne le rendait**. Un code que rien n'émet est une métrique qui
+ * restera vide, et une métrique vide ressemble à une métrique sans incident :
+ * le comptage des refus du § 24 aurait rangé toute panne d'amont sous
+ * `interrompu` / `internal`, c'est-à-dire sous « le socle a un défaut ».
+ *
+ * Le retirer de `ERROR_CODES` fait échouer `pnpm typecheck` sur cette ligne-ci,
+ * qui dit pourquoi elle existe.
+ */
+export const CODE_AMONT_INJOIGNABLE: ErrorCode = "upstream_unavailable";
+
+/**
+ * LES CODES SYSTÈME QUI SIGNIFIENT « L'AMONT N'A PAS RÉPONDU ».
+ *
+ * ⚠️ **CE QUI EST MESURÉ EST LE CODE, JAMAIS LE MESSAGE.** Un adaptateur peut
+ *    écrire n'importe quoi dans le texte d'une `Error` ; il ne fabrique pas un
+ *    `code` de `libuv` ou de `undici` sans le vouloir. Reconnaître « injoignable »
+ *    à un mot du message ferait du LIBELLÉ d'un tiers l'entrée d'une décision du
+ *    socle — exactement le vecteur que le § 18 range parmi les adversaires.
+ *
+ * ⚠️ **ET LE MESSAGE DE L'ERREUR N'ENTRE JAMAIS DANS LE REFUS.** Il porte
+ *    couramment l'hôte, le port, une URL, parfois un jeton en clair. Le refus ne
+ *    rend que l'`adapterId` — connu du socle — et ce code système. C'est aussi le
+ *    § 15 : `internal` est le seul à rendre un identifiant de corrélation, et
+ *    aucun refus ne rend de trace de pile.
+ *
+ * ⚠️ **CETTE LISTE EST FERMÉE, ET SON APPARTENANCE EST UN CHOIX.** Chaque valeur
+ *    désigne une panne de JOIGNABILITÉ, jamais une réponse de l'amont : un `500`
+ *    reçu d'une API tierce est une réponse, il se range ailleurs. Ajouter ici un
+ *    code qui n'est pas une panne de transport ferait passer pour « amont
+ *    injoignable » un défaut du socle.
+ */
+export const CODES_SYSTEME_AMONT_INJOIGNABLE: readonly string[] = [
+  // Le pair a refusé la connexion, ou l'a coupée en cours.
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  // Le nom ne se résout pas, ou plus.
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  // La route n'existe pas — hôte ou réseau hors d'atteinte.
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENETDOWN",
+  // Le délai a expiré, aux deux étages où le délai se mesure.
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+];
+
+/** Ce que rend la reconnaissance d'une panne d'amont. JAMAIS un booléen seul. */
+export interface VerdictAmont {
+  readonly injoignable: boolean;
+  /** Le code SYSTÈME reconnu, ou `null`. Jamais le message de l'erreur. */
+  readonly codeSysteme: string | null;
+  /** Combien de maillons de la chaîne `cause` ont été examinés. Annoncé. */
+  readonly causesExaminees: number;
+}
+
+/**
+ * L'ERREUR REMONTÉE PAR L'ADAPTATEUR EST-ELLE UNE PANNE DE JOIGNABILITÉ ?
+ *
+ * ⚠️ **ELLE SUIT LA CHAÎNE `cause`, ET ELLE DIT COMBIEN DE MAILLONS ELLE A VUS.**
+ *    Un client HTTP moderne enveloppe presque toujours : `TypeError: fetch
+ *    failed` avec `{ cause: Error { code: "ECONNREFUSED" } }`. Regarder le seul
+ *    premier niveau rendrait cette fonction VERTE POUR LA PIRE DES RAISONS —
+ *    elle ne reconnaîtrait jamais rien, et le code du § 15 resterait sans
+ *    émetteur tout en ayant l'air branché.
+ *
+ * ⚠️ **LA PROFONDEUR EST BORNÉE.** Une chaîne de causes peut être cyclique — rien
+ *    ne l'interdit — et une boucle ici pendrait l'appel dans un `catch`, à
+ *    l'endroit exact où le socle doit encore écrire sa ligne de journal.
+ */
+export function estAmontInjoignable(
+  erreur: unknown,
+  codes: readonly string[] = CODES_SYSTEME_AMONT_INJOIGNABLE,
+  profondeurMax = 8,
+): VerdictAmont {
+  const connus = new Set(codes);
+  const vues = new Set<object>();
+  let courante: unknown = erreur;
+  let causesExaminees = 0;
+
+  while (courante !== null && typeof courante === "object" && causesExaminees < profondeurMax) {
+    if (vues.has(courante)) break;
+    vues.add(courante);
+    causesExaminees += 1;
+
+    const code: unknown = (courante as { code?: unknown }).code;
+    if (typeof code === "string" && connus.has(code)) {
+      return { injoignable: true, codeSysteme: code, causesExaminees };
+    }
+    courante = (courante as { cause?: unknown }).cause;
+  }
+
+  return { injoignable: false, codeSysteme: null, causesExaminees };
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  LES EMPREINTES DE PROVENANCE — la valeur canonique du port
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1382,6 +1548,9 @@ export async function orchestrerAppel(
   const colonne = colonneDuTransport(dependances.transport);
   const maintenant = dependances.maintenant();
   const catalogue = memoiserPourCetAppel(dependances.catalogue);
+  // ADR 0036, décision 2 — l'inventaire SERVI est du chemin NOMINAL depuis que
+  // le plafond du § 14 se refuse à l'étape 7. Une lecture par appel, au plus.
+  const inventaire = memoiserLInventairePourCetAppel(dependances.pilotage);
 
   // ── L'`argHash` de la charge BRUTE, pour qu'un refus précoce ait quoi écrire.
   //    Son échec n'est PAS avalé : il est MESURÉ dans la trace. Un coffre fermé
@@ -1564,7 +1733,7 @@ export async function orchestrerAppel(
     //    la surface RÉELLEMENT servie — vers `admin`, jamais.
     let profil = await dependances.pilotage.profilActif(identite.principal);
     if (profil === null) {
-      const repli = profilLeMoinsExposant(await dependances.pilotage.inventaire());
+      const repli = profilLeMoinsExposant(await inventaire.lire());
       profil = repli.profil;
     }
     if (!estServi(outil, profil)) {
@@ -1574,6 +1743,86 @@ export async function orchestrerAppel(
           `« ${profil} » : il n'y est pas rattaché, ou il est désactivé, ou il est sorti de ` +
           "`tools/list` (§ 14, correction 3 — les trois conditions, pas une de moins). " +
           "Changer de profil depuis la console, ou rattacher l'outil à ce profil-ci.",
+      );
+    }
+
+    // ── LE PLAFOND DU § 14 SE REFUSE ICI, PAS SEULEMENT EN CI (ADR 0036) ────
+    //
+    // ⚠️ **L'ORDRE N'EST PAS UNE COMMODITÉ.** L'appartenance parle d'abord : un
+    //    outil absent du profil se refuse sans qu'aucun plafond n'ait à être
+    //    mesuré, et le message qu'il faut lire est celui de l'appartenance.
+    //
+    // ⚠️ **LE NUMÉRO ET LE CODE SONT LUS DANS LE VERDICT** — `etapeDeRefus` et
+    //    `codeDeRefus`, que `core/profiles/budget.ts` dérive déjà d'`APPEL_STEPS`
+    //    par la clé « profil ». Les réécrire ici fabriquerait la seconde source
+    //    de vérité que l'ADR 0030 interdit, et elle divergerait en silence.
+    //
+    // ⚠️ **LE CODE EST EXACT POUR L'APPARTENANCE ET INEXACT POUR LE PLAFOND, ET
+    //    ON NE L'INVENTE PAS.** `tool_not_in_profile` dit « absent du profil
+    //    actif » ; sur un dépassement, l'outil Y EST, c'est le profil qui
+    //    déborde. Le § 15 n'énumère aucun code pour ce second cas, et
+    //    `budget.ts` a déjà tranché en laissant l'écart VISIBLE plutôt qu'en le
+    //    bouchant par un voisin qui mentirait sur la cause. C'est donc le
+    //    MESSAGE qui distingue les deux — c'est lui que l'appelant lit (§ 15).
+    // ⚠️ LE PLAFOND EST NOMMÉ ICI, ET IL EST IMPORTÉ DE SON PROPRIÉTAIRE. Le
+    //    laisser implicite rendrait l'étape 7 muette sur la règle qu'elle
+    //    applique — or c'est précisément ce que le § 14 lui reproche depuis le
+    //    début : « le plafond se refuse à l'étape 7, PAS SEULEMENT EN CI ». Ce
+    //    n'est pas une recopie : `PLAFOND_OUTILS_PAR_PROFIL` vient de
+    //    `core/profiles/budget.ts`, qui reste le seul endroit où le nombre est
+    //    écrit.
+    const verdictDuBudget: VerdictBudget = mesurerBudgetProfil(profil, await inventaire.lire(), {
+      plafondOutils: PLAFOND_OUTILS_PAR_PROFIL,
+    });
+    const refusDuBudget = (message: string): EtapeRefuse => ({
+      issue: "refuse",
+      etape: verdictDuBudget.etapeDeRefus,
+      code: verdictDuBudget.codeDeRefus,
+      message,
+    });
+
+    // ⚠️ UNE MESURE AVEUGLE REFUSE, ELLE NE PASSE PAS (ADR 0036, décision 3).
+    //    À l'étape 7, `mesureAveugle` ne peut vouloir dire qu'une chose :
+    //    l'étape 6 a trouvé l'outil au catalogue et le pilotage rend un
+    //    inventaire vide — les deux se contredisent. Laisser passer ferait
+    //    mesurer le plafond sur zéro outil, et il ne pourrait plus jamais
+    //    mordre : une garde verte parce qu'elle ne regarde rien.
+    //
+    //    LE MESSAGE NOMME LA CONTRADICTION, PAS LE PLAFOND. Parler de plafond
+    //    ici enverrait retirer des outils d'un profil qui n'en sert aucun.
+    if (verdictDuBudget.mesureAveugle) {
+      return refuserDepuis(
+        refusDuBudget(
+          `Contradiction interne au socle : l'étape 6 a relu « ${appel.nomComplet} » dans ` +
+            `\`ops_tool\`, et le pilotage rend un inventaire de ` +
+            `${String(verdictDuBudget.outilsExamines)} définition(s) — les deux ne peuvent pas ` +
+            "être vrais ensemble. Le plafond du § 14 ne peut donc être mesuré sur RIEN : " +
+            "l'appel est refusé plutôt que servi sur une mesure aveugle. Vérifier que le " +
+            "pilotage lit le même `ops_tool` que le catalogue.",
+        ),
+      );
+    }
+
+    if (verdictDuBudget.depasse) {
+      const plusLourd = verdictDuBudget.poids[0];
+      return refuserDepuis(
+        refusDuBudget(
+          `L'outil « ${appel.nomComplet} » EST bien rattaché au profil actif ` +
+            `« ${profil} » — c'est le PROFIL qui déborde le budget du § 14, et c'est pour ` +
+            "cela que l'appel est refusé. " +
+            `Mesuré : ${String(verdictDuBudget.outilsComptes)} outil(s) servi(s) pour un ` +
+            `plafond de ${String(verdictDuBudget.plafondOutils)}, ` +
+            `${String(verdictDuBudget.octetsMesures)} octet(s) de définitions pour un plafond ` +
+            `de ${String(verdictDuBudget.plafondOctets)}, sur ` +
+            `${String(verdictDuBudget.outilsExamines)} définition(s) soumises. ` +
+            (plusLourd === undefined
+              ? ""
+              : `La définition la plus lourde : « ${plusLourd.name} » à ` +
+                `${String(plusLourd.octets)} octet(s). `) +
+            "Retirer un outil de ce profil ou le désactiver depuis la console — le refus " +
+            "porte sur la liste SERVIE, celle que la console commande, pas sur la liste " +
+            "déclarée que la CI épingle.",
+        ),
       );
     }
     franchir(ETAPE_PROFIL_CHAINE.numero);
@@ -2065,6 +2314,53 @@ export async function orchestrerAppel(
       //    reprend. Ce qui reste est l'issue d'INTENTION, qui n'est pas la même
       //    question et n'a jamais commandé de rejeu.
       issueDeLIntention = "failed";
+
+      // ═══ § 15 — L'AMONT INJOIGNABLE EST UN REFUS NOMMÉ, PAS UNE EXCEPTION ══
+      //
+      // ⚠️ **CE CODE N'AVAIT AUCUN ÉMETTEUR DE PRODUCTION.** Le § 15 énumère
+      //    `upstream_unavailable` — « Adaptateur ou API tierce injoignable. Dit
+      //    lequel, et si c'est transitoire » — et le socle rendait toute panne
+      //    d'amont sous `decision: "interrompu"`, c'est-à-dire « aucune décision
+      //    n'a été atteinte ». C'est faux : le socle SAIT ce qui s'est passé, il
+      //    sait de quel adaptateur il s'agit, et il sait que réessayer a un sens.
+      //    Le taire rangeait toute panne de réseau d'un tiers parmi les défauts
+      //    du socle dans la métrique du § 24 — et une métrique vide ressemble à
+      //    une métrique sans incident.
+      //
+      // ⚠️ **NI L'ISSUE D'IDEMPOTENCE NI CELLE D'INTENTION NE CHANGENT.**
+      //    `issueDeLIntention` vient d'être posée à `failed` juste au-dessus, et
+      //    `issueDeReservation()` du `finally` ne lit que le CLIQUET de
+      //    l'ADR 0017 et `terminaisonRendue` — tous deux inchangés, puisque
+      //    l'adaptateur a levé. Un envoi PARTI dont l'aval lève reste donc fermé
+      //    en `done` : ce refus NOMME la panne, il ne rouvre aucun rejeu.
+      //
+      // ⚠️ **L'`outcome` RESTE `erreur`.** `core/audit/vocabulaire.ts` l'écrit
+      //    déjà — « `erreur` — incompactable (`result_too_large`), amont
+      //    injoignable, ou exception » — et `issue()` le dérive pour tout refus
+      //    prononcé À l'étape 14. Le vocabulaire était juste avant qu'un
+      //    émetteur n'existe ; c'est la dérivation qui manquait, pas le mot.
+      const amont = estAmontInjoignable(erreur);
+      if (amont.injoignable) {
+        return refuserDepuis({
+          issue: "refuse",
+          etape: ETAPE_EXECUTION.numero,
+          code: CODE_AMONT_INJOIGNABLE,
+          // ⚠️ NI LE MESSAGE DE L'ERREUR, NI SA PILE, NI HÔTE NI URL : ils
+          //    portent couramment une adresse d'infrastructure, parfois un
+          //    secret. Le refus ne rend que l'`adapterId`, que le socle connaît
+          //    déjà, et le code SYSTÈME, qui est un mot d'une liste fermée.
+          message:
+            `L'adaptateur « ${outil.adapterId} » n'a pas pu être joint pour ` +
+            `« ${appel.nomComplet} » (${amont.codeSysteme ?? "code système inconnu"}). ` +
+            "C'est une panne de JOIGNABILITÉ, donc a priori TRANSITOIRE : rien n'indique " +
+            "que l'appel soit malformé, et aucune étape ne l'a refusé. Réessayer plus " +
+            "tard ; si la panne dure, vérifier l'état de cet adaptateur depuis la console. " +
+            "⚠️ Un effet extérieur a PEUT-ÊTRE eu lieu avant la coupure : le socle ne peut " +
+            "pas le savoir, et la clé d'idempotence de cet appel reste donc verrouillée " +
+            "pour un outil à effet extérieur (§ 20).",
+        });
+      }
+
       throw erreur;
     } finally {
       // ═══════════════════════════════════════════════════════════════════════

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { CritereDeProduction, FichierSoumis } from "./contrat.js";
-import type { EntreeDeCouture } from "./registre.js";
+import type { AssertionDeCouture, EntreeDeCouture } from "./registre.js";
 import {
+  corpsDuTestNomme,
   trousDeNumerotation,
   verifierLaCouvertureDesAdr,
+  verifierLesAssertions,
   verifierLesCoutures,
 } from "./verifier.js";
 
@@ -73,6 +75,7 @@ function entree(
     genre: "fonction",
     module: "faux/definisseur.ts",
     mesureeAilleurs: null,
+    assertion: null,
     motif: "témoin fabriqué",
     ...surcharge,
   };
@@ -208,6 +211,7 @@ const TEMOINS: readonly Temoin[] = [
       etat: "à-nommer",
       dossierAttendu: "core/transport/",
       lot: "lot fabriqué",
+      assertion: null,
       motif: "témoin fabriqué",
     },
     anomaliesAttendues: 1,
@@ -333,6 +337,7 @@ const ENTREE_HORS_CODE: EntreeDeCouture = {
   adr: "0001",
   decision: "décision fabriquée",
   etat: "hors-code",
+  assertion: null,
   motif: "témoin fabriqué",
 };
 
@@ -421,5 +426,295 @@ describe("G3 bis — la couverture des ADR sait dire NON", () => {
 
     expect(avecTrou).toEqual(["0002", "0003"]);
     expect(sansTrou).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  G4 — LA GARDE DES ASSERTIONS, ÉPROUVÉE SUR DES JEUX FABRIQUÉS (ADR 0041)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ═══ POURQUOI CE BLOC EXISTE ═══
+ *
+ * G1 mesure les APPELANTS d'un symbole. Elle est verte, honnête — et elle ne
+ * voit RIEN quand une décision neuve porte sur un symbole DÉJÀ COUSU. Deux ADR
+ * marqués « Statut : acceptée » sont passés au travers dans le même lot.
+ *
+ * G4 mesure l'autre fait : **un test rougit-il si la décision se défait ?** Une
+ * garde qui répondrait à cette question sans savoir dire NON serait pire que
+ * l'absence de garde — elle donnerait à un registre menteur l'apparence d'une
+ * mesure. Les cas ci-dessous fabriquent, un par un, chaque façon dont une
+ * assertion peut être fausse, et exigent une anomalie pour chacune.
+ *
+ * ⚠️ **LE DERNIER CAS EST LE PLUS IMPORTANT DES DIX.** Il éprouve que le corps
+ *    isolé d'un test NE FUIT PAS jusqu'au test voisin : sans lui, une entrée
+ *    serait fermée par un nom que porte le test d'à côté, et G4 rendrait
+ *    exactement le genre de vert qu'elle existe pour empêcher.
+ */
+
+/** Une entrée fabriquée qui porte une assertion. Rien d'autre ne varie. */
+function entreeAvecAssertion(
+  assertion: AssertionDeCouture | null,
+  etat: "cousue" | "à-coudre" = "à-coudre",
+): EntreeDeCouture {
+  return {
+    adr: "9999",
+    decision: "décision fabriquée — aucune valeur documentaire",
+    etat,
+    symbole: "faireLaChose",
+    genre: "fonction",
+    module: "faux/definisseur.ts",
+    mesureeAilleurs: null,
+    assertion,
+    motif: "témoin fabriqué",
+  };
+}
+
+/**
+ * Une garde fabriquée. Les sources sont écrites en littéral : c'est le décor
+ * que G4 doit savoir lire sans le confondre avec son propre corps.
+ */
+const GARDE_QUI_VOIT: FichierSoumis = {
+  chemin: "faux/garde.spec.ts",
+  source: [
+    'import { describe, expect, it } from "vitest";',
+    'describe("fabriqué", () => {',
+    '  it("le port journalDesRefus existe et la ligne est écrite", () => {',
+    "    const ports = { journalDesRefus: [] };",
+    "    expect(ports.journalDesRefus).toEqual([]);",
+    "  });",
+    '  it("un voisin qui parle de delaiDeReprise", () => {',
+    "    expect(1).toBe(1);",
+    "  });",
+    '  it("un test qui n_assere rien", () => {',
+    "    const ports = { journalDesRefus: [] };",
+    "    void ports;",
+    "  });",
+    '  it.fails("la dette nommée du journalDesRefus", () => {',
+    "    const ports = { journalDesRefus: null };",
+    "    expect(ports.journalDesRefus).toEqual([]);",
+    "  });",
+    "});",
+    "",
+  ].join("\n"),
+};
+
+interface CasDAssertion {
+  readonly nom: string;
+  readonly assertion: AssertionDeCouture | null;
+  readonly etat?: "cousue" | "à-coudre";
+  readonly anomaliesAttendues: number;
+  readonly motAttenduDansLAnomalie: string | null;
+  /**
+   * ⚠️ **LE DÉFAUT CENTRAL DU LOT 4.** Une entrée `cousue` dont l'assertion est
+   *    un `it.fails` dit DEUX VÉRITÉS à la fois : le symbole a des appelants,
+   *    et la décision n'a pas atterri. Ce n'est pas un reproche — c'est le
+   *    compte que la garde existe pour rendre.
+   */
+  readonly cousueNonAtterrieAttendue?: boolean;
+}
+
+const CAS_D_ASSERTION: readonly CasDAssertion[] = [
+  {
+    nom: "① une assertion vers un FICHIER absent : le registre nomme un test inexécutable",
+    assertion: {
+      fichier: "faux/garde-qui-nexiste-pas.spec.ts",
+      nom: "le port journalDesRefus existe et la ligne est écrite",
+      nomme: ["journalDesRefus"],
+    },
+    anomaliesAttendues: 1,
+    motAttenduDansLAnomalie: "N'EXISTE PAS",
+  },
+  {
+    nom: "② un fichier présent, un NOM DE TEST absent : la chaîne recopiée à la main",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "un test que personne n_a jamais écrit",
+      nomme: ["journalDesRefus"],
+    },
+    anomaliesAttendues: 1,
+    motAttenduDansLAnomalie: "aucun test de ce nom EXACT",
+  },
+  {
+    nom: "③ un test présent qui n'assère RIEN : il ne peut faire échouer personne",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "un test qui n_assere rien",
+      nomme: ["journalDesRefus"],
+    },
+    anomaliesAttendues: 1,
+    motAttenduDansLAnomalie: "AUCUN « expect( »",
+  },
+  {
+    nom: "④ un test présent qui parle d'AUTRE CHOSE que la décision",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "le port journalDesRefus existe et la ligne est écrite",
+      nomme: ["delaiDeReprise"],
+    },
+    anomaliesAttendues: 1,
+    motAttenduDansLAnomalie: "ne NOMME pas",
+  },
+  {
+    nom: "⑤ une liste « nomme » VIDE : une assertion qui désignerait n'importe quel vert",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "le port journalDesRefus existe et la ligne est écrite",
+      nomme: [],
+    },
+    anomaliesAttendues: 1,
+    motAttenduDansLAnomalie: "est VIDE",
+  },
+  {
+    nom: "⑥ une assertion portée par un MODULE DE PRODUCTION : ce serait du code, pas une garde",
+    assertion: {
+      fichier: "faux/definisseur.ts",
+      nom: "le port journalDesRefus existe et la ligne est écrite",
+      nomme: ["journalDesRefus"],
+    },
+    anomaliesAttendues: 2,
+    motAttenduDansLAnomalie: "« .spec.ts »",
+  },
+  {
+    nom: "⑦ une entrée COUSUE gardée par un « it.fails » : le défaut central, COMPTÉ et non reproché",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "la dette nommée du journalDesRefus",
+      nomme: ["journalDesRefus"],
+    },
+    etat: "cousue",
+    anomaliesAttendues: 0,
+    motAttenduDansLAnomalie: null,
+    cousueNonAtterrieAttendue: true,
+  },
+  {
+    nom: "⑧ la MÊME dette sur un « à-coudre » ne reproche RIEN — elle se compte, elle ne s'interdit pas",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "la dette nommée du journalDesRefus",
+      nomme: ["journalDesRefus"],
+    },
+    anomaliesAttendues: 0,
+    motAttenduDansLAnomalie: null,
+  },
+  {
+    nom: "⑨ une assertion JUSTE ne reproche rien — la garde sait dire OUI",
+    assertion: {
+      fichier: "faux/garde.spec.ts",
+      nom: "le port journalDesRefus existe et la ligne est écrite",
+      nomme: ["journalDesRefus"],
+    },
+    anomaliesAttendues: 0,
+    motAttenduDansLAnomalie: null,
+  },
+  {
+    nom: "⑩ aucune assertion : ZÉRO reproche, et l'entrée se compte comme SANS-ASSERTION",
+    assertion: null,
+    anomaliesAttendues: 0,
+    motAttenduDansLAnomalie: null,
+  },
+];
+
+describe("G4 — la garde des assertions sait dire NON, et dire OUI (ADR 0041)", () => {
+  it("rougit sur chacune des six façons dont une assertion peut être fausse", () => {
+    const fichiers = [GARDE_QUI_VOIT, DEFINISSEUR];
+    let casEprouves = 0;
+
+    for (const cas of CAS_D_ASSERTION) {
+      const entree = entreeAvecAssertion(cas.assertion, cas.etat);
+      const rapport = verifierLesAssertions(fichiers, [entree]);
+      casEprouves += 1;
+
+      console.info(
+        `[G4 · témoin] ${cas.nom} → ${String(rapport.anomalies.length)} anomalie(s) ` +
+          `[${rapport.anomalies.join(" | ") || "aucune"}] · ` +
+          `${String(rapport.avecAssertion)} avec assertion · ` +
+          `${String(rapport.sansAssertion)} sans · ${String(rapport.enDette)} en dette · ` +
+          `${String(rapport.cousuesNonAtterries.length)} cousue(s) NON ATTERRIE(s) ` +
+          `[${rapport.cousuesNonAtterries.join(", ") || "aucune"}]`,
+      );
+
+      expect(rapport.anomalies, cas.nom).toHaveLength(cas.anomaliesAttendues);
+      expect(rapport.cousuesNonAtterries.length, cas.nom).toBe(
+        cas.cousueNonAtterrieAttendue === true ? 1 : 0,
+      );
+      if (cas.motAttenduDansLAnomalie !== null) {
+        expect(rapport.anomalies.join(" | "), cas.nom).toContain(cas.motAttenduDansLAnomalie);
+      }
+    }
+
+    // Plancher : la boucle a réellement tourné sur TOUS les cas. Sans lui, une
+    // liste vidée rendrait ce test vert en n'éprouvant rien.
+    console.info(`[G4 · témoin · totaux] ${String(casEprouves)} cas fabriqué(s) éprouvé(s)`);
+    expect(casEprouves).toBe(CAS_D_ASSERTION.length);
+    expect(casEprouves).toBeGreaterThanOrEqual(10);
+  });
+
+  /**
+   * ⚠️ **LE PIÈGE QUE CE TEST FERME, ET C'EST LE VRAI.** Si l'isolement du corps
+   *    fuyait jusqu'à la fin du fichier, le nom cité par le test VOISIN
+   *    (`delaiDeReprise`) satisferait `nomme`, et l'entrée serait fermée par un
+   *    test qui n'en parle pas. La garde deviendrait alors ce qu'elle existe
+   *    pour empêcher : une mesure qui a l'air d'en être une.
+   */
+  it("n'isole que le corps du test nommé — le nom cité par le VOISIN ne ferme rien", () => {
+    const corps = corpsDuTestNomme(
+      GARDE_QUI_VOIT.source,
+      "le port journalDesRefus existe et la ligne est écrite",
+    );
+
+    console.info(
+      `[G4 · isolement] corps isolé : ${String(corps?.brut.length ?? 0)} caractère(s) bruts, ` +
+        `${String(corps?.code.length ?? 0)} de code · contient journalDesRefus : ` +
+        `${String(corps?.brut.includes("journalDesRefus") ?? false)} · contient delaiDeReprise : ` +
+        `${String(corps?.brut.includes("delaiDeReprise") ?? false)}`,
+    );
+
+    expect(corps).not.toBeNull();
+    expect(corps?.brut).toContain("journalDesRefus");
+    // Le voisin est HORS du corps. C'est toute la garde.
+    expect(corps?.brut).not.toContain("delaiDeReprise");
+  });
+
+  /**
+   * ⚠️ **ET G4 SE SURVEILLE ELLE-MÊME.** Le rapport du lot 3 écrivait, du
+   *    mécanisme des coutures, « ET JE SUIS LOGÉ À LA MÊME ENSEIGNE ». Ce
+   *    test-ci est l'assertion que l'entrée de l'ADR 0041 nomme au registre :
+   *    la garde des assertions est une décision, et elle est vue par un test
+   *    comme n'importe quelle autre.
+   */
+  it("compte les entrées SANS assertion et dérive les ADR qu'aucun test ne voit", () => {
+    const registre: readonly EntreeDeCouture[] = [
+      entreeAvecAssertion({
+        fichier: "faux/garde.spec.ts",
+        nom: "le port journalDesRefus existe et la ligne est écrite",
+        nomme: ["journalDesRefus"],
+      }),
+      entreeAvecAssertion(null),
+      { ...entreeAvecAssertion(null), adr: "9998" },
+    ];
+    const rapport = verifierLesAssertions([GARDE_QUI_VOIT, DEFINISSEUR], registre);
+
+    console.info(
+      `[G4 · répartition] ${String(rapport.entreesConfrontees)} entrée(s) · ` +
+        `répartition ${JSON.stringify(rapport.parAssertion)} · ` +
+        `${String(rapport.adrConfrontes)} ADR · ` +
+        `${String(rapport.adrSansAucuneAssertion.length)} sans AUCUNE assertion ` +
+        `[${rapport.adrSansAucuneAssertion.join(", ")}]`,
+    );
+
+    expect(rapport.entreesConfrontees).toBe(3);
+    expect(rapport.avecAssertion).toBe(1);
+    expect(rapport.sansAssertion).toBe(2);
+    expect(rapport.parAssertion).toEqual({
+      "avec-assertion": 1,
+      "en-dette": 0,
+      "sans-assertion": 2,
+    });
+    // 9999 porte UNE entrée vue ; 9998 n'en porte aucune. La dérivation est par
+    // ADR, jamais par entrée : un ADR dont UNE décision est vue n'est pas aveugle.
+    expect(rapport.adrConfrontes).toBe(2);
+    expect(rapport.adrSansAucuneAssertion).toEqual(["9998"]);
+    expect(rapport.anomalies).toEqual([]);
   });
 });

@@ -616,6 +616,29 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     fluxDEntree: deps.flux.entree,
     fluxDeSortie: deps.flux.sortie,
     maintenant: deps.maintenant,
+    // ⚠️ **LES DEUX PORTS DE L'ADR 0037 : LA FENTE EXISTE, ET CE PROCESSUS NE
+    //    L'ARME PAS ENCORE. LE `null` EST ÉCRIT, MOTIVÉ, ET COMPTÉ.**
+    //
+    //    Le défaut que ce champ ferme n'était PAS « le port n'est pas armé » —
+    //    c'était « le type n'offrait aucune fente pour l'armer », si bien que
+    //    l'absence ne se voyait nulle part. Elle se voit maintenant :
+    //    `monterLeService` rend `portsDAmontNonArmes`, et la ligne `[service]`
+    //    ci-dessous la NOMME à chaque démarrage.
+    //
+    //    · `journalDesRefus` — le canal d'amont est DISTINCT d'`ops_audit`
+    //      (ADR 0037 : y verser une ligne non scellée ferait un trou dans la
+    //      chaîne de l'ADR 0002). Choisir ce canal depuis ce fichier
+    //      reviendrait à décider, au montage, où va une trace de sécurité :
+    //      c'est une décision de la racine, elle n'est pas tranchée, et
+    //      l'inventer ici serait la recopier plutôt que la prendre.
+    //    · `delaiDeReprise` — la seule source honnête du délai serait
+    //      `RefusDetaille.retryAfterSecondes`, que `core/chaine/orchestrateur.ts`
+    //      ne porte pas à ce jour. L'autre voie — relire le nombre dans le
+    //      message français du refus — est exactement celle que l'ADR 0037
+    //      interdit : un en-tête de protocole dérivé d'une phrase casse à la
+    //      première reformulation, et il casse en silence.
+    journalDesRefus: null,
+    delaiDeReprise: null,
   };
   const adresseDemandee = deps.env[VARIABLES_DU_SERVICE.adresseHttp];
   const reglagesDuService: ReglagesDuService = {
@@ -642,6 +665,8 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
       `transports NOMMÉS : [${transports.join(", ")}] · ` +
       `transports MONTÉS : [${service.transportsMontes.join(", ") || "aucun"}] · ` +
       `colonnes FRAPPÉES : ${String(service.colonnesFrappees)} · ` +
+      `ports d'amont NON ARMÉS : ` +
+      `[${service.portsDAmontNonArmes.join(", ") || "aucun"}] · ` +
       `${String(service.empechements.length)} empêchement(s)`,
   );
   for (const empechement of service.empechements) dire(`[service] ${empechement}`);

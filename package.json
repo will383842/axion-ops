@@ -23,7 +23,10 @@
     "build": "tsc -p tsconfig.build.json",
     "prisma:generate": "prisma generate",
     "prisma:format": "prisma format",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "db:deploy": "prisma migrate deploy && prisma db execute --schema prisma/schema.prisma --file prisma/sql/0001-ops-audit-append-only.sql",
+    "ops:vault:init": "tsx ops/vault-init.ts",
+    "ops:vault:init:dist": "node dist/ops/vault-init.js"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",

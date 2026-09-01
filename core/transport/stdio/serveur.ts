@@ -66,6 +66,13 @@ import type {
   ValeursServiesAuClient,
 } from "../contrat.js";
 import { valeursServiesAuClient } from "../valeurs-servies.js";
+// ⚠️ **LE FILET DU § 20, ET IL EST NEUF DE CE CÔTÉ-CI — ADR 0044.** Jusqu'au
+//    lot 4, `verifierAucuneFuite` ne vivait que sous `core/transport/http/` et
+//    n'avait qu'UN appelant de production : 6 modules balayés ici, 0 appelant.
+//    Le fil stdio sert pourtant le MÊME noyau (ADR 0025) et transporte le MÊME
+//    jeton de confirmation. Le § 20 dit « jamais », pas « jamais en HTTP ».
+import { valeursSensiblesDeLAppel, verifierAucuneFuite } from "../anti-fuite.js";
+import type { ValeurSensible } from "../anti-fuite.js";
 
 import { creerDecoupeur, serialiser } from "./cadrage.js";
 import type { Cadre, MesuresDuCadrage } from "./cadrage.js";
@@ -192,6 +199,26 @@ export interface MesuresDuServeurStdio {
   /** Clés de `params` refusées par la fermeture. Comptées, jamais nommées au fil. */
   readonly parametresRefuses: number;
   /**
+   * **CE QUE LE FILET ANTI-FUITE A RÉELLEMENT REGARDÉ SUR CE FIL — § 20,
+   * ADR 0044.**
+   *
+   * ⚠️ **UN FILET QUI AURAIT CONFRONTÉ ZÉRO VALEUR SERAIT VERT POUR LA PIRE DES
+   *    RAISONS**, et c'est le mode de défaillance que ce dépôt paie le plus
+   *    cher : une garde verte parce qu'elle ne regarde rien. Le compte des
+   *    valeurs confrontées est donc EXPOSÉ, pas seulement calculé — c'est lui
+   *    qui distingue « aucune fuite » de « aucune confrontation ».
+   */
+  readonly valeursConfrontees: number;
+  /**
+   * Réponses REMPLACÉES parce qu'elles portaient une valeur de la requête.
+   *
+   * ⚠️ Fail-closed, comme sur la porte HTTP : perdre un message d'aide coûte
+   *    moins qu'un jeton de confirmation à usage unique renvoyé dans un corps
+   *    d'erreur (§ 15, § 20). Un nombre non nul ici n'est pas une panne du
+   *    filet — c'est le filet qui a mordu.
+   */
+  readonly reponsesRetenues: number;
+  /**
    * Les étapes du § 11 que les appels de ce processus ont réellement touchées.
    *
    * ⚠️ **CET ACCUMULATEUR EST BORNÉ PAR CONSTRUCTION** — c'est un ensemble sur
@@ -272,9 +299,61 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
   let appelsAuNoyau = 0;
   let reponsesEcrites = 0;
   let parametresRefuses = 0;
+  let valeursConfrontees = 0;
+  let reponsesRetenues = 0;
 
-  const ecrireReponse = (reponse: unknown): void => {
-    ports.ecrire(serialiser(reponse));
+  /**
+   * LES VALEURS SENSIBLES DE L'APPEL EN COURS DE SERVICE — § 20, ADR 0044.
+   *
+   * ⚠️ **REMISE À VIDE À CHAQUE CADRE, ET REMPLIE AVANT TOUT REFUS.** Un cadre
+   *    ne peut porter qu'un message ; la garder d'un cadre au suivant ferait
+   *    confronter la réponse d'un appel aux valeurs d'un autre — c'est-à-dire
+   *    inventer des fuites, puis désarmer le filet pour faire taire l'alerte.
+   */
+  let sensiblesDeLAppel: readonly ValeurSensible[] = [];
+
+  /**
+   * **LE POINT UNIQUE PAR LEQUEL CE TRANSPORT ÉCRIT, ET LE DERNIER FILET.**
+   *
+   * ⚠️ **LA CONFRONTATION PORTE SUR LA TRAME SÉRIALISÉE**, cadrage compris, et
+   *    pas sur l'objet qui l'a produite (ADR 0044, § 2) : confronter l'objet
+   *    laisserait passer une valeur qu'un sérialiseur recopierait dans un champ
+   *    d'erreur — précisément le chemin qu'on garde le moins.
+   *
+   * ⚠️ **ET C'EST BIEN LE CHEMIN D'ERREUR QUI COMPTE.** Le § 20 exige que le
+   *    jeton de confirmation ne paraisse « jamais dans la réponse d'erreur ».
+   *    Poser le filet sur le seul chemin nominal reviendrait à ne pas le poser :
+   *    `refuserLEnveloppe`, le refus de chaîne et le `catch` de `servirToolsCall`
+   *    passent tous par ici.
+   */
+  const ecrireReponse = (id: IdJsonRpc, reponse: unknown): void => {
+    const ligne = serialiser(reponse);
+    const verdict = verifierAucuneFuite(
+      { transport: TRANSPORT_STDIO, texte: ligne },
+      sensiblesDeLAppel,
+    );
+    valeursConfrontees += verdict.valeursConfrontees;
+
+    if (verdict.fuites.length === 0) {
+      ports.ecrire(ligne);
+      reponsesEcrites += 1;
+      return;
+    }
+
+    // FAIL-CLOSED, comme sur la porte HTTP. Les NOMS des valeurs retenues sont
+    // écrits, jamais les valeurs — c'est toute la discipline de `VerdictDeFuite`.
+    reponsesRetenues += 1;
+    ports.ecrire(
+      serialiser(
+        reponseDErreur(
+          id,
+          CODES_ENVELOPPE.interne,
+          "Réponse retenue : elle portait une valeur de la requête " +
+            `(${String(verdict.fuites.length)} valeur(s) : ${verdict.fuites.join(", ")}). ` +
+            "Consulter l'écran Santé de la console.",
+        ),
+      ),
+    );
     reponsesEcrites += 1;
   };
 
@@ -284,7 +363,7 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
     //    client, qui n'attend rien. Le refus est COMPTÉ, et c'est tout ce qu'on
     //    peut faire sans inventer une réponse à une question qui n'a pas été posée.
     if (id === null) return;
-    ecrireReponse(reponseDErreur(id, code, message));
+    ecrireReponse(id, reponseDErreur(id, code, message));
   };
 
   /**
@@ -327,6 +406,7 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
   /** `initialize` — la poignée de main. Aucune étape du § 11 ne s'y applique. */
   const servirInitialize = (requete: RequeteLue): void => {
     ecrireReponse(
+      requete.id,
       reponseDeSucces(requete.id, {
         // ⚠️ AUCUN NUMÉRO DE RÉVISION N'EST ÉCRIT ICI. Le § 11 le dit lui-même :
         //    « la révision courante de la spécification MCP doit être relue » et
@@ -349,10 +429,34 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
     // doit rester égal à `toolsListServis`, et une garde le mesure.
     lecturesDuCatalogue += 1;
     const outils = await ports.catalogue.listerPourCetAppel(identite);
-    ecrireReponse(reponseDeSucces(requete.id, { tools: outils }));
+    ecrireReponse(requete.id, reponseDeSucces(requete.id, { tools: outils }));
   };
 
   const servirToolsCall = async (requete: RequeteLue): Promise<void> => {
+    // ── LES VALEURS SENSIBLES, AVANT TOUT — § 20, ADR 0044 ──────────────────
+    // ⚠️ **ELLES SONT DÉRIVÉES AVANT LE PREMIER REFUS POSSIBLE, ET C'EST LA
+    //    MOITIÉ DE LA DÉCISION.** Le § 20 vise la RÉPONSE D'ERREUR : les dériver
+    //    après la fermeture des paramètres, ou après la lecture de `name`,
+    //    laisserait les refus les plus précoces sortir sans filet — ceux, donc,
+    //    qu'un appelant hostile atteint le plus facilement.
+    //
+    // ⚠️ **C'EST LA MÊME DÉRIVATION QUE LA PORTE HTTP, PAS UNE SECONDE
+    //    ÉCRITURE.** Deux écritures d'un même fait finissent par se contredire,
+    //    et c'est la seconde qui ne suit jamais : c'est exactement ce qui vient
+    //    d'être mesuré ici, où le jeton de confirmation n'était confronté nulle
+    //    part. Ce que ce fil N'A PAS — l'en-tête `Host`, le jeton porteur — ne
+    //    lui manque pas : le § 11 lui retire les quatre étapes « HTTP seul ».
+    const chaineOuNull = (cle: string): string | null => {
+      const valeur = requete.params[cle];
+      return typeof valeur === "string" ? valeur : null;
+    };
+    sensiblesDeLAppel = valeursSensiblesDeLAppel({
+      jetonDeConfirmation: chaineOuNull("confirmation"),
+      idempotencyKey: chaineOuNull("idempotencyKey"),
+      curseur: chaineOuNull("cursor"),
+      input: requete.params["arguments"] ?? {},
+    });
+
     // ── La FERMETURE des paramètres, avant toute autre lecture ───────────────
     const verdict = clesRefuseesDeToolsCall(requete.params);
     if (verdict.refusees.length > 0) {
@@ -438,6 +542,7 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
       //    NORMALE, et un code JSON-RPC négatif ferait réessayer le transport là
       //    où il faut corriger l'appel.
       ecrireReponse(
+        requete.id,
         reponseDeSucces(
           requete.id,
           resultatRefuse(resultat.refus.etape, resultat.refus.code, resultat.refus.message),
@@ -469,6 +574,7 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
     //    l'EMBALLAGE — les champs du `result` stdio —, jamais la décision.
     const servies: ValeursServiesAuClient = valeursServiesAuClient(resultat.terminaison.valeur);
     ecrireReponse(
+      requete.id,
       reponseDeSucces(requete.id, {
         isError: false,
         // Le genre distingue une exécution d'un REJEU (§ 11, étape 13) : loger un
@@ -484,6 +590,12 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
   };
 
   const servir = async (cadre: Cadre): Promise<void> => {
+    // ⚠️ REMISE À VIDE AVANT TOUT SERVICE. Les valeurs sensibles appartiennent à
+    //    UN cadre ; les laisser d'un cadre au suivant ferait confronter la
+    //    réponse d'un appel aux valeurs d'un autre, donc inventer des fuites —
+    //    et le remède qu'on chercherait à cette fausse alerte serait de
+    //    désarmer le filet.
+    sensiblesDeLAppel = [];
     if (cadre.genre === "rebut") {
       // ⚠️ **RIEN N'EST INCRÉMENTÉ ICI, ET C'EST UNE DÉCISION.** Le cadrage compte
       //    déjà cette ligne, PAR CAUSE (`mesures().cadrage.rebuts`). La recompter
@@ -513,7 +625,7 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
         // Servie comme requête, elle n'a rien à rendre — mais le client attend
         // une réponse puisqu'il a mis un `id`. On lui rend un succès vide plutôt
         // que de le laisser en attente.
-        ecrireReponse(reponseDeSucces(enveloppe.id, {}));
+        ecrireReponse(enveloppe.id, reponseDeSucces(enveloppe.id, {}));
         return;
       case "tools/list":
         await servirToolsList(enveloppe);
@@ -546,6 +658,8 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
         appelsAuNoyau,
         reponsesEcrites,
         parametresRefuses,
+        valeursConfrontees,
+        reponsesRetenues,
         etapesExercees: [...etapesExercees].sort((a, b) => a - b),
       };
     },

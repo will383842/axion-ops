@@ -37,12 +37,31 @@
  *    flux d'entrée et de sortie sont REÇUS : ce module ne nomme ni `process`, ni
  *    `stdin`, ni `stdout`, et peut donc être monté deux fois dans une garde.
  *
- * Voir **ADR 0023**, **ADR 0025**, **ADR 0032**, **ADR 0034**.
+ * ⚠️ **ET IL PORTE LES DEUX PORTS D'AMONT DE L'ADR 0037 — LOT 4.** Le lot 3 a
+ *    mesuré que les décisions 2 et 3 de cette ADR, marquée « Statut :
+ *    acceptée », n'avaient pas atterri : `PortsDuService` n'offrait AUCUNE
+ *    fente pour `journalDesRefus` ni pour `delaiDeReprise`. Le mécanisme
+ *    existait des deux côtés — `franchirLAmont` appelle le journal à l'instant
+ *    exact, `transport.ts` pose l'en-tête depuis le port — et la SEULE
+ *    composition de production ne pouvait pas les armer, même en le voulant.
+ *
+ *    Le défaut a survécu à un lot entier sous une entrée de registre `cousue`
+ *    VERTE À BON DROIT : la garde des coutures compte les APPELANTS DE
+ *    PRODUCTION d'un symbole, et `ops/index.ts` importe bien `PortsDuService`.
+ *    **Ajouter un champ à un type déjà importé ne change aucun compte
+ *    d'appelants.** C'est le spécimen que l'ADR 0041 nomme, et les deux gardes
+ *    de `ops/service.spec.ts` § ③ partent donc de `monterLeService`, jamais de
+ *    `creerTransportHttp` : une garde qui appellerait le transport directement
+ *    re-vérifierait ce qui marchait déjà.
+ *
+ * Voir **ADR 0023**, **ADR 0025**, **ADR 0032**, **ADR 0034**, **ADR 0037**.
  */
 
 import type { Transport } from "../core/chaine/orchestrateur.js";
 import type { FabriqueDeNoyau, NoyauUnique } from "../core/transport/contrat.js";
 import type {
+  JournalDesRefusEnAmont,
+  LectureDuDelaiDeReprise,
   PontDIdentite,
   RegistreDesJetons,
   ServeurHttp,
@@ -110,7 +129,75 @@ export interface PortsDuService {
   readonly fluxDEntree: FluxDEntreeStdio | null;
   readonly fluxDeSortie: FluxDeSortieStdio | null;
   readonly maintenant: () => Date;
+  /**
+   * § 11, étapes 1 à 4 — **LE JOURNAL DES REFUS D'AMONT, ET LA FENTE QUI
+   * N'EXISTAIT PAS (ADR 0037, décision 2).**
+   *
+   * 🔴 **CE CHAMP EST LE SPÉCIMEN DU DÉFAUT QUE L'ADR 0041 FERME.** L'ADR 0037
+   *    est marquée « Statut : acceptée » depuis le lot 3, et sa décision 2 n'a
+   *    pas atterri pendant un lot entier. La garde des coutures est restée
+   *    VERTE, et elle avait raison : elle mesure les APPELANTS DE PRODUCTION
+   *    d'un symbole, or `PortsDuService` en avait — `ops/index.ts` l'importe.
+   *    Ajouter un champ à un type déjà importé ne change AUCUN compte
+   *    d'appelants. Mesuré alors : `grep -rn "journalDesRefus" ops` → **0**,
+   *    `grep -rn "delaiDeReprise" ops` → **0**, contre 27 lignes des mêmes
+   *    formes sous `core/transport/`. Le mécanisme existait, la fente non.
+   *
+   * Conséquence en service, tant que la fente manquait : les quatre refus
+   * « HTTP seul » n'écrivaient AUCUNE ligne, si bien qu'une campagne de jetons
+   * contre la porte était invisible — et l'objectif O6 (« 100 % des appels
+   * journalisés, y compris chaque refus ») était faux.
+   *
+   * ⚠️ **LE CANAL EST DISTINCT D'`ops_audit`, ET IL EST NOMMÉ.** Les étapes 1 à
+   *    4 précèdent le noyau par construction ; le journal du § 11 est scellé par
+   *    une clé du coffre (ADR 0002) et s'écrit dans l'orchestrateur. Y verser une
+   *    ligne non scellée fabriquerait un trou dans la chaîne — précisément ce que
+   *    l'ADR 0002 rend détectable, et qu'on rendrait alors normal.
+   *
+   * ⚠️ **`null` EST UN RÉGLAGE, PAS UN OUBLI, ET IL SE COMPTE.** Le champ est
+   *    OBLIGATOIRE — un champ qu'on peut omettre est un champ qu'on omet — et le
+   *    montage NOMME ce qu'il n'a pas armé dans
+   *    {@link ServiceMonte.portsDAmontNonArmes}. Non armé, le transport prend
+   *    `JOURNAL_AMONT_NON_ARME`, qui rend `0`, et la trace d'amont annonce
+   *    « 1 refus prononcé · 0 consigné ».
+   */
+  readonly journalDesRefus: JournalDesRefusEnAmont | null;
+  /**
+   * § 15, étape 12 — **CE QUI DONNE SA VALEUR AU `Retry-After` (ADR 0037,
+   * décision 3).**
+   *
+   * Tant que cette fente manquait, **tout `429` servi par un service RÉELLEMENT
+   * MONTÉ sortait sans `Retry-After`**, contre le § 11 et le § 15 : « non armé »
+   * n'était pas un réglage, c'était une impossibilité.
+   *
+   * ⚠️ **L'EN-TÊTE VIENT D'UN PORT, JAMAIS D'UNE RELECTURE DU MESSAGE.** Le
+   *    délai existe — `core/limits` le calcule — mais l'orchestrateur ne le fait
+   *    franchir la frontière du noyau que dans le TEXTE FRANÇAIS du refus de
+   *    l'étape 12. Un en-tête de protocole dérivé d'une phrase casse à la
+   *    première reformulation, et il casse EN SILENCE.
+   *
+   * 🔴 **BORNE ÉCRITE AVEC LA FENTE.** L'ADR 0037 veut à terme que
+   *    `RefusDetaille` porte `retryAfterSecondes` ; ce champ vit dans
+   *    `core/chaine/orchestrateur.ts` et il n'est pas posé à ce jour. Le port
+   *    reste donc la seule voie honnête, et la composition de production le
+   *    laisse `null` : voir `ops/index.ts`, où le motif est écrit à l'endroit du
+   *    `null` plutôt que caché derrière un défaut.
+   */
+  readonly delaiDeReprise: LectureDuDelaiDeReprise | null;
 }
+
+/**
+ * LES PORTS D'AMONT QUI PEUVENT RESTER NON ARMÉS, **DÉRIVÉS DU TYPE**.
+ *
+ * ⚠️ `satisfies readonly (keyof PortsDuService)[]` N'EST PAS UNE COQUETTERIE :
+ *    c'est ce qui fait ROUGIR LE COMPILATEUR si l'un de ces deux noms est
+ *    renommé ou retiré du type. Une liste de chaînes libres serait une seconde
+ *    source de vérité, et c'est la seconde qui ne suit jamais.
+ */
+const PORTS_DAMONT_ARMABLES = [
+  "journalDesRefus",
+  "delaiDeReprise",
+] as const satisfies readonly (keyof PortsDuService)[];
 
 /**
  * LES RÉGLAGES, ÉTABLIS UNE FOIS AU DÉMARRAGE (ADR 0023).
@@ -178,6 +265,23 @@ export interface ServiceMonte {
    *    une panne.
    */
   readonly empechements: readonly string[];
+  /**
+   * LES PORTS D'AMONT QUE CE MONTAGE N'A PAS ARMÉS, **NOMMÉS** — ADR 0037.
+   *
+   * ⚠️ **CE N'EST NI UN EMPÊCHEMENT NI UNE ANOMALIE, ET C'EST TOUT L'INTÉRÊT.**
+   *    Un socle dont le journal d'amont n'est pas armé SERT quand même ; en
+   *    faire un empêchement l'empêcherait de démarrer pour un canal
+   *    d'observation. Mais un `null` muet est exactement la façon dont ces deux
+   *    ports ont disparu pendant un lot entier. La liste est donc RENDUE et
+   *    NOMMÉE, dérivée des ports reçus, jamais recopiée : un nombre seul se
+   *    contemple, des noms se corrigent.
+   *
+   * Vide = les deux ports sont armés. `["journalDesRefus"]` = les quatre refus
+   * « HTTP seul » n'écriront aucune ligne, et la trace d'amont annoncera
+   * « 1 prononcé · 0 consigné ». `["delaiDeReprise"]` = tout `429` sortira sans
+   * `Retry-After`, et `TraceDeTraitement.retryAfterAbsentSur429` le comptera.
+   */
+  readonly portsDAmontNonArmes: readonly string[];
   ecouter(): Promise<{ readonly adresse: string; readonly port: number } | null>;
   arreter(): Promise<void>;
 }
@@ -300,6 +404,14 @@ export function monterLeService(
           pontDIdentite: ports.pontDIdentite,
           noyau: frapperLeNoyauDe("http"),
           maintenant: ports.maintenant,
+          // ⚠️ **LES DEUX PORTS DE L'ADR 0037, ET C'EST ICI QU'ILS MANQUAIENT.**
+          //    Ils sont FACULTATIFS au transport — il doit pouvoir être monté nu
+          //    dans une garde — et c'est précisément pourquoi leur absence ne
+          //    faisait rougir personne : un champ optionnel omis compile. Ce
+          //    montage-ci les transmet, et `portsDAmontNonArmes` dit lesquels ne
+          //    lui ont pas été remis.
+          ...(ports.journalDesRefus === null ? {} : { journalDesRefus: ports.journalDesRefus }),
+          ...(ports.delaiDeReprise === null ? {} : { delaiDeReprise: ports.delaiDeReprise }),
         },
       );
       serveurHttp = creerServeurHttp(transportHttp, {
@@ -346,6 +458,8 @@ export function monterLeService(
     colonnesFrappees,
     sertLesOutils,
     empechements,
+    // DÉRIVÉ des ports reçus, jamais recopié. Voir `PORTS_DAMONT_ARMABLES`.
+    portsDAmontNonArmes: PORTS_DAMONT_ARMABLES.filter((nom) => ports[nom] === null),
     ecouter: async (): Promise<{ readonly adresse: string; readonly port: number } | null> => {
       if (serveurHttp === null) return null;
       return serveurHttp.ecouter();

@@ -52,7 +52,6 @@ import type { LigneOpsTool, VerrouAdaptateurs } from "../registry/types.js";
 import {
   CODE_REFUS_PROFIL,
   ETAPE_REFUS_PROFIL,
-  PLAFOND_OUTILS_PAR_PROFIL,
   PROFILE_NAMES,
   SCEAU_PROFILS,
   estServi,
@@ -109,7 +108,26 @@ import {
   type EtatCoffre,
 } from "../vault/index.js";
 
-import { ETAPES_REVENDIQUEES } from "../chaine/index.js";
+import {
+  CODES_SYSTEME_AMONT_INJOIGNABLE,
+  CODE_AMONT_INJOIGNABLE,
+  ETAPES_REVENDIQUEES,
+  ETAPE_EXECUTION,
+  estAmontInjoignable,
+  identiteStdio,
+} from "../chaine/index.js";
+import type { IdentiteAppelante, OutilDuCatalogue, ResultatAppel } from "../chaine/index.js";
+// ⚠️ LE HARNAIS stdio EST UN NOYAU RÉEL — `orchestrerAppel` et ses cinq étapes,
+//    le vrai journal chaîné. Il est IMPORTÉ plutôt que refait : une seconde
+//    composition de la chaîne dans ce fichier serait exactement le défaut que
+//    l'ADR 0036 vient de fermer.
+import {
+  HABILITATIONS_DU_HARNAIS,
+  INSTANT_DU_HARNAIS,
+  OUTIL_BONJOUR,
+  PROFIL_DU_HARNAIS,
+  fabriquerHarnaisStdio,
+} from "../transport/stdio/fixtures.js";
 import { SCELLEUR_TEMOIN } from "../audit/fixtures.js";
 import { AUCUN_CHAMP_DE_GOUVERNANCE } from "../adapter-kit/types.js";
 // ADR 0014 — la session de témoin vient de la fabrique NOMMÉE de `core/identite/` :
@@ -481,10 +499,15 @@ async function executerAppel(
       if (!estServi(definition, appel.profilActif)) {
         return refus(ETAPE_REFUS_PROFIL, CODE_REFUS_PROFIL);
       }
-      // § 14 — le plafond se refuse ICI, pas seulement en CI.
-      if (outilsServis(ctx.catalogue, appel.profilActif).length > PLAFOND_OUTILS_PAR_PROFIL) {
-        return refus(ETAPE_REFUS_PROFIL, CODE_REFUS_PROFIL);
-      }
+      // ⚠️ LA RÉIMPLÉMENTATION DU PLAFOND DU § 14 A ÉTÉ RETIRÉE D'ICI — ADR 0036,
+      //    décision 4, et ADR 0043 pour l'ordre du geste. Elle refusait au-delà
+      //    de quarante outils servis, dans ce harnais, sous le commentaire « le
+      //    plafond se refuse ICI, pas seulement en CI ». C'était le SOSIE de la
+      //    règle : le seul endroit du dépôt où le plafond mordait était ce
+      //    test-ci, si bien qu'il restait vert quoi qu'il arrive à l'étape 7 de
+      //    la production. Le cas éprouvé n'a pas disparu — il est monté sur
+      //    l'orchestrateur RÉEL, plus bas, section « § 14 — LE PLAFOND SE REFUSE
+      //    À L'ÉTAPE 7 », avec son témoin inverse.
 
       // ── ÉTAPES 8 → 9 → 10 → 11 → 12 → 13, DANS L'ORDRE DU § 11. ─────────
       //
@@ -1341,5 +1364,313 @@ describe("§ 12 règle 2 et § 20 — l'`argHash` du journal et celui du jeton",
     expect(argHashDuJournal).toBe(argHashDuJeton);
     // Et c'est bien l'empreinte VALIDÉE qui a été inscrite, pas la brute.
     expect(argHashDuJournal).toBe(empreinteValidee);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  § 14 — LE PLAFOND SE REFUSE À L'ÉTAPE 7, SUR L'ORCHESTRATEUR RÉEL
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * **CE BLOC REMPLACE UNE RÉIMPLÉMENTATION — ADR 0036, décision 4.**
+ *
+ * Jusqu'au lot 4, le seul endroit du dépôt où le plafond de quarante outils
+ * SERVIS mordait était le harnais de ce fichier, quelques centaines de lignes
+ * plus haut. Le § 14 écrit pourtant, mot pour mot, « le plafond se refuse à
+ * l'étape 7, PAS SEULEMENT EN CI » — et `mesurerBudgetProfil` n'avait ZÉRO
+ * appelant de production. Un test qui réimplémente la règle éprouve son propre
+ * sosie : il reste vert quoi qu'il arrive à la production.
+ *
+ * Ce qui suit monte un noyau RÉEL — `orchestrerAppel`, ses cinq étapes, son
+ * journal chaîné — et lui soumet un profil au-delà du plafond.
+ *
+ * ⚠️ **LE TÉMOIN INVERSE EST OBLIGATOIRE, ET IL EST ICI.** Une garde qui ne sait
+ *    dire que NON ne prouve rien : un socle qui refuserait tout la satisferait.
+ *    Le second cas sert exactement le plafond, moins un dépassement.
+ *
+ * ⚠️ **LE PLAFOND N'EST PAS NOMMÉ, IL EST DÉRIVÉ.** Il est lu dans un verdict de
+ *    `core/profiles/budget.ts` — le seul module qui écrit le nombre. Le recopier
+ *    ici, fût-ce sous son nom de constante, réintroduirait la seconde source de
+ *    vérité qu'on vient de retirer, et la garde mesurerait de nouveau sa propre
+ *    recopie.
+ */
+describe("§ 14 — le plafond de 40 outils SERVIS se refuse à l'étape 7 (ADR 0036)", () => {
+  /** Le plafond du § 14, LU dans le verdict de son propriétaire. */
+  const PLAFOND_SERVIS = mesurerBudgetProfil(PROFIL_DU_HARNAIS, []).plafondOutils;
+
+  const APPEL_NU = {
+    input: {},
+    idempotencyKey: null,
+    curseur: null,
+    jetonDeConfirmation: null,
+  } as const;
+
+  /** `n` outils tous SERVIS dans le profil du harnais, tous distincts. */
+  function catalogueDe(n: number): readonly OutilDuCatalogue[] {
+    return Array.from({ length: n }, (_valeur, rang) => ({
+      ...OUTIL_BONJOUR,
+      name: `plafond.outil${String(rang).padStart(3, "0")}`,
+    }));
+  }
+
+  /** L'identité stdio du harnais — aucun secret, aucun jeton. */
+  function identiteDuTemoin(): IdentiteAppelante {
+    return identiteStdio({
+      requestId: "req-plafond-temoin",
+      deadline: new Date(INSTANT_DU_HARNAIS.getTime() + 60_000),
+      habilitations: HABILITATIONS_DU_HARNAIS,
+    });
+  }
+
+  async function appeler(
+    outils: readonly OutilDuCatalogue[],
+    inventaire?: readonly OutilDuCatalogue[],
+  ): Promise<{
+    readonly resultat: ResultatAppel;
+    readonly lignes: readonly LigneAudit[];
+    readonly servis: number;
+  }> {
+    const harnais = fabriquerHarnaisStdio(
+      inventaire === undefined ? { outils } : { outils, inventaire },
+    );
+    const premier = outils[0];
+    expect(premier, "témoin : le catalogue fabriqué n'est pas vide").toBeDefined();
+    const resultat = await harnais.noyau(identiteDuTemoin(), {
+      ...APPEL_NU,
+      nomComplet: premier?.name ?? "",
+    });
+    return {
+      resultat,
+      lignes: harnais.lignes(),
+      servis: outilsServis(inventaire ?? outils, PROFIL_DU_HARNAIS).length,
+    };
+  }
+
+  it("REFUSE au-delà du plafond, et la ligne porte l'étape 7 dans `stepDenied`", async () => {
+    const outils = catalogueDe(PLAFOND_SERVIS + 1);
+    const { resultat, lignes, servis } = await appeler(outils);
+    const ligne = lignes[0];
+
+    console.log(
+      `[plafond · au-delà] ${String(outils.length)} définition(s) soumises · ` +
+        `${String(servis)} servie(s) dans « ${PROFIL_DU_HARNAIS} » pour un plafond DÉRIVÉ de ` +
+        `${String(PLAFOND_SERVIS)} · ${String(lignes.length)} ligne(s) d'ops_audit · ` +
+        `decision=${String(ligne?.decision)} stepDenied=${String(ligne?.stepDenied)} · ` +
+        `code=${String(resultat.refus?.code)}`,
+    );
+
+    // Plancher-témoin : la garde a bien mesuré un dépassement d'UN outil, et
+    // l'invariant de sortie du § 11 a bien écrit sa ligne.
+    expect(servis).toBe(PLAFOND_SERVIS + 1);
+    expect(lignes).toHaveLength(1);
+
+    // ⚠️ CE QUI EST ÉPROUVÉ : la PRODUCTION refuse. Rien ici ne recompte les
+    //    outils — c'est l'orchestrateur qui a prononcé, et la ligne qui le dit.
+    expect(ligne?.decision).toBe("refusé");
+    expect(ligne?.stepDenied).toBe(ETAPE_REFUS_PROFIL);
+    expect(resultat.refus?.etape).toBe(ETAPE_REFUS_PROFIL);
+    expect(resultat.refus?.code).toBe(CODE_REFUS_PROFIL);
+
+    // § 15 — le message DIT ce qu'il faut faire ensuite, et il distingue le
+    // dépassement de l'appartenance : l'outil EST au profil, c'est le profil
+    // qui déborde. Sans cette phrase, `tool_not_in_profile` mentirait seul.
+    expect(resultat.refus?.message).toContain("c'est le PROFIL qui déborde");
+    expect(resultat.refus?.message).toContain(String(PLAFOND_SERVIS + 1));
+    expect(resultat.refus?.message).toContain(String(PLAFOND_SERVIS));
+  });
+
+  it("TÉMOIN INVERSE — le plafond EXACT passe, et l'appel est servi", async () => {
+    const outils = catalogueDe(PLAFOND_SERVIS);
+    const { resultat, lignes, servis } = await appeler(outils);
+    const ligne = lignes[0];
+
+    console.log(
+      `[plafond · témoin inverse] ${String(outils.length)} définition(s) soumises · ` +
+        `${String(servis)} servie(s) pour un plafond de ${String(PLAFOND_SERVIS)} · ` +
+        `decision=${String(ligne?.decision)} stepDenied=${String(ligne?.stepDenied)}`,
+    );
+
+    // Sans ce cas, un socle qui refuserait TOUT satisferait la garde précédente.
+    expect(servis).toBe(PLAFOND_SERVIS);
+    expect(lignes).toHaveLength(1);
+    expect(ligne?.decision).toBe("autorisé");
+    expect(ligne?.stepDenied).toBeNull();
+    expect(resultat.refus).toBeNull();
+  });
+
+  it("REFUSE une mesure AVEUGLE, et le message nomme la CONTRADICTION", async () => {
+    // L'étape 6 relit l'outil dans `ops_tool` ; le pilotage rend un inventaire
+    // VIDE. Les deux se contredisent. Laisser passer ferait mesurer le plafond
+    // sur zéro outil — il ne pourrait plus jamais mordre.
+    const servi = await appeler([OUTIL_BONJOUR]);
+    const aveugle = await appeler([OUTIL_BONJOUR], []);
+
+    console.log(
+      `[plafond · mesure aveugle] 2 appel(s) mesuré(s) sur le MÊME catalogue · ` +
+        `inventaire servi (${String(servi.servis)} outil) → ` +
+        `code=${String(servi.resultat.refus?.code ?? "aucun refus")} · ` +
+        `inventaire VIDE (${String(aveugle.servis)} outil) → ` +
+        `code=${String(aveugle.resultat.refus?.code)} ` +
+        `étape=${String(aveugle.resultat.refus?.etape)}`,
+    );
+
+    // Témoin : avec l'inventaire servi, le MÊME appel passe. Sans lui, le refus
+    // ci-dessous pourrait venir de n'importe quelle autre étape.
+    expect(servi.resultat.refus).toBeNull();
+
+    expect(aveugle.resultat.refus?.etape).toBe(ETAPE_REFUS_PROFIL);
+    expect(aveugle.resultat.refus?.message).toContain("Contradiction interne au socle");
+    // Le message NOMME la contradiction, pas le plafond : parler de plafond
+    // enverrait retirer des outils d'un profil qui n'en sert aucun.
+    expect(aveugle.resultat.refus?.message).not.toContain("déborde le budget");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  § 15 — `upstream_unavailable` : LE CODE QUI N'AVAIT AUCUN ÉMETTEUR
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * **UN CODE QUE RIEN N'ÉMET EST UNE MÉTRIQUE QUI RESTERA VIDE — ET UNE MÉTRIQUE
+ * VIDE RESSEMBLE À UNE MÉTRIQUE SANS INCIDENT.**
+ *
+ * `upstream_unavailable` est l'un des treize codes du tableau du § 15 depuis le
+ * premier jour, et jusqu'au lot 4 **aucun module de production ne le rendait**.
+ * Toute panne de joignabilité d'un tiers sortait donc en
+ * `decision: "interrompu"` — « l'aveu qu'aucune décision n'a été atteinte » —
+ * c'est-à-dire rangée parmi les défauts du socle dans le comptage du § 24.
+ *
+ * ⚠️ **CE QUI EST ÉPROUVÉ EST LE CHEMIN COMPLET**, depuis une `Error` levée PAR
+ *    L'ADAPTATEUR jusqu'à la ligne d'`ops_audit` — pas la fonction de
+ *    reconnaissance seule. Éprouver `estAmontInjoignable()` en isolation aurait
+ *    laissé le branchement lui-même sans garde, ce qui est le défaut exact que
+ *    ce lot ferme.
+ */
+describe("§ 15 — l'amont injoignable rend `upstream_unavailable` (étape 14)", () => {
+  const APPEL_DE_PANNE = {
+    nomComplet: OUTIL_BONJOUR.name,
+    input: {},
+    idempotencyKey: null,
+    curseur: null,
+    jetonDeConfirmation: null,
+  } as const;
+
+  function identiteDePanne(): IdentiteAppelante {
+    return identiteStdio({
+      requestId: "req-amont-temoin",
+      deadline: new Date(INSTANT_DU_HARNAIS.getTime() + 60_000),
+      habilitations: HABILITATIONS_DU_HARNAIS,
+    });
+  }
+
+  /** Une panne de transport telle qu'un client HTTP la remonte : enveloppée. */
+  function panneEnveloppee(codeSysteme: string): Error {
+    const dessous = Object.assign(new Error("panne de témoin — aucun hôte réel"), {
+      code: codeSysteme,
+    });
+    return new Error("fetch failed", { cause: dessous });
+  }
+
+  it("un adaptateur injoignable est REFUSÉ à l'étape 14, et le code est celui du § 15", async () => {
+    const harnais = fabriquerHarnaisStdio({
+      outils: [OUTIL_BONJOUR],
+      panneDeLAdaptateur: panneEnveloppee("ECONNREFUSED"),
+    });
+
+    const resultat = await harnais.noyau(identiteDePanne(), APPEL_DE_PANNE);
+    const lignes = harnais.lignes();
+    const ligne = lignes[0];
+
+    console.log(
+      `[amont] 1 appel traversé · ${String(CODES_SYSTEME_AMONT_INJOIGNABLE.length)} code(s) ` +
+        `système reconnus · ${String(lignes.length)} ligne(s) d'ops_audit · ` +
+        `decision=${String(ligne?.decision)} outcome=${String(ligne?.outcome)} ` +
+        `stepDenied=${String(ligne?.stepDenied)} · code=${String(resultat.refus?.code)}`,
+    );
+
+    // Plancher-témoin : la liste des codes reconnus n'est pas vide, et
+    // l'invariant de sortie du § 11 a bien écrit sa ligne.
+    expect(CODES_SYSTEME_AMONT_INJOIGNABLE.length).toBeGreaterThanOrEqual(10);
+    expect(lignes).toHaveLength(1);
+
+    expect(resultat.refus?.code).toBe(CODE_AMONT_INJOIGNABLE);
+    expect(resultat.refus?.etape).toBe(ETAPE_EXECUTION.numero);
+    expect(ligne?.stepDenied).toBe(ETAPE_EXECUTION.numero);
+    // `core/audit/vocabulaire.ts` : « `erreur` — incompactable, amont
+    // injoignable, ou exception ». Le mot existait avant l'émetteur.
+    expect(ligne?.outcome).toBe("erreur");
+
+    // § 15 — le message dit LEQUEL, et s'il est transitoire.
+    expect(resultat.refus?.message).toContain(OUTIL_BONJOUR.adapterId);
+    expect(resultat.refus?.message).toContain("TRANSITOIRE");
+    expect(resultat.refus?.message).toContain("ECONNREFUSED");
+    // § 15 — et il ne rend NI le message de l'erreur, NI de trace de pile.
+    expect(resultat.refus?.message).not.toContain("fetch failed");
+    expect(resultat.refus?.message).not.toContain("panne de témoin");
+  });
+
+  it("TÉMOIN INVERSE — une panne QUELCONQUE reste une exception, jamais ce code", async () => {
+    // Sans ce cas, un socle qui rendrait `upstream_unavailable` sur TOUTE
+    // exception satisferait la garde précédente — et le code du § 15 mentirait
+    // dans l'autre sens, en accusant l'amont d'un défaut du socle.
+    const harnais = fabriquerHarnaisStdio({
+      outils: [OUTIL_BONJOUR],
+      panneDeLAdaptateur: new Error("défaut de l'adaptateur — aucun code système"),
+    });
+
+    let leve: unknown = null;
+    try {
+      await harnais.noyau(identiteDePanne(), APPEL_DE_PANNE);
+    } catch (erreur: unknown) {
+      leve = erreur;
+    }
+    const ligne = harnais.lignes()[0];
+
+    console.log(
+      `[amont · témoin inverse] a levé=${String(leve !== null)} · ` +
+        `decision=${String(ligne?.decision)} outcome=${String(ligne?.outcome)} ` +
+        `stepDenied=${String(ligne?.stepDenied)}`,
+    );
+
+    expect(leve).not.toBeNull();
+    expect(ligne?.decision).toBe("interrompu");
+    expect(ligne?.stepDenied).toBeNull();
+  });
+
+  it("la reconnaissance suit la chaîne `cause`, et elle ANNONCE ce qu'elle a vu", () => {
+    // Un client HTTP moderne enveloppe presque toujours : regarder le seul
+    // premier niveau ne reconnaîtrait JAMAIS rien, et le code du § 15 serait
+    // branché en apparence seulement.
+    const nu = estAmontInjoignable(Object.assign(new Error("nu"), { code: "ETIMEDOUT" }));
+    const enveloppe = estAmontInjoignable(panneEnveloppee("ENOTFOUND"));
+    const etranger = estAmontInjoignable(
+      Object.assign(new Error("étranger"), { code: "ERR_ASSERTION" }),
+    );
+
+    // Une chaîne CYCLIQUE ne doit pas pendre : elle pendrait dans un `catch`,
+    // à l'endroit exact où le socle doit encore écrire sa ligne de journal.
+    const boucle: { code: string; cause?: unknown } = { code: "PAS_UN_CODE_RESEAU" };
+    boucle.cause = boucle;
+    const cyclique = estAmontInjoignable(boucle);
+
+    console.log(
+      `[amont · reconnaissance] 4 erreur(s) confrontée(s) à ` +
+        `${String(CODES_SYSTEME_AMONT_INJOIGNABLE.length)} code(s) système · ` +
+        `nu=${String(nu.injoignable)}/${String(nu.causesExaminees)} · ` +
+        `enveloppée=${String(enveloppe.injoignable)}/${String(enveloppe.causesExaminees)} · ` +
+        `étrangère=${String(etranger.injoignable)}/${String(etranger.causesExaminees)} · ` +
+        `cyclique=${String(cyclique.injoignable)}/${String(cyclique.causesExaminees)}`,
+    );
+
+    expect(nu.injoignable).toBe(true);
+    expect(enveloppe.injoignable).toBe(true);
+    // Elle a bien dû DESCENDRE d'un maillon : à un seul niveau examiné, la
+    // reconnaissance ci-dessus serait une coïncidence.
+    expect(enveloppe.causesExaminees).toBe(2);
+    expect(enveloppe.codeSysteme).toBe("ENOTFOUND");
+    // Un code système qui n'est pas une panne de JOIGNABILITÉ n'en est pas une.
+    expect(etranger.injoignable).toBe(false);
+    expect(cyclique.injoignable).toBe(false);
+    expect(cyclique.causesExaminees).toBe(1);
   });
 });

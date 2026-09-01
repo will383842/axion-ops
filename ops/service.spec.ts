@@ -36,18 +36,26 @@ import {
   revendicationsDeTemoin,
   verificateurDeTemoin,
 } from "../core/transport/http/fixtures.js";
+import { CHEMIN_MCP, METHODE_MCP } from "../core/transport/http/index.js";
+import type {
+  JournalDesRefusEnAmont,
+  LectureDuDelaiDeReprise,
+  RefusEnAmont,
+  RequeteHttp,
+} from "../core/transport/http/index.js";
 import {
   HABILITATIONS_DU_HARNAIS,
   INSTANT_DU_HARNAIS,
   OUTIL_BONJOUR,
   fabriquerHarnaisStdio,
 } from "../core/transport/stdio/fixtures.js";
+import type { HarnaisStdio } from "../core/transport/stdio/fixtures.js";
 import type { DescripteurOutilServi } from "../core/transport/stdio/index.js";
 import type { EtatCoffre } from "../core/vault/index.js";
 import { PONT_AU_PLUS_FAIBLE, catalogueDesAdaptateursAdmis } from "./index.js";
 import type { DependancesDuSocle, Planificateur } from "./main.js";
 import { SONDES_NON_POURVUES, demarrerLeSocle, reglagesDepuisLEnvironnement } from "./main.js";
-import type { PortsDuService } from "./service.js";
+import type { PortsDuService, ReglagesDuService } from "./service.js";
 import { ErreurDeMontageDuService, monterLeService } from "./service.js";
 
 const PLANIFICATEUR_INERTE: Planificateur = () => () => {
@@ -171,7 +179,12 @@ function portsAvecNoyauReel(
   entree: FluxDEntreeFabrique,
   sortie: FluxDeSortieFabrique,
   outilsServis: readonly DescripteurOutilServi[],
-): { readonly ports: PortsDuService; readonly lectures: () => number } {
+): {
+  readonly ports: PortsDuService;
+  readonly lectures: () => number;
+  /** Le harnais LUI-MÊME : `quota.refuseTout` est le levier de l'étape 12. */
+  readonly harnais: HarnaisStdio;
+} {
   const harnais = fabriquerHarnaisStdio();
   const catalogue = catalogueDesAdaptateursAdmis(outilsServis);
   return {
@@ -192,8 +205,14 @@ function portsAvecNoyauReel(
       fluxDEntree: entree,
       fluxDeSortie: sortie,
       maintenant: () => INSTANT_DU_HARNAIS,
+      // ADR 0037, décision 2 — LES DEUX FENTES. Le décor les laisse NON ARMÉES
+      // par défaut : le § 32 ① et le § 23 ② mesurent le montage, pas l'amont.
+      // Les gardes du § ③ les arment, et c'est là que la couture se voit.
+      journalDesRefus: null,
+      delaiDeReprise: null,
     },
     lectures: (): number => catalogue.lectures(),
+    harnais,
   };
 }
 
@@ -547,6 +566,259 @@ describe("§ 23 · ② le montage refuse — et il NOMME ce qui l'en empêche", 
     //    témoin mesure le MONTAGE, pas l'écoute ; fermer un serveur qui n'a
     //    jamais ouvert de socket lève « Server is not running », et ferait
     //    rougir la garde pour une raison qui n'a rien à voir avec la règle.
+    await socle.arreter();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ③ ADR 0037 — LES DEUX PORTS D'AMONT, DEPUIS UN SERVICE RÉELLEMENT MONTÉ
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ═══ POURQUOI CES DEUX GARDES PARTENT DE `monterLeService`, ET DE NULLE PART
+ *     AILLEURS ═══
+ *
+ * `core/transport/http/amont.spec.ts` éprouve déjà le journal d'amont, et
+ * `reponse.spec.ts` la valeur du `Retry-After` : les deux mécanismes MARCHAIENT.
+ * Ce qui manquait n'était pas le mécanisme, c'était **la fente** — l'ADR 0037,
+ * marquée « Statut : acceptée », posait deux ports que `PortsDuService`
+ * n'offrait pas, si bien que la SEULE composition de production ne pouvait pas
+ * les armer, même en le voulant.
+ *
+ * Une garde qui appellerait `creerTransportHttp` en lui passant les deux ports
+ * à la main re-vérifierait donc ce qui marchait déjà, **et laisserait passer
+ * exactement ce défaut-ci** : c'est ainsi qu'il a survécu à un lot entier, sous
+ * une entrée de registre `cousue` verte à bon droit — `PortsDuService` A des
+ * appelants de production, et la décision n'avait pas atterri.
+ *
+ * Ces gardes partent donc du MONTAGE, et la première va jusqu'à la socket.
+ *
+ * ⚠️ **L'ÉCOUTE RESTE BORNÉE À `127.0.0.1`, ET AUCUN APPEL NE SORT** — même
+ *    règle qu'au § 32 ① ci-dessus.
+ */
+
+/** Le délai que le lecteur ARMÉ rend. Entier, jamais zéro (RFC 9110, § 10.2.3). */
+const SECONDES_DE_REPRISE = 37;
+
+/** Ce qu'un journal d'amont ARMÉ retient, et COMBIEN de lignes il dit avoir écrites. */
+function journalQuiEcrit(lignesParRefus: number): {
+  readonly port: JournalDesRefusEnAmont;
+  readonly lignes: RefusEnAmont[];
+} {
+  const lignes: RefusEnAmont[] = [];
+  return {
+    port: {
+      consigner(refus: RefusEnAmont): Promise<number> {
+        lignes.push(refus);
+        return Promise.resolve(lignesParRefus);
+      },
+    },
+    lignes,
+  };
+}
+
+/**
+ * UNE REQUÊTE QUI SE FERA REFUSER À L'ÉTAPE 2 — aucune autorisation présentée.
+ *
+ * ⚠️ L'étape 1 passe (l'hôte est celui de la liste blanche), l'étape 2 refuse :
+ *    c'est le refus d'amont le plus simple à obtenir sans toucher au `Host`,
+ *    en-tête que la couche `fetch` ne laisse pas toujours choisir.
+ */
+function requeteSansJeton(hote: string): RequeteHttp {
+  return {
+    methode: METHODE_MCP,
+    chemin: CHEMIN_MCP,
+    entetes: { host: hote },
+    lireLeCorps: () => Promise.resolve("{}"),
+  };
+}
+
+/** Les réglages d'un service HTTP seul, sur un port déjà obtenu. */
+function reglagesHttpSeul(hote: string, port: number): ReglagesDuService {
+  return {
+    transports: ["http"],
+    hotesAdmis: [hote],
+    audienceAttendue: AUDIENCE_DE_TEMOIN,
+    budgetMs: 30_000,
+    octetsMaxDuCorps: 1_048_576,
+    portHttp: port,
+    adresseHttp: "127.0.0.1",
+  };
+}
+
+describe("§ 11 · ③ les deux ports de l'ADR 0037, armés DEPUIS LE MONTAGE", () => {
+  it("un refus d'amont servi par un service RÉELLEMENT MONTÉ écrit une ligne, et refusConsignes l'ADDITIONNE", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports } = portsAvecNoyauReel(entree, sortie, []);
+
+    // ── ① LE PORT ARMÉ, ET LE FIL RÉEL ──────────────────────────────────────
+    const journal = journalQuiEcrit(1);
+    const portsArmes: PortsDuService = { ...ports, journalDesRefus: journal.port };
+    const service = monterLeService(socle, portsArmes, reglagesHttpSeul(hote, port));
+    await service.ecouter();
+
+    const reponse = await fetch(`http://${hote}/api/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "garde-amont", method: "tools/list" }),
+    });
+    await reponse.text();
+    const lignesApresLeFil = journal.lignes.length;
+
+    // ── ② LE MÊME TRANSPORT MONTÉ, POUR LIRE LA TRACE ───────────────────────
+    // La socket ne rend pas `TraceAmont` : `serveur.ts` écrit la réponse et jette
+    // la trace (écart de l'ADR 0037, § 5, hors de ce lot). Le compte se lit donc
+    // sur l'OBJET SORTI DU MONTAGE — c'est le même transport, la même couture.
+    const arme = await service.transportHttp?.traiter(requeteSansJeton(hote));
+
+    // ── ③ LE MÊME MONTAGE, PORT NON ARMÉ — LE TÉMOIN INVERSE ────────────────
+    const nonArme = await monterLeService(
+      socle,
+      { ...ports, journalDesRefus: null },
+      reglagesHttpSeul(hote, port),
+    ).transportHttp?.traiter(requeteSansJeton(hote));
+
+    // ── ④ UN PORT QUI ÉCRIT DEUX LIGNES — « ADDITIONNE », pas « incrémente » ─
+    const journalDouble = journalQuiEcrit(2);
+    const double = await monterLeService(
+      socle,
+      { ...ports, journalDesRefus: journalDouble.port },
+      reglagesHttpSeul(hote, port),
+    ).transportHttp?.traiter(requeteSansJeton(hote));
+
+    console.info(
+      `[③ · journalDesRefus] statut sur le fil : ${String(reponse.status)} · ` +
+        `${String(lignesApresLeFil)} ligne(s) écrite(s) par le fil · ` +
+        `${String(journal.lignes.length)} au total, étape(s) ` +
+        `[${journal.lignes.map((ligne) => String(ligne.etape)).join(", ")}], motif(s) ` +
+        `[${journal.lignes.map((ligne) => ligne.motif).join(", ")}] · ` +
+        `ARMÉ : ${String(arme?.trace.amont?.refusPrononces ?? -1)} prononcé(s) · ` +
+        `${String(arme?.trace.amont?.refusConsignes ?? -1)} consigné(s) · ` +
+        `NON ARMÉ : ${String(nonArme?.trace.amont?.refusPrononces ?? -1)} prononcé(s) · ` +
+        `${String(nonArme?.trace.amont?.refusConsignes ?? -1)} consigné(s) · ` +
+        `PORT À 2 LIGNES : ${String(double?.trace.amont?.refusConsignes ?? -1)} consigné(s)`,
+    );
+
+    // Le fil a bien porté un refus d'amont, et le port l'a VU.
+    expect(reponse.status).toBe(401);
+    expect(lignesApresLeFil).toBe(1);
+    expect(journal.lignes[0]?.etape).toBe(2);
+    expect(journal.lignes[0]?.motif).toBe("jeton absent");
+
+    // Le compte du transport monté ADDITIONNE ce que le port a écrit.
+    expect(arme?.trace.amont?.refusPrononces).toBe(1);
+    expect(arme?.trace.amont?.refusConsignes).toBe(1);
+    expect(journal.lignes.length).toBe(2);
+
+    // TÉMOIN INVERSE, OBLIGATOIRE : sans lui, un montage qui compterait « 1 »
+    // quoi qu'il arrive satisferait la garde ci-dessus. Le socle NON ARMÉ doit
+    // annoncer « 1 prononcé · 0 consigné », mot pour mot ce que la prose de
+    // `JOURNAL_AMONT_NON_ARME` promet.
+    expect(nonArme?.trace.amont?.refusPrononces).toBe(1);
+    expect(nonArme?.trace.amont?.refusConsignes).toBe(0);
+
+    // Et « ADDITIONNE » se distingue d'« incrémente » : deux lignes écrites,
+    // deux lignes comptées. C'est la mutation `refusConsignes += 1` qui meurt ici.
+    expect(double?.trace.amont?.refusConsignes).toBe(2);
+    expect(journalDouble.lignes.length).toBe(1);
+
+    // Le montage NOMME ce qu'il n'a pas armé — un zéro qui se lit.
+    console.info(
+      `[③ · journalDesRefus] ports d'amont NON ARMÉS au montage : ` +
+        `[${service.portsDAmontNonArmes.join(", ") || "aucun"}]`,
+    );
+    expect(service.portsDAmontNonArmes).toEqual(["delaiDeReprise"]);
+
+    await service.arreter();
+    await socle.arreter();
+  });
+
+  it("un 429 servi par un service RÉELLEMENT MONTÉ porte Retry-After, et le non-armé ne le porte pas", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports, harnais } = portsAvecNoyauReel(entree, sortie, []);
+    // Le levier de l'étape 12 : le dépôt de quota du harnais refuse tout.
+    harnais.quota.refuseTout = true;
+
+    const etapesLues: number[] = [];
+    const delaiDeReprise: LectureDuDelaiDeReprise = (etape) => {
+      etapesLues.push(etape);
+      return SECONDES_DE_REPRISE;
+    };
+    const portsArmes: PortsDuService = { ...ports, delaiDeReprise };
+    const service = monterLeService(socle, portsArmes, reglagesHttpSeul(hote, port));
+    await service.ecouter();
+
+    const appel = JSON.stringify({
+      jsonrpc: "2.0",
+      id: "garde-429",
+      method: "tools/call",
+      params: { name: OUTIL_BONJOUR.name, arguments: { ton: "neutre" } },
+    });
+    const reponse = await fetch(`http://${hote}/api/mcp`, {
+      method: "POST",
+      headers: {
+        host: hote,
+        "content-type": "application/json",
+        authorization: `Bearer ${PORTEUR_DE_TEMOIN}`,
+      },
+      body: appel,
+    });
+    await reponse.text();
+
+    // TÉMOIN INVERSE : le MÊME montage, la MÊME requête, le port NON DÉCLARÉ.
+    const nu = portsAvecNoyauReel(entree, sortie, []);
+    nu.harnais.quota.refuseTout = true;
+    const nonArme = await monterLeService(
+      socle,
+      { ...nu.ports, delaiDeReprise: null },
+      reglagesHttpSeul(hote, port),
+    ).transportHttp?.traiter({
+      methode: METHODE_MCP,
+      chemin: CHEMIN_MCP,
+      entetes: { host: hote, authorization: `Bearer ${PORTEUR_DE_TEMOIN}` },
+      lireLeCorps: () => Promise.resolve(appel),
+    });
+
+    console.info(
+      `[③ · delaiDeReprise] statut sur le fil : ${String(reponse.status)} · ` +
+        `Retry-After servi : « ${reponse.headers.get("retry-after") ?? "AUCUN"} » · ` +
+        `${String(etapesLues.length)} lecture(s) du port, étape(s) ` +
+        `[${etapesLues.map((etape) => String(etape)).join(", ") || "aucune"}] · ` +
+        `TÉMOIN NON ARMÉ : statut ${String(nonArme?.reponse.statut ?? -1)} · ` +
+        `Retry-After « ${nonArme?.reponse.entetes["retry-after"] ?? "AUCUN"} » · ` +
+        `écart compté : ${String(nonArme?.trace.retryAfterAbsentSur429 ?? false)}`,
+    );
+
+    // § 15 — le refus DIT quand réessayer, et il le dit depuis le port armé au
+    // MONTAGE, jamais depuis une relecture du message français du refus.
+    expect(reponse.status).toBe(429);
+    expect(reponse.headers.get("retry-after")).toBe(String(SECONDES_DE_REPRISE));
+    // Le port a été lu UNE fois, et sur l'étape du § 11 qui porte le 429.
+    expect(etapesLues).toEqual([12]);
+
+    // TÉMOIN INVERSE : sans lui, un transport qui poserait l'en-tête en dur
+    // satisferait la garde ci-dessus. Non déclaré, l'en-tête est ABSENT, et
+    // l'écart se COMPTE plutôt que de se taire.
+    expect(nonArme?.reponse.statut).toBe(429);
+    expect(nonArme?.reponse.entetes["retry-after"]).toBeUndefined();
+    expect(nonArme?.trace.retryAfterAbsentSur429).toBe(true);
+
+    // Le montage NOMME ce qu'il n'a pas armé.
+    console.info(
+      `[③ · delaiDeReprise] ports d'amont NON ARMÉS au montage : ` +
+        `[${service.portsDAmontNonArmes.join(", ") || "aucun"}]`,
+    );
+    expect(service.portsDAmontNonArmes).toEqual(["journalDesRefus"]);
+
+    await service.arreter();
     await socle.arreter();
   });
 });

@@ -53,6 +53,8 @@
 
 import { APPEL_STEPS } from "../../types.js";
 import type { AppelStep } from "../../types.js";
+import type { Transport } from "../../chaine/orchestrateur.js";
+import type { SortieServie } from "../anti-fuite.js";
 import type { DefiDAuthentification } from "./amont.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -85,6 +87,14 @@ export const STATUT_ERREUR_INTERNE = 500;
 
 /** Le domaine d'authentification annoncé. Le nom du socle, jamais un hôte réel. */
 export const REALM_DU_SOCLE = "axion-ops";
+
+/**
+ * Le transport servi par cette porte. Écrit UNE fois, lu partout ailleurs —
+ * exactement comme `TRANSPORT_STDIO` du côté du fil. C'est lui qui NOMME le fil
+ * dans le verdict du filet anti-fuite, pour qu'un compte ne dise jamais
+ * seulement « une réponse confrontée » sans dire LAQUELLE des deux portes.
+ */
+export const TRANSPORT_HTTP: Transport = "http";
 
 /**
  * LE STATUT D'UN REFUS, **LU DANS `APPEL_STEPS`**.
@@ -187,69 +197,61 @@ export function valeurRetryAfter(secondes: number): string | null {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  LE FILET ANTI-FUITE
+//  LE FILET ANTI-FUITE — IL A QUITTÉ CE FICHIER (ADR 0044)
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * La longueur au-dessous de laquelle une valeur n'est pas confrontée.
+ * ⚠️ **LE FILET N'EST PLUS ÉCRIT ICI, ET C'EST LA DÉCISION DE L'ADR 0044.** Tant
+ *    qu'il vivait sous `core/transport/http/`, il ne pouvait servir qu'un
+ *    transport sur deux — mesure transcrite au lot 4 : 1 appelant de production,
+ *    `transport.ts`, et **0 sous `core/transport/stdio/`**, dont 6 modules de
+ *    production ont été balayés. Or le § 20 dit « jamais », pas « jamais en
+ *    HTTP », et le fil stdio sert le MÊME noyau (ADR 0025) en transportant le
+ *    MÊME jeton de confirmation.
  *
- * Huit caractères : au-delà d'une coïncidence de vocabulaire (« invalid »,
- * « request ») et bien en deçà de tout porteur, de tout `jti` et de toute
- * empreinte. Ce n'est pas un chiffre rond jeté là — c'est le seuil à partir
- * duquel une collision fortuite avec un mot du protocole cesse d'être plausible.
+ *    Il vit désormais dans `core/transport/anti-fuite.ts`, à côté de
+ *    `core/transport/valeurs-servies.ts` que le lot 3 a unifié pour exactement
+ *    la même raison : **une dérivation qui vaut pour les deux fils n'appartient
+ *    à aucun des deux**.
+ *
+ * ⚠️ **CE QUI SUIT EST UN RÉ-EXPORT, PAS UNE COUTURE.** `core/coutures/verifier.ts`
+ *    retire les clauses `export … from` avant de compter les appelants : ce
+ *    fichier ne coud rien du filet, il le nomme pour les appelants d'hier.
  */
-export const LONGUEUR_MINIMALE_CONFRONTEE = 8;
-
-/** Ce que le filet rend. Des NOMBRES, et des NOMS de valeurs — jamais les valeurs. */
-export interface VerdictDeFuite {
-  /** Combien de valeurs sensibles ont été RÉELLEMENT confrontées. */
-  readonly valeursConfrontees: number;
-  /** Combien ont été écartées comme trop courtes pour être distinguables. */
-  readonly valeursEcartees: number;
-  /** Les NOMS des valeurs retrouvées dans la réponse. Jamais leur contenu. */
-  readonly fuites: readonly string[];
-}
-
-/** Une valeur sensible de la requête, NOMMÉE — et le nom seul sort d'ici. */
-export interface ValeurSensible {
-  readonly nom: string;
-  readonly valeur: string;
-}
+export {
+  LONGUEUR_MINIMALE_CONFRONTEE,
+  MAX_ARGUMENTS_CONFRONTES,
+  NOMS_DES_CANAUX_SENSIBLES,
+  PROFONDEUR_MAX_ARGUMENTS,
+  valeursSensiblesDeLAppel,
+  verifierAucuneFuite,
+  type AppelConfronte,
+  type SortieServie,
+  type ValeurSensible,
+  type VerdictDeFuite,
+} from "../anti-fuite.js";
 
 /**
- * CONFRONTE UNE RÉPONSE AUX VALEURS SENSIBLES DE LA REQUÊTE QUI L'A PRODUITE.
+ * CE QUE LA PORTE HTTP S'APPRÊTE À ÉCRIRE SUR LE FIL, EN UNE CHAÎNE.
  *
- * Elle ne peut pas être verte pour rien : `valeursConfrontees` est incrémenté
- * dans la boucle, et `reponseSansFuite` refuse d'expédier une réponse dont le
- * filet n'a confronté AUCUNE valeur alors qu'on lui en a nommé — ce serait la
- * garde verte parce qu'elle ne regarde rien.
+ * ⚠️ **LA SÉRIALISATION APPARTIENT AU TRANSPORT, LA CONFRONTATION AU FILET.**
+ *    L'ADR 0044 fait recevoir au filet la réponse SÉRIALISÉE plutôt qu'un objet :
+ *    confronter l'objet laisserait passer une valeur qu'un sérialiseur
+ *    recopierait dans un champ d'erreur. Chaque fil sait sérialiser le sien, et
+ *    aucun des deux n'a besoin de connaître la forme de l'autre — c'est ce qui
+ *    permet au filet d'être unique.
+ *
+ * ⚠️ **EN-TÊTES ET STATUT Y ENTRENT, PAS SEULEMENT LE CORPS.** Un défi
+ *    `WWW-Authenticate`, un `Retry-After` ou un en-tête de corrélation sortent
+ *    aussi sûrement qu'un corps, et se journalisent plus facilement.
  */
-export function verifierAucuneFuite(
-  reponse: ReponseHttp,
-  sensibles: readonly ValeurSensible[],
-): VerdictDeFuite {
-  // En-têtes ET corps : un défi, un `Retry-After` ou un en-tête de corrélation
-  // sortent aussi sûrement qu'un corps, et se journalisent plus facilement.
-  const sortie = [
-    String(reponse.statut),
-    ...Object.entries(reponse.entetes).map(([nom, valeur]) => `${nom}: ${valeur}`),
-    reponse.corps,
-  ].join("\n");
-
-  const fuites: string[] = [];
-  let valeursConfrontees = 0;
-  let valeursEcartees = 0;
-
-  for (const sensible of sensibles) {
-    if (sensible.valeur.length < LONGUEUR_MINIMALE_CONFRONTEE) {
-      valeursEcartees += 1;
-      continue;
-    }
-    valeursConfrontees += 1;
-    if (sortie.includes(sensible.valeur)) {
-      fuites.push(sensible.nom);
-    }
-  }
-
-  return { valeursConfrontees, valeursEcartees, fuites };
+export function sortieServieHttp(reponse: ReponseHttp): SortieServie {
+  return {
+    transport: TRANSPORT_HTTP,
+    texte: [
+      String(reponse.statut),
+      ...Object.entries(reponse.entetes).map(([nom, valeur]) => `${nom}: ${valeur}`),
+      reponse.corps,
+    ].join("\n"),
+  };
 }

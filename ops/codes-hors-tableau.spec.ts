@@ -7,9 +7,26 @@ import {
   CODES_DU_TABLEAU_15,
   CODES_HORS_TABLEAU_15,
   CODE_SCOPE_INSUFFISANT,
+  MODULES_DE_DECLARATION,
+  chercherLesSitesDEmission,
   confronterCodes,
   type CodeHorsTableau,
+  type FichierDeProduction,
 } from "./codes-hors-tableau.js";
+// ⚠️ LE PÉRIMÈTRE DE PRODUCTION A **UN** PROPRIÉTAIRE DANS CE DÉPÔT. Le
+//    recopier ici mesurerait sa propre recopie — c'est le défaut exact que
+//    `core/epreuve/perimetre-de-production.ts` existe pour fermer.
+import { fichiersLivresDuDepot, lireDuDepot } from "../core/epreuve/perimetre-de-production.js";
+
+/** Les modules que `pnpm build` émet, avec leur source. Lu une seule fois. */
+function productionDuDepot(): readonly FichierDeProduction[] {
+  return fichiersLivresDuDepot().map((chemin) => ({ chemin, source: lireDuDepot(chemin) }));
+}
+
+/** La recherche des sites d'émission sur le DÉPÔT RÉEL. */
+function rechercheReelle(): ReturnType<typeof chercherLesSitesDEmission> {
+  return chercherLesSitesDEmission(productionDuDepot());
+}
 
 /**
  * GARDES — LES CODES QUE LE § 15 N'ÉNUMÈRE PAS.
@@ -31,7 +48,6 @@ function motifTemoin(code: string, voisins: number): CodeHorsTableau {
       mensonge: `mensonge témoin n° ${String(rang + 1)}`,
     })),
     adr: "ADR témoin",
-    enAttenteDeBranchement: false,
   };
 }
 
@@ -105,7 +121,12 @@ describe("ops/codes-hors-tableau — un écart au § 15 peut être justifié, ja
 
   it("SAIT DIRE OUI — l'union RÉELLE du socle, et elle annonce ses trois comptes", () => {
     // Sans ce cas, une confrontation qui refuserait TOUT serait verte plus haut.
-    const verdict = confronterCodes();
+    const verdict = confronterCodes(
+      ERROR_CODES,
+      CODES_DU_TABLEAU_15,
+      CODES_HORS_TABLEAU_15,
+      rechercheReelle(),
+    );
 
     console.info(
       `[garde codes réels] ${String(verdict.codesMesures)} code(s) dans \`ERROR_CODES\`, ` +
@@ -167,28 +188,146 @@ describe("ops/codes-hors-tableau — `scope_insufficient` appartient bien à `Er
     }
   });
 
-  it("n'a PLUS aucun code déclaré qu'aucune étape ne rend", () => {
-    // Un code que rien n'émet est une métrique qui restera vide, et une
-    // métrique vide ressemble à une métrique sans incident. Les deux écarts
-    // assumés sont désormais branchés — `vault_locked` à l'étape 0 depuis le
-    // lot 1b, `scope_insufficient` à l'étape 5 depuis la Recette du lot 1c.
-    const verdict = confronterCodes();
+  /**
+   * ⚠️ **CETTE GARDE MESURAIT DEUX BOOLÉENS ÉCRITS À LA MAIN, ET ELLE MESURE
+   *    DÉSORMAIS LES QUINZE CODES.** `CodeHorsTableau` portait un champ
+   *    `enAttenteDeBranchement`, renseigné entrée par entrée : la garde ne
+   *    pouvait donc rien dire des TREIZE codes DU tableau du § 15, et
+   *    `upstream_unavailable` — l'un des treize — est resté sans aucun émetteur
+   *    de production pendant quatre lots sans qu'une ligne le dise.
+   */
+  it("aucun code de l'union n'est sans émetteur de production — les QUINZE confrontés", () => {
+    const recherche = rechercheReelle();
+    const verdict = confronterCodes(
+      ERROR_CODES,
+      CODES_DU_TABLEAU_15,
+      CODES_HORS_TABLEAU_15,
+      recherche,
+    );
     const etape5 = APPEL_STEPS.find((etape) => etape.cle === "scopes");
+    const litterales = recherche.sites.filter((site) => site.forme === "littérale").length;
+    const ancrees = recherche.sites.filter((site) => site.forme === "ancrée").length;
 
     console.info(
-      `[garde branchement] ${String(CODES_HORS_TABLEAU_15.length)} écart(s) assumé(s) confronté(s) · ` +
-        `${String(verdict.enAttenteDeBranchement.length)} code(s) déclaré(s) qu'aucune étape ne rend ; ` +
-        `l'étape 5 rend « ${String(etape5?.refus)} » sous le statut HTTP ${String(etape5?.statutHttp)}`,
+      `[garde branchement] ${String(recherche.codesConfrontes)} code(s) confronté(s) à ` +
+        `${String(recherche.modulesBalayes)} module(s) de production ` +
+        `(${String(recherche.declarationsEcartees.length)} module(s) de déclaration écarté(s) : ` +
+        `${recherche.declarationsEcartees.join(", ")}) · ` +
+        `${String(recherche.sites.length)} site(s) d'émission trouvé(s) ` +
+        `[${String(litterales)} littérale(s), ${String(ancrees)} ancrée(s)] · ` +
+        `${String(recherche.sansProducteur.length)} code(s) SANS producteur ` +
+        `[${recherche.sansProducteur.join(", ") || "aucun"}]`,
     );
 
-    // Plancher-témoin : zéro écart confronté rendrait la ligne suivante vraie
-    // sur une liste vide.
+    // Planchers-témoins : une recherche qui n'aurait balayé aucun module, ou
+    // confronté aucun code, rendrait la ligne finale vraie sur du vide.
+    expect(recherche.modulesBalayes).toBeGreaterThanOrEqual(60);
+    expect(recherche.codesConfrontes).toBe(ERROR_CODES.length);
+    expect(recherche.declarationsIntrouvables).toEqual([]);
+    expect(recherche.declarationsEcartees).toHaveLength(MODULES_DE_DECLARATION.length);
     expect(CODES_HORS_TABLEAU_15.length).toBe(2);
     expect(etape5).toBeDefined();
     // Le 403 du § 11 n'a pas bougé : le code nomme la cause, il ne remplace pas
     // le statut.
     expect(etape5?.statutHttp).toBe(403);
+    expect(verdict.emissionMesuree).toBe(true);
     expect(verdict.enAttenteDeBranchement).toEqual([]);
+  });
+
+  /**
+   * ⚠️ **LA FORME ANCRÉE N'EST PAS UN CONFORT : SANS ELLE, LA MESURE SERAIT
+   *    FAUSSE.** Le dépôt émet la plupart de ses refus en LISANT le code dans
+   *    l'ancrage d'`APPEL_STEPS`, jamais en l'écrivant — c'est la règle de
+   *    dérivation de `core/chaine/etapes.ts`. Un `grep` sur le seul littéral ne
+   *    prouve donc que l'absence de la FORME ÉCRITE, et il rangerait parmi les
+   *    codes morts des refus que la chaîne prononce tous les jours.
+   */
+  it("compte les DEUX formes, et la forme ancrée en trouve que le littéral rate", () => {
+    const production = productionDuDepot();
+    const complete = chercherLesSitesDEmission(production);
+    // Le même balayage, privé de la forme ancrée : sans étape du § 11, plus
+    // aucun code ne se déduit d'un `ancrerEtape("…")`.
+    const litteraleSeule = chercherLesSitesDEmission(production, ERROR_CODES, []);
+    const vusParLAncrage = litteraleSeule.sansProducteur.filter(
+      (code) => !complete.sansProducteur.includes(code),
+    );
+
+    console.info(
+      `[garde formes] ${String(production.length)} module(s) de production · ` +
+        `sans producteur avec les deux formes : ${String(complete.sansProducteur.length)} · ` +
+        `avec le littéral seul : ${String(litteraleSeule.sansProducteur.length)} ` +
+        `[${litteraleSeule.sansProducteur.join(", ") || "aucun"}] · ` +
+        `${String(vusParLAncrage.length)} code(s) que SEULE la forme ancrée voit ` +
+        `[${vusParLAncrage.join(", ") || "aucun"}]`,
+    );
+
+    expect(production.length).toBeGreaterThanOrEqual(60);
+    // Plancher : si l'ancrage n'apportait rien, la garde précédente serait verte
+    // pour la mauvaise raison — elle mesurerait une forme qui ne sert à rien.
+    expect(vusParLAncrage.length).toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * ⚠️ **LE TÉMOIN FABRIQUÉ : SANS LES MODULES DE DÉCLARATION ÉCARTÉS, LA
+   *    RECHERCHE SERAIT VERTE PAR CONSTRUCTION.** `core/types.ts` nomme les
+   *    quinze codes — il DÉCLARE l'union. Le compter pour un émetteur rendrait
+   *    « tout est branché » vrai quoi qu'il arrive, et c'est exactement sous ce
+   *    vert-là que `upstream_unavailable` a dormi quatre lots.
+   */
+  it("écarte les modules de DÉCLARATION, et rougit sur un chemin écarté introuvable", () => {
+    const declaration: FichierDeProduction = {
+      chemin: "core/types.ts",
+      source: 'export const ERROR_CODES = ["internal", "conflict"] as const;',
+    };
+    // ⚠️ UN TÉMOIN ISOLE UNE SEULE RÈGLE. Ce module-ci existe pour que le
+    //    balayage ne soit pas VIDE : sans lui, la confrontation du bas
+    //    rougirait AUSSI sur « zéro module balayé », et l'on ne saurait plus
+    //    laquelle des deux règles a mordu.
+    const emetteur: FichierDeProduction = {
+      chemin: "core/emetteur-temoin.ts",
+      source: 'export const REFUS = { code: "internal" };',
+    };
+    const ecarte = chercherLesSitesDEmission(
+      [declaration],
+      ["internal", "conflict"],
+      [],
+      MODULES_DE_DECLARATION,
+    );
+    const siOnLeComptait = chercherLesSitesDEmission(
+      [declaration],
+      ["internal", "conflict"],
+      [],
+      [],
+    );
+    const cheminPerime = confronterCodes(
+      CODES_DU_TABLEAU_15,
+      CODES_DU_TABLEAU_15,
+      [],
+      chercherLesSitesDEmission(
+        [declaration, emetteur],
+        CODES_DU_TABLEAU_15,
+        [],
+        [
+          { chemin: "core/types.ts", motif: "témoin — déclare l'union sans rien émettre" },
+          { chemin: "core/chemin-qui-nexiste-plus.ts", motif: "témoin — un chemin périmé" },
+        ],
+      ),
+    );
+
+    console.info(
+      `[garde déclarations] 2 module(s) fabriqué(s), dont 1 de DÉCLARATION · écarté : ` +
+        `${String(ecarte.sansProducteur.length)} code(s) sans producteur · ` +
+        `compté : ${String(siOnLeComptait.sansProducteur.length)} · ` +
+        `chemin périmé → ${String(cheminPerime.anomalies.length)} anomalie(s)`,
+    );
+
+    // Écarté : le module ne compte pas, donc les deux codes sont sans producteur.
+    expect(ecarte.sansProducteur).toEqual(["conflict", "internal"]);
+    // Compté : il passerait pour un émetteur, et la garde serait verte pour rien.
+    expect(siOnLeComptait.sansProducteur).toEqual([]);
+    // Un chemin écarté qui n'existe pas n'écarte plus rien : il faut le dire.
+    expect(cheminPerime.anomalies).toHaveLength(1);
+    expect(cheminPerime.anomalies[0]).toContain("chemin-qui-nexiste-plus");
   });
 
   /**

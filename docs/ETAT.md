@@ -8,6 +8,100 @@ construction, de croisement et d'épreuve.
 > du jeton Coolify — ne sont pas posées. C'est la raison d'être de cette
 > retenue, pas une négligence.
 
+> ### 🟢 2026-09-01 — LOT 4, RECETTE : LE CHIFFRE QUI MANQUAIT, ET LA GARDE QUI NE MESURAIT PAS CE QU'ON CROYAIT
+>
+> **LE CHIFFRE DU LOT — 44 ADR inscrits au registre, 10 portent au moins une
+> décision qu'un TEST VOIT, 34 n'en portent AUCUNE.**
+>
+> ```
+> [G4 · LA MESURE QUI MANQUAIT] 44 ADR inscrit(s) au registre · 10 porte(nt) AU MOINS
+>     UNE décision qu'un test voit · 34 n'en porte(nt) AUCUNE [0001…0040]
+> [G4 · totaux] 112 entrée(s) confrontée(s) · 24 avec assertion · 88 SANS assertion ·
+>     0 en dette · 53 nom(s) exigé(s) dont 24 en LITTÉRAL seul ·
+>     1 assertion(s) PARTAGÉE(s) · 11 fichier(s) de garde ouvert(s) · 0 anomalie(s)
+> [G4 · cliquet d'identité] 88 identité(s) sans assertion aujourd'hui ·
+>     88 figée(s) le 2026-09-01 · 0 ENTRANTE(s) · 0 sortante(s)
+> ```
+>
+> **CE QUE CE CHIFFRE NE DIT PAS, et il faut le lire avec lui :**
+>
+> - Les 34 ADR sans assertion **ne sont pas non gardés** : G1 mesure toujours que
+>   leurs symboles ont des appelants de production. Ce qu'aucun test ne dit, c'est
+>   que **la décision** a atterri — la distinction exacte que le lot 4 existe pour
+>   poser.
+> - Les 10 autres **ne sont pas prouvés** : G4 mesure des **FORMES sur le
+>   disque**. Elle rend impossible qu'une assertion soit une chaîne, ou un test
+>   qui ne peut pas rougir. Elle ne fait pas tourner le test, donc elle ne sait
+>   pas si une mutation de la décision le tue. **Cette preuve-là s'obtient en
+>   mutant**, et elle reste à la charge du lot qui pose l'assertion.
+> - **24 des 53 noms exigés ne vivent que dans un littéral**, et G4 ne peut pas
+>   distinguer une mesure (`expect(bloc).toContain("…")`) d'un message
+>   (`console.info("… …")`). La part est annoncée, elle n'est pas tranchée.
+>
+> #### 🔴 CE QUE LA RECETTE A TROUVÉ DANS LA GARDE ELLE-MÊME — ADR 0048
+>
+> L'épreuve du lot 4 avait ouvert trois brèches dans G4, chacune sous `it.fails`.
+> Toutes trois vues **ROUGES** en `it()` avant correction, puis fermées :
+>
+> | brèche                                              | ROUGE                                         | VERT                                     |
+> | --------------------------------------------------- | --------------------------------------------- | ---------------------------------------- |
+> | `expect(1).toBe(1)` fermait une décision            | `expected 0 to be greater than or equal to 1` | 1 anomalie · `expectsFalsifiables`       |
+> | un `it()` dans `describe.skip` fermait une décision | `expected 0 to be greater than or equal to 1` | `describe.skip → 1` et `it.skip → 1`     |
+> | le cliquet était un TOTAL, et une somme se compense | `expected 88 to be greater than 88`           | 1 identité ENTRANTE, total inchangé à 88 |
+>
+> **La troisième est la leçon du lot.** Aucun correctif ne pouvait sauver le
+> total : `sansAssertion` vaut `entrées − avecAssertion`, une soustraction est
+> incapable de distinguer un échange d'un ajout. Le cliquet porte désormais sur
+> l'**IDENTITÉ** — 88 identités figées, toute entrante fait rougir — et le total
+> reste annoncé à côté, pour que son incapacité reste **lue**.
+>
+> #### 🟠 CE QUI RESTE OUVERT, ET NOMMÉ
+>
+> - **Le filet anti-fuite, ADR 0044 § 4.** La § 4 promettait un `reponseSansFuite`
+>   **qui n'a jamais existé**. Le paragraphe porte maintenant sa correction. La
+>   règle n'a pas été codée telle quelle **parce qu'elle est dangereuse ainsi
+>   écrite** : `valeursConfrontees === 0` vaut aussi zéro quand toutes les valeurs
+>   nommées ont été légitimement écartées pour être trop courtes — un `Host` de
+>   sept caractères suffit, et le refus ferait tomber **toutes** les réponses.
+>   Dette nommée, avec la distinction juste écrite dedans.
+> - **Les sondes du dépôt public, ADR 0042.** `SONDES` est une liste de 6 chemins
+>   écrite à la main ; le bloc « Secrets » de `.gitignore` porte **16 règles**, et
+>   **11 ne sont exercées par aucune sonde**. Rien n'est exposé aujourd'hui — les
+>   16 règles sont en place et mordent. Ce qui manque est ce qui serait REMARQUÉ
+>   le jour où l'une s'en va. Aggravant : l'avertissement en tête du bloc affirme
+>   le contraire à celui qui l'édite. **Correctif : dériver les sondes du
+>   fichier**, jamais allonger la liste.
+> - **31 dettes héritées, ZÉRO fermée.** Le lot 4 en a ajouté 6, la recette en a
+>   fermé 3 : le compte passe de 31 à **34**. Écrit ici plutôt que dilué.
+>
+> #### ✅ LE SOCLE DÉMARRE ET SERT, ET LE GESTE NOMMÉ EXISTE
+>
+> ```
+> [démarrage] 7 étage(s) confronté(s), 7 franchi(s) · sert : true · coffre : « ouvert » ·
+>     healthcheck : 200 · vaultLocked : false · transports MONTÉS : [stdio] ·
+>     ports d'amont NON ARMÉS : [journalDesRefus, delaiDeReprise] · 0 empêchement(s)
+> {"jsonrpc":"2.0","id":1,"result":{"tools":[]}}
+> {"jsonrpc":"2.0","id":2,"result":{"isError":true,"step":6,"code":"tool_disabled", …}}
+> CODE=0
+> ```
+>
+> `pnpm ops:vault:init --repetition` : **code 0** avec clé, **code 1** sans (refus
+> `clé-absente`, nommant `OPS_VAULT_KEY`). Chemin BASE : **code 1**, refus NOMMÉ
+> qui dit les trois gestes dans l'ordre — le client Prisma n'étant pas généré ici,
+> **ce chemin n'a jamais été exécuté**, et « le provisionnement fonctionne » ne
+> serait qu'un périmètre d'observation transformé en garantie.
+>
+> ⚠️ **`ports d'amont NON ARMÉS : [journalDesRefus, delaiDeReprise]`** au lancement
+> réel : la composition stdio-seule n'arme aucun des deux ports HTTP de l'ADR 0037. C'est cohérent — ils ne servent qu'à la porte HTTP — et c'est **annoncé au
+> démarrage**, ce qui est exactement ce que le lot 4 a posé.
+>
+> #### 📏 NON-RÉGRESSION MESURÉE
+>
+> `156 fichiers · 1 724 tests verts · 34 dettes nommées · 0 rouge` · quatre gates
+> vertes (`typecheck`, `lint`, `format:check`, `prisma:validate`) · 44 ADR dont 41
+> acceptées · 0 anomalie sur G1, G2 et G4 · **28 fichiers de garde sur 156
+> n'annoncent aucun compte** (`console.info` absent) — mesure brute, à réduire.
+>
 > ### 🟢 2026-09-01 — LOT 3, RECETTE : LE SOCLE SERT DEPUIS SON PROPRE PROCESSUS, ET UNE GARDE LE REJOUE
 >
 > **Le jalon du lot 2 est franchi, et il est mesuré deux fois.**
