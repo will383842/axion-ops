@@ -47,7 +47,8 @@ import type { AppelStep, ErrorCode, Habilitations, OpsScope } from "../../types.
 import { CHEMIN_DE_LA_RESSOURCE_MCP } from "../../auth/ressource.js";
 import { colonneDuTransport, identiteHttp } from "../../chaine/orchestrateur.js";
 import type { ResultatAppel } from "../../chaine/orchestrateur.js";
-import type { EtapesEtabliesEnAmont, NoyauUnique } from "../contrat.js";
+import type { EtapesEtabliesEnAmont, NoyauUnique, ValeursServiesAuClient } from "../contrat.js";
+import { valeursServiesAuClient } from "../valeurs-servies.js";
 import { ETAPE_HOTE, franchirLAmont, JOURNAL_AMONT_NON_ARME } from "./amont.js";
 import type {
   DefiDAuthentification,
@@ -278,22 +279,41 @@ function corpsDErreurJsonRpc(
  *    ne font autorité sur un numéro de révision. Servir ici un `content[]` de
  *    l'une des révisions serait la recopier sans l'avoir lue. Le corps porte
  *    donc la charge du socle, et les valeurs de service sous le préfixe `ops/`.
+ *
+ * 🔴 **CE QUI A ÉTÉ MESURÉ ICI, ET QUE L'ADR 0037 FERME.** Cette fonction ne
+ *    connaissait qu'UN genre de terminaison servie : `charge.valeur.genre ===
+ *    "exécuté" ? … : null`. Un **REJEU** — l'issue de l'étape 13 sur une clé
+ *    d'idempotence rejouée — tombait dans la branche `null` : `structuredContent`
+ *    nul, ni genre, ni `resultRef`, et le `_meta` ne rattrapait rien puisque
+ *    `"ops/outcome"` vaut `"ok"` des deux côtés. Un client HTTP ne pouvait donc
+ *    pas distinguer « ton appel a été REJOUÉ, voici la référence du résultat
+ *    d'origine » de « ton appel a été exécuté et n'a rien rendu », alors que le
+ *    § 13 fait du `resultRef` le SEUL pointeur vers ce résultat. stdio publiait
+ *    les deux. La mutation qui rendait ce chemin FATAL sur un rejeu a survécu à
+ *    la suite complète (lot 3, M5) : aucun test HTTP n'a jamais vu un rejeu.
+ *
+ * ⚠️ **LES VALEURS SERVIES SONT DÉRIVÉES AILLEURS, ET UNE SEULE FOIS.** Ce corps
+ *    ne fait plus que les EMBALLER — voir `core/transport/valeurs-servies.ts`.
  */
 function corpsDeSucces(id: IdJsonRpc, resultat: ResultatAppel, requestId: string): string {
   const charge = resultat.terminaison;
-  const servie: unknown =
-    charge.genre === "succès" && charge.valeur.genre === "exécuté"
-      ? charge.valeur.execution.charge
-      : null;
+  const servies: ValeursServiesAuClient | null =
+    charge.genre === "succès" ? valeursServiesAuClient(charge.valeur) : null;
   return JSON.stringify({
     jsonrpc: VERSION_JSON_RPC,
     id,
     result: {
       isError: false,
-      structuredContent: servie,
+      structuredContent: servies === null ? null : servies.charge,
       _meta: {
         "ops/requestId": requestId,
         "ops/outcome": charge.genre === "succès" ? charge.outcome : null,
+        // § 13 — le genre et la référence, sous le préfixe `ops/` déjà en
+        // service. La forme du `result` MCP reste l'écart signalé ci-dessus ;
+        // ce qui ne pouvait pas attendre est que ces deux valeurs cessent de
+        // DISPARAÎTRE.
+        "ops/genre": servies === null ? null : servies.genre,
+        "ops/resultRef": servies === null ? null : servies.resultRef,
         "ops/seq": String(resultat.ligne.seq),
         "ops/etapesFranchies": resultat.trace.etapesFranchies,
       },

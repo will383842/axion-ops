@@ -176,7 +176,14 @@ function portsAvecNoyauReel(
   const catalogue = catalogueDesAdaptateursAdmis(outilsServis);
   return {
     ports: {
-      noyau: harnais.noyau,
+      // ADR 0039 — le montage réclame une FABRIQUE et l'appelle une fois par
+      // colonne. Le harnais, lui, ne sait composer qu'un noyau `stdio` ; ce
+      // décor rend donc le même objet pour les deux colonnes, et c'est un ÉCART
+      // ASSUMÉ DU DÉCOR, pas du montage : ce qui est éprouvé ici est que les
+      // transports montent et répondent. Que la fabrique soit appelée une fois
+      // PAR colonne est éprouvé par `ops/composition/noyau.spec.ts`, sur la
+      // fabrique RÉELLE, où la colonne est observable.
+      noyau: () => harnais.noyau,
       catalogue: catalogue.catalogue,
       habilitations: () => HABILITATIONS_DU_HARNAIS,
       verificateurDeJeton: verificateurDeTemoin(revendicationsDeTemoin()),
@@ -483,7 +490,63 @@ describe("§ 23 · ② le montage refuse — et il NOMME ce qui l'en empêche", 
     expect(service.transportsMontes).toEqual([]);
     expect(service.empechements.length).toBe(1);
     expect(service.empechements[0]).toContain("quatorze étapes");
+    // ⚠️ **ET AUCUNE COLONNE N'A ÉTÉ FRAPPÉE.** Sans ce compte, un montage qui
+    //    appellerait la fabrique PUIS renoncerait laisserait la même trace : zéro
+    //    transport monté. Ce n'est pas la même chose — la fabrique lit une clé de
+    //    coffre —, et c'est le seul endroit d'où on peut le voir.
+    expect(service.colonnesFrappees).toBe(0);
 
+    await socle.arreter();
+  });
+
+  it("UN NOYAU PAR COLONNE — la fabrique est appelée autant de fois qu'il y a de transports montés", async () => {
+    const port = await portLibre();
+    const hote = `127.0.0.1:${String(port)}`;
+    const socle = await socleQuiSert("ouvert", [hote]);
+    const entree = new FluxDEntreeFabrique();
+    const sortie = new FluxDeSortieFabrique();
+    const { ports } = portsAvecNoyauReel(entree, sortie, []);
+
+    // ⚠️ **LA FABRIQUE EST OBSERVÉE, PAS SUPPOSÉE.** On enveloppe celle du décor
+    //    pour relever LES COLONNES DEMANDÉES, dans l'ordre. Un montage qui
+    //    frapperait un seul noyau et le remettrait aux deux transports rendrait
+    //    ici une seule colonne — c'est le défaut exact que l'ADR 0039 ferme, et
+    //    `verifierCouvertureDesEtapes` ne le verrait PAS : elle boucle sur les
+    //    NOMS de transports, jamais sur les noyaux montés.
+    const colonnesDemandees: string[] = [];
+    const fabriqueObservee: NonNullable<PortsDuService["noyau"]> = (transport) => {
+      colonnesDemandees.push(transport);
+      return ports.noyau!(transport);
+    };
+
+    const service = monterLeService(
+      socle,
+      { ...ports, noyau: fabriqueObservee },
+      {
+        transports: ["http", "stdio"],
+        hotesAdmis: [hote],
+        audienceAttendue: AUDIENCE_DE_TEMOIN,
+        budgetMs: 30_000,
+        octetsMaxDuCorps: 1_048_576,
+        portHttp: port,
+      },
+    );
+
+    console.info(
+      `[② · un noyau par colonne] transports montés : ` +
+        `[${service.transportsMontes.join(", ")}] · colonnes demandées à la fabrique : ` +
+        `[${colonnesDemandees.join(", ")}] · colonnes frappées : ` +
+        `${String(service.colonnesFrappees)}`,
+    );
+
+    expect(service.transportsMontes).toEqual(["http", "stdio"]);
+    expect(colonnesDemandees).toEqual(["http", "stdio"]);
+    expect(service.colonnesFrappees).toBe(service.transportsMontes.length);
+
+    // ⚠️ AUCUN `service.arreter()` ICI, ET C'EST DÉLIBÉRÉ : rien n'a ÉCOUTÉ. Ce
+    //    témoin mesure le MONTAGE, pas l'écoute ; fermer un serveur qui n'a
+    //    jamais ouvert de socket lève « Server is not running », et ferait
+    //    rougir la garde pour une raison qui n'a rien à voir avec la règle.
     await socle.arreter();
   });
 });

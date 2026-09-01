@@ -112,10 +112,29 @@ function parcourir(relatif: string, acc: FichierSoumis[]): void {
   }
 }
 
+/**
+ * ⚠️ **LE BALAYAGE EST MÉMOÏSÉ — ADR 0040, ET C'EST LE REMÈDE QU'IL NOMME.**
+ *
+ * Ce fichier rescannait 273 fichiers À CHAQUE TEST, quatorze fois. Mesuré :
+ * 23 698 ms pour le fichier sur machine calme ; sur machine chargée, ses gardes
+ * ont pris **15 663 ms** — au-delà du seuil d'alerte de 15 000 ms —, et la suite
+ * complète a cessé d'être reproductible : verte cinq fois, rouge à la sixième,
+ * sur un arbre inchangé. Le remède est celui que l'ADR 0040 écrit — rendre la
+ * garde MOINS CHÈRE —, jamais remonter le plafond.
+ *
+ * ⚠️ **CE QUE LA MÉMOÏSATION NE CHANGE PAS.** Le registre de modules d'un worker
+ *    vitest est isolé PAR FICHIER : ce cache naît et meurt avec ce fichier-ci.
+ *    Chaque test reçoit le même corpus qu'avant, et continue d'ANNONCER ses
+ *    comptes.
+ */
+let memoireDuProgramme: FichierSoumis[] | null = null;
+
 /** Tous les `.ts` du programme, tests compris. */
 function programme(): FichierSoumis[] {
+  if (memoireDuProgramme !== null) return memoireDuProgramme;
   const acc: FichierSoumis[] = [];
   for (const dossier of DOSSIERS_DU_PROGRAMME) parcourir(`${dossier}/`, acc);
+  memoireDuProgramme = acc;
   return acc;
 }
 
@@ -141,7 +160,10 @@ function echapper(texte: string): string {
   return texte.replace(/[.*+?^${}()|[\]\\]/g, (caractere) => `\\${caractere}`);
 }
 
+let memoireDuCritere: CritereDeProduction | null = null;
+
 function critereDeLivraison(): CritereDeProduction {
+  if (memoireDuCritere !== null) return memoireDuCritere;
   const brut = readFileSync(fileURLToPath(new URL("tsconfig.build.json", RACINE)), "utf8");
   // `tsconfig.build.json` porte des commentaires de ligne : JSON.parse les refuse.
   const sansCommentaires = brut.replace(/^\s*\/\/[^\n]*$/gm, "");
@@ -160,7 +182,21 @@ function critereDeLivraison(): CritereDeProduction {
       return forme.test(chemin) || forme.test(base);
     });
 
-  return { estLivre: (chemin) => !estExclu(chemin), motifs: motifs.length };
+  memoireDuCritere = { estLivre: (chemin) => !estExclu(chemin), motifs: motifs.length };
+  return memoireDuCritere;
+}
+
+/**
+ * LE RAPPORT SUR LE REGISTRE RÉEL, calculé UNE FOIS pour les six tests qui le
+ * lisent. Les témoins FABRIQUÉS appellent {@link mesurerLesCoutures}
+ * directement : eux ne passent jamais par ici, sans quoi la mémoire les
+ * confondrait avec le registre du dépôt.
+ */
+let memoireDuRapport: ReturnType<typeof mesurerLesCoutures> | null = null;
+
+function rapportDuRegistreReel(): ReturnType<typeof mesurerLesCoutures> {
+  memoireDuRapport ??= mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+  return memoireDuRapport;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -254,6 +290,23 @@ function mesurerLesCoutures(
   critere: CritereDeProduction,
 ): RapportDesCoutures {
   const production = fichiers.filter((fichier) => critere.estLivre(fichier.chemin));
+  /**
+   * ⚠️ **LA PROSE ET LES LIAISONS SONT RETIRÉES UNE FOIS PAR FICHIER — ADR 0040.**
+   *    Les deux étaient calculées au CŒUR de la double boucle, donc 89 entrées ×
+   *    134 modules = près de 12 000 fois, pour un résultat qui ne dépend QUE du
+   *    fichier. Les deux fonctions sont PURES : le corpus confronté ne change
+   *    pas d'un caractère, seul le nombre de calculs change. Mesuré ici :
+   *    4 641 ms → 785 ms sur la garde jumelle de `core/coutures/`.
+   */
+  const corpsSansProse = new Map<string, string>(
+    production.map((fichier) => [fichier.chemin, sansProse(fichier.source)]),
+  );
+  const corpsSansLiaisons = new Map<string, string>(
+    production.map((fichier) => [
+      fichier.chemin,
+      sansLiaisons(corpsSansProse.get(fichier.chemin) ?? ""),
+    ]),
+  );
   const verdicts: VerdictDUneCouture[] = [];
   const anomalies: string[] = [];
   const parEtat: Record<string, number> = {};
@@ -273,7 +326,7 @@ function mesurerLesCoutures(
 
     for (const fichier of production) {
       if (fichier.chemin === entree.module) continue;
-      const nu = sansProse(fichier.source);
+      const nu = corpsSansProse.get(fichier.chemin) ?? "";
       if (entree.genre === "type") {
         // Un type ne s'appelle pas : c'est son IMPORT qui EST la couture.
         if (new RegExp(`import[^;]*\\b${echapper(entree.symbole)}\\b[^;]*from`).test(nu)) {
@@ -283,7 +336,7 @@ function mesurerLesCoutures(
         }
         continue;
       }
-      const corps = sansLiaisons(nu);
+      const corps = corpsSansLiaisons.get(fichier.chemin) ?? "";
       // ⚠️ **UNE CONSTANTE LUE EST UNE CONSTANTE IMPORTÉE.** Ce dépôt est en
       //    modules ES : il n'a aucune portée globale. Exiger l'import n'ajoute
       //    donc rien à la réalité, et retire un faux positif MESURÉ au lot 2 —
@@ -620,7 +673,7 @@ describe("② ma dérivation du graphe d'appels sait mordre", () => {
 describe("③ le registre confronté au graphe d'appels du dépôt", () => {
   it("annonce les comptes, symbole par symbole, appelants NOMMÉS", () => {
     const critere = critereDeLivraison();
-    const rapport = mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critere);
+    const rapport = rapportDuRegistreReel();
 
     for (const verdict of rapport.verdicts) {
       console.info(
@@ -674,7 +727,7 @@ describe("③ le registre confronté au graphe d'appels du dépôt", () => {
   const DESACCORDS_CONNUS_LE_2026_08_31: readonly string[] = [];
 
   it("tient le CLIQUET : aucun désaccord NOUVEAU, quel que soit le nombre déjà ouvert", () => {
-    const rapport = mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
     const enDesaccord = [
       ...new Set(rapport.verdicts.filter((v) => v.anomalies.length > 0).map((v) => v.adr)),
     ].sort();
@@ -697,7 +750,7 @@ describe("③ le registre confronté au graphe d'appels du dépôt", () => {
   });
 
   it("✅ aucune entrée du registre ne contredit le graphe d'appels", () => {
-    const rapport = mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
     expect(rapport.anomalies).toEqual([]);
   });
 });
@@ -720,7 +773,7 @@ describe("④ un symbole qui n'existe pas satisfait `à-coudre` GRATUITEMENT", (
     expect(fantome.verdicts[0]?.defini).toBe(false);
 
     // Le réel : quelles entrées du registre nomment un symbole introuvable ?
-    const rapport = mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
     const introuvables = rapport.verdicts.filter((verdict) => !verdict.defini);
 
     console.info(
@@ -736,7 +789,7 @@ describe("④ un symbole qui n'existe pas satisfait `à-coudre` GRATUITEMENT", (
   });
 
   it.fails("tout symbole du registre est DÉFINI dans le module qu'on lui attribue", () => {
-    const rapport = mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
     expect(
       rapport.verdicts.filter((v) => !v.defini).map((v) => `${v.symbole} (ADR ${v.adr})`),
     ).toEqual([]);
@@ -792,7 +845,7 @@ describe("⑤ le critère de livraison et les fabriques de témoins", () => {
       .sort();
 
     // Quelles entrées `cousue` doivent un appelant à l'une d'elles ?
-    const rapport = mesurerLesCoutures(programme(), REGISTRE_DES_COUTURES, critere);
+    const rapport = rapportDuRegistreReel();
     const adossees = rapport.verdicts.filter(
       (verdict) =>
         verdict.appelants.length > 0 &&

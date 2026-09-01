@@ -60,7 +60,12 @@ import type {
   ResultatAppel,
   Transport,
 } from "../../chaine/orchestrateur.js";
-import type { NoyauUnique, ValeursFrappeesParLeTransport } from "../contrat.js";
+import type {
+  NoyauUnique,
+  ValeursFrappeesParLeTransport,
+  ValeursServiesAuClient,
+} from "../contrat.js";
+import { valeursServiesAuClient } from "../valeurs-servies.js";
 
 import { creerDecoupeur, serialiser } from "./cadrage.js";
 import type { Cadre, MesuresDuCadrage } from "./cadrage.js";
@@ -457,18 +462,23 @@ export function creerServeurStdio(ports: PortsDuServeurStdio): ServeurStdio {
       return;
     }
 
-    const servie = resultat.terminaison.valeur;
+    // ⚠️ **LA MÊME DÉRIVATION QUE LA PORTE HTTP — ADR 0037, § 4.** Ces trois
+    //    valeurs se décidaient ici ET dans `corpsDeSucces`, et les deux écritures
+    //    se sont contredites : sur un rejeu, stdio publiait le genre et le
+    //    `resultRef`, HTTP ne publiait ni l'un ni l'autre. Ce qui reste ici est
+    //    l'EMBALLAGE — les champs du `result` stdio —, jamais la décision.
+    const servies: ValeursServiesAuClient = valeursServiesAuClient(resultat.terminaison.valeur);
     ecrireReponse(
       reponseDeSucces(requete.id, {
         isError: false,
         // Le genre distingue une exécution d'un REJEU (§ 11, étape 13) : loger un
         // rejeu comme une exécution ferait croire à un appel servi.
-        genre: servie.genre,
+        genre: servies.genre,
         content:
-          servie.genre === "exécuté"
-            ? [{ type: "text", text: JSON.stringify(servie.execution.charge) }]
+          servies.genre === "exécuté"
+            ? [{ type: "text", text: JSON.stringify(servies.charge) }]
             : [],
-        resultRef: servie.genre === "rejeu" ? servie.resultRef : null,
+        resultRef: servies.resultRef,
       }),
     );
   };

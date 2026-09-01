@@ -32,7 +32,12 @@
 
 import { DATA_CLASSES, rangDataClass } from "../types.js";
 import { octetsCanoniques } from "../adapter-kit/json.js";
-import { nomComplet, prefixeDe } from "../adapter-kit/manifest.js";
+// ⚠️ `requisDuSchema` EST IMPORTÉE, JAMAIS RÉÉCRITE — ADR 0036, décision 6.
+//    C'est la fonction que le contrôle C13.3 du BUILD emploie déjà. Deux
+//    définitions de « quels champs ce schéma exige-t-il » divergeraient au
+//    premier dialecte ajouté, et le build accepterait alors ce que l'admission
+//    refuse — ou l'inverse, ce qui est pire (ADR 0003).
+import { nomComplet, prefixeDe, requisDuSchema } from "../adapter-kit/manifest.js";
 import { analyserFermeture, chercherChampsDAutorisation } from "../adapter-kit/fermeture.js";
 import {
   analyserChampsDeclares,
@@ -162,6 +167,12 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
   let gouvernanceConfrontes = 0;
   let gouvernanceIntrouvables = 0;
 
+  // § 13.3, ADR 0036 — combien de champs de rang 2 ont été DÉCLARÉS, combien
+  // ont été CONFRONTÉS aux requis du schéma de sortie, combien s'y trouvaient.
+  let rang2Declares = 0;
+  let rang2Confrontes = 0;
+  let rang2Obligatoires = 0;
+
   const annonces = (): readonly GardeAnnoncee[] => [
     {
       nom:
@@ -189,6 +200,28 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
       //    `champ_de_gouvernance_introuvable`, plus bas, et le schéma FERMÉ de
       //    `manifeste-recu.ts` qui exige le champ.
       verdict: { mesures: gouvernanceDeclares, plancher: 0, anomalies: [] },
+    },
+    {
+      nom:
+        `champs de rang 2 au schéma de sortie (§ 13.3, ADR 0036) — ` +
+        `${String(rang2Declares)} déclaré(s), ${String(rang2Confrontes)} confronté(s) aux ` +
+        `requis, ${String(rang2Obligatoires)} obligatoire(s)`,
+      // ⚠️ PLANCHER À ZÉRO, POUR LA MÊME RAISON QUE LA GARDE DU DESSUS ET POUR
+      //    UNE AUTRE. `compaction.tier2` peut légitimement être VIDE : un outil
+      //    dont la sortie n'a pas de second palier n'a rien à déclarer, et la
+      //    cascade du § 13.3 saute ce palier. Un plancher à 1 punirait ici
+      //    l'outil correct de n'avoir rien à déclarer.
+      //
+      //    Ce qui garde le cas « la garde n'a rien vu » n'est donc pas ce
+      //    plancher : c'est ce compte, ANNONCÉ, qui distingue « aucun champ de
+      //    rang 2 déclaré » de « la boucle n'a pas tourné ». Le refus, lui, est
+      //    prononcé plus bas, dans le contrôle 7 ter.
+      //
+      // ⚠️ LE COMPTE ANNONCÉ EST CELUI DES CHAMPS CONFRONTÉS, PAS DES CHAMPS
+      //    DÉCLARÉS. Les deux sont égaux tant que la boucle traite chaque
+      //    champ ; ils divergent à la première sortie anticipée qu'on y
+      //    ajouterait, et c'est ce jour-là que l'annonce doit dire la vérité.
+      verdict: { mesures: rang2Confrontes, plancher: 0, anomalies: [] },
     },
   ];
 
@@ -519,6 +552,45 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
             `${String(controle7.clesInterdites)} nom(s) interdit(s). Une décision de droit ` +
             "atteint la couche service par `ctx`, et par lui seul (§ 09, contrôle 7) : " +
             "renommer le champ d'entrée.",
+        ),
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  7 ter bis · LE RANG 2 EST OPTIONNEL AU SCHÉMA DE SORTIE (§ 13.3)
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // ADR 0036, décision 6. Troisième règle du § 09 / § 13.3 à être REDOUBLÉE
+    // ici, et pour le même motif que les deux précédentes : le registre est la
+    // SEULE barrière statique pour un manifeste produit ailleurs — le CRM en
+    // PHP, dépôt public à jamais (§ 29). Le contrôle C13.3 du build ne voit que
+    // les adaptateurs TypeScript passant par le kit, c'est-à-dire précisément
+    // pas le mode FÉDÉRÉ que la règle vise.
+    //
+    // ⚠️ LA MÊME FONCTION QUE LE BUILD — `requisDuSchema()`, importée en tête
+    //    de fichier comme `nomComplet` et `prefixeDe` le sont déjà. Aucune
+    //    lecture de `required` n'est écrite ici.
+    //
+    // ⚠️ UN REFUS PAR CHAMP, PAS UN PAR OUTIL. Un exploitant qui corrige un
+    //    champ à la fois paie un cycle de build dans un autre dépôt à chaque
+    //    aller-retour : c'est la raison d'être de « rendre TOUS les refus »,
+    //    appliquée à l'intérieur d'un outil.
+    const requisDeLaSortie = requisDuSchema(outil.outputSchema);
+    rang2Declares += outil.compaction.tier2.length;
+    for (const champ of outil.compaction.tier2) {
+      rang2Confrontes += 1;
+      if (!requisDeLaSortie.includes(champ)) continue;
+      rang2Obligatoires += 1;
+      refuses.push(
+        refus(
+          "rang2_obligatoire_au_schema",
+          `« ${ou} » : « ${champ} » est déclaré de rang 2 (compaction.tier2) et OBLIGATOIRE ` +
+            `au schéma de sortie (${String(requisDeLaSortie.length)} champ(s) requis : ` +
+            `${requisDeLaSortie.join(", ")}). Au deuxième palier de la cascade du § 13.3, le ` +
+            "socle retire ce champ — et la charge compactée ne valide plus le schéma que " +
+            "l'outil PUBLIE, celui-là même que le client a lu. Retirer le champ de " +
+            "`required`, ou le retirer de `compaction.tier2` : l'une des deux déclarations " +
+            "est de trop, et c'est à l'auteur de l'outil de dire laquelle.",
         ),
       );
     }

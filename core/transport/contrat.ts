@@ -39,7 +39,12 @@
  */
 
 import type { AppelStep, ErrorCode } from "../types.js";
-import type { IdentiteAppelante, ResultatAppel, Transport } from "../chaine/orchestrateur.js";
+import type {
+  ChargeServie,
+  IdentiteAppelante,
+  ResultatAppel,
+  Transport,
+} from "../chaine/orchestrateur.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  L'ÉTAPE 1 — ANTI DNS-REBINDING, AVANT TOUT TRAITEMENT
@@ -87,6 +92,72 @@ export interface VerdictDHote {
  *    l'orchestrateur, ni aucune à compléter après lui.
  */
 export type NoyauUnique = (identite: IdentiteAppelante, appel: unknown) => Promise<ResultatAppel>;
+
+/**
+ * **UN NOYAU PAR COLONNE — ADR 0039.**
+ *
+ * ═══ POURQUOI UNE FABRIQUE, ET NON UN NOYAU ═══
+ *
+ * `DependancesOrchestrateur` porte un champ `transport`, et c'est LUI qui fait
+ * lire à l'orchestrateur la colonne du § 11 : quelles étapes sont applicables,
+ * lesquelles sont établies EN AMONT, lesquelles ne s'appliquent pas du tout.
+ *
+ * Un noyau unique composé avec `transport: "stdio"` puis remis aux DEUX
+ * transports servirait donc les appels HTTP en croyant que les quatre étapes
+ * « HTTP seul » n'existent pas. Et rien ne le verrait :
+ * `verifierCouvertureDesEtapes` boucle à l'étage 6 sur les NOMS de transports —
+ * pas sur les noyaux montés.
+ *
+ * La racine de composition rend donc une fabrique, et le montage l'appelle **une
+ * fois par transport monté**, avec le nom de la colonne qu'il monte.
+ *
+ * ⚠️ **CE N'EST PAS UNE CONTRADICTION AVEC L'ADR 0025** (« deux transports, un
+ *    seul noyau »). Ce que cet ADR-là interdit est qu'un transport REFASSE la
+ *    chaîne à côté ; les deux noyaux d'ici partagent tout ce qui décide —
+ *    journal, dépôts, index de provenance, politique, les cinq étapes — et ne
+ *    diffèrent QUE par leur colonne. Un seul CHEMIN, pas un seul objet.
+ */
+export type FabriqueDeNoyau = (transport: Transport) => NoyauUnique;
+
+/**
+ * **CE QU'UNE TERMINAISON SERVIE REMET AU CLIENT — DÉRIVÉ UNE FOIS, POUR LES
+ * DEUX TRANSPORTS. ADR 0037.**
+ *
+ * ═══ LE DÉFAUT MESURÉ QUE CE TYPE EXISTE POUR FERMER ═══
+ *
+ * Le transport HTTP ne connaissait qu'un seul genre de terminaison servie
+ * (`genre === "exécuté"`). Un REJEU — l'issue de l'étape 13 quand une clé
+ * d'idempotence est rejouée — tombait dans la branche `null` : `structuredContent`
+ * nul, ni genre, ni `resultRef`. Mesuré, même noyau double présenté aux deux :
+ *
+ *  · HTTP  → `genre` absent · `resultRef` absent · `structuredContent` nul ;
+ *  · stdio → `genre: "rejeu"` · `resultRef: "…"` · `content: []`.
+ *
+ * Un client HTTP ne pouvait donc pas distinguer « ton appel a été REJOUÉ, voici
+ * la référence du résultat d'origine » de « ton appel a été exécuté et n'a rien
+ * rendu ». Le § 13 fait du `resultRef` le SEUL pointeur vers le résultat
+ * d'origine.
+ *
+ * ⚠️ **UNE SEULE DÉRIVATION, DEUX EMBALLAGES.** Chaque transport emballe ces
+ *    valeurs dans SON enveloppe — `_meta` sous le préfixe `ops/` en HTTP, les
+ *    champs du `result` en stdio. Deux écritures de « qu'est-ce qu'un rejeu rend
+ *    au client » finiraient par se contredire, et la contradiction serait
+ *    exactement celle qu'on vient de mesurer, dans l'autre sens.
+ *
+ * ⚠️ **ELLE SE DÉRIVE PAR UN `switch` EXHAUSTIF SUR {@link ChargeServie}**, jamais
+ *    par un test d'égalité. Une troisième branche ajoutée un jour à l'union ne
+ *    pourra alors plus tomber en silence dans `null` : le compilateur le dira.
+ *    C'est la seule partie de cette décision qui se tient toute seule après notre
+ *    départ.
+ */
+export interface ValeursServiesAuClient {
+  /** `"exécuté"` ou `"rejeu"` — DÉRIVÉ de `ChargeServie`, jamais réécrit. */
+  readonly genre: ChargeServie["genre"];
+  /** § 13 — la référence du résultat d'origine sur un rejeu, `null` sinon. */
+  readonly resultRef: string | null;
+  /** La charge de l'adaptateur sur une exécution, `null` sur un rejeu. */
+  readonly charge: unknown;
+}
 
 /**
  * CE QU'UN TRANSPORT DOIT ÉTABLIR AVANT D'APPELER LE NOYAU.

@@ -1728,6 +1728,464 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "DÉBRANCHÉ, `ops/service.spec.ts` › « coffre VERROUILLÉ — le socle vit, le healthcheck " +
       "rend 200, et RIEN n'écoute » rougit sur `transportsMontes` et sur `serveurHttp`.",
   },
+
+  // ── ADR 0035 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0035",
+    decision:
+      "Un `pattern` ne referme un champ que si la LONGUEUR MAXIMALE du langage " +
+      "qu'il accepte est finie et tient sous la borne de fermeture — dérivée du motif, " +
+      "jamais éprouvée par trois témoins.",
+    etat: "cousue",
+    symbole: "BORNE_DE_FERMETURE",
+    genre: "constante",
+    module: "core/adapter-kit/capacite.ts",
+    mesureeAilleurs: "core/adapter-kit/champs-declares.temoin.spec.ts",
+    motif:
+      "1 lecteur de production MESURÉ : `core/adapter-kit/champs-declares.ts`, qui l'IMPORTE " +
+      "et la lit à DEUX endroits — la quatrième condition de `mesurerLaCapacite()` et " +
+      "`maxLengthReferme()`. La dette écrite ici au moment de la pose est levée. " +
+      "⚠️ LE COMPTE D'APPELANTS NE MESURE PAS LA DÉCISION, et il ne l'a jamais fait : ce " +
+      "qui la mesure est le corpus nommé en `mesureeAilleurs`, qui porte désormais le " +
+      "contournement EXACT trouvé par l'audit — `^[A-Za-z0-9 ,.'()-]{1,2000}$`, ancré aux " +
+      "deux bouts, rejetant les TROIS témoins de prose, admettant 2 000 caractères. " +
+      "MESURE TRANSCRITE, les deux états : avant le correctif `patternReferme` rendait " +
+      "`true` sur ce motif et le test rougissait ; après, il rend `false` et une charge " +
+      "ASCII de 206 caractères ne referme plus rien. ⚠️ ET L'ENCADREMENT DE LA VALEUR EST " +
+      "UNE GARDE, PAS UN PARAGRAPHE : 45 (la plus longue forme d'`ipv6`, déjà réputée " +
+      "fermante) ≤ 64 < 160 (`LONGUEUR_RACCOURCIE`, IMPORTÉE, dont le socle dit lui-même " +
+      "qu'elle porte « une phrase entière ») — les quatre exemplaires de format sont " +
+      "confrontés et ANNONCÉS.",
+  },
+  {
+    adr: "0035",
+    decision:
+      "La mesure d'un motif rend des NOMBRES et une raison de non-borne, jamais un " +
+      "booléen : une borne rendue sans avoir lu un seul nœud serait verte pour la pire des " +
+      "raisons.",
+    etat: "cousue",
+    symbole: "MesureDeCapacite",
+    genre: "type",
+    module: "core/adapter-kit/capacite.ts",
+    mesureeAilleurs: "core/adapter-kit/champs-declares.temoin.spec.ts",
+    motif:
+      "1 importateur de production MESURÉ : `core/adapter-kit/champs-declares.ts`, où " +
+      "`mesurerLaCapacite` le REMPLIT et où `patternReferme` ne lit plus que son champ " +
+      "`referme`. ⚠️ CE QUE CE TYPE FORCE, ET QUI EST TOUT SON OBJET : `noeudsLus` interdit " +
+      "qu'une mesure vide rende une borne, et `raisonDeNonBorne` dit LAQUELLE des cinq " +
+      "constructions non bornables a produit le `null`. Sans ces deux champs, la fonction " +
+      "pourrait rendre « fermé » en n'ayant rien lu, exactement comme les trois témoins " +
+      "rendaient « fermé » en n'ayant confronté que trois phrases. ⚠️ ET LES DEUX CHAMPS " +
+      "SONT ÉPROUVÉS, PAS SEULEMENT DÉCLARÉS : la garde du sous-ensemble confronte " +
+      "26 constructions, exige `noeudsLus > 0` sur chacune qui compile, et annonce " +
+      "combien des cinq raisons un témoin produit — 4 sur 5, la cinquième " +
+      "(`syntaxe-hors-sous-ensemble`) étant un filet qu'aucun motif COMPILABLE sous le " +
+      "drapeau `u` n'atteint, ce que la garde FIGE au lieu de le supposer.",
+  },
+  {
+    adr: "0035",
+    decision:
+      "Trois `format` sur sept — `time`, `date-time`, `duration` — admettent un texte " +
+      "de longueur LIBRE : ils cessent de refermer à eux seuls, et un `maxLength` sous la " +
+      "borne referme désormais.",
+    etat: "à-coudre",
+    symbole: "patternReferme",
+    genre: "fonction",
+    module: "core/adapter-kit/champs-declares.ts",
+    mesureeAilleurs: "core/adapter-kit/champs-declares.temoin.spec.ts",
+    motif:
+      "0 appelant de production MESURÉ, et le compte n'est PAS la mesure : son unique " +
+      "appelant est `estValeurLibre`, dans le module qui le DÉFINIT, donc exclu du comptage " +
+      "par construction. L'état reste donc `à-coudre` APRÈS l'implémentation, et ce n'est " +
+      "pas une dette — c'est la borne du graphe d'appels, écrite avec sa mesure. " +
+      "⚠️ CE QUI MESURE RÉELLEMENT CETTE ENTRÉE est le corpus nommé en `mesureeAilleurs` : " +
+      "`FORMATS_CONTRAIGNANTS` est passée de 7 à 4 entrées, et la garde CONFRONTE la liste " +
+      "des écartés en la DÉRIVANT de `FORMATS_ECARTES_PAR_CAPACITE` — un écarté remis en " +
+      "service rougit. MESURE TRANSCRITE : avant, `{ type: string, format: duration }` " +
+      "rendait `estValeurLibre = false` ; après, `true`. ⚠️ LE JUMEAU OUBLIÉ, MESURÉ " +
+      "PENDANT LE LOT 3 : le défaut du `pattern` existait AUSSI sur `format`, et il y était " +
+      "plus court à écrire — `format` est une ANNOTATION sans effet de validation, et trois " +
+      "des sept valeurs retenues acceptent une fraction de seconde ou un nombre de chiffres " +
+      "de longueur libre. ⚠️ C'EST UN RESSERRAGE, DONC IL EST LIBRE (§ 20, protection 1) : " +
+      "il ne peut faire que de la surveillance en plus, et son coût est nul tant " +
+      "qu'`adapters/` est vide.",
+  },
+
+  // ── ADR 0036 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0036",
+    decision:
+      "§ 14 — le plafond de 40 outils SERVIS se refuse À L'ÉTAPE 7, dans le même " +
+      "bloc qu'`estServi`, en LISANT l'étape et le code que le verdict porte déjà.",
+    etat: "à-coudre",
+    symbole: "mesurerBudgetProfil",
+    genre: "fonction",
+    module: "core/profiles/budget.ts",
+    mesureeAilleurs: "core/profiles/budget.spec.ts",
+    motif:
+      "0 appelant de production MESURÉ sur les 130 modules émis par le build. ⚠️ LA RÈGLE " +
+      "EST ÉCRITE, ÉPROUVÉE, DOCUMENTÉE — ET COUSUE NULLE PART : le seul endroit du dépôt " +
+      "où le plafond se refuse effectivement est un TEST, " +
+      "`core/__tests__/integration.spec.ts`, qui RÉIMPLÉMENTE la règle sous le commentaire " +
+      "« le plafond se refuse ICI, pas seulement en CI ». Un test qui réimplémente éprouve " +
+      "son propre sosie. ⚠️ AGGRAVANT MESURÉ : aucune entrée du registre ne portait ce " +
+      "sujet, donc la garde qui existe pour repérer ce cas précis était aveugle à " +
+      "celui-là. Cette entrée est le geste qui le rend trouvable. ⚠️ LE SECOND PLAFOND du " +
+      "§ 14 — les octets de définitions — vit dans le MÊME verdict, donc au même endroit " +
+      "non appelé, et il n'a jamais été confronté séparément.",
+  },
+  {
+    adr: "0036",
+    decision:
+      "§ 13.3 — un champ de rang 2 OBLIGATOIRE au schéma de sortie est REFUSÉ à " +
+      "l'admission, par la MÊME fonction que le build.",
+    etat: "cousue",
+    symbole: "requisDuSchema",
+    genre: "fonction",
+    module: "core/adapter-kit/manifest.ts",
+    mesureeAilleurs: "core/registry/enregistrer.temoin.spec.ts",
+    motif:
+      "2 appelants de production mesurés : `core/adapter-kit/conformite.ts` (contrôle C13.3, " +
+      "AU BUILD) et `core/registry/enregistrer.ts` (contrôle 7 ter bis, À L'ADMISSION, motif " +
+      "`rang2_obligatoire_au_schema`). ⚠️ LE SECOND EST L'ATTERRISSAGE DU LOT 3, et c'est " +
+      "lui qui referme le défaut : jusque-là les cinq occurrences du dépôt vivaient TOUTES " +
+      "dans `core/adapter-kit/`, ZÉRO sous `core/registry/`, si bien que la règle n'était " +
+      "tenue que du côté BUILD — alors qu'`enregistrer.ts` se déclare lui-même « la SEULE " +
+      "barrière statique pour un manifeste produit ailleurs : le CRM en PHP, dépôt public à " +
+      "jamais ». Le mode FÉDÉRÉ, celui que la règle vise, était le seul pour lequel elle ne " +
+      "s'appliquait jamais. ⚠️ LE SECOND APPELANT N'EST PAS UNE RECOPIE : il importe " +
+      "`requisDuSchema` du même module que le build, parce que deux définitions divergentes " +
+      "sont le défaut de l'ADR 0003. ⚠️ RIEN NE RATTRAPE EN AVAL : `outputSchema` n'est " +
+      "validé à aucun moment du runtime, et l'étape 14 l'écrit elle-même — « ici on retire, " +
+      "on ne revalide pas » ; sa prose, qui disait la règle tenue « plus tôt et mieux » au " +
+      "seul build, a été corrigée dans le même geste. ⚠️ MUTATION REJOUÉE : retirer l'appel " +
+      "à `requisDuSchema` du contrôle 7 ter bis fait rougir " +
+      "`core/registry/rang2-au-schema.temoin.spec.ts`.",
+  },
+  {
+    adr: "0036",
+    decision:
+      "§ 09, contrôle 4 — le `fixtureMax` déclaré est apparié PAR SON CHEMIN à une " +
+      "fixture réellement exécutée, ou l'anomalie est nommée.",
+    etat: "à-coudre",
+    symbole: "executerHarnais",
+    genre: "fonction",
+    module: "core/adapter-kit/conformite.ts",
+    mesureeAilleurs: "core/adapter-kit/conformite.temoin.spec.ts",
+    motif:
+      "0 appelant de production MESURÉ, ET CE ZÉRO EST LE RÉGIME NORMAL : le harnais tourne " +
+      "dans la CI de l'ADAPTATEUR, et `adapters/` est vide. ⚠️ LE DÉFAUT QUE CETTE ENTRÉE " +
+      "PORTAIT N'ÉTAIT PAS LE ZÉRO, ET IL EST FERMÉ AU LOT 3 : les six seules occurrences " +
+      "de `fixtureMax` dans le dépôt étaient un titre de section, le libellé du contrôle, " +
+      "deux lignes qui vérifient que la chaîne n'est pas VIDE, la déclaration de type et " +
+      "une valeur de verrou — le corps du contrôle 4 appariait par `fixture.outil` et ne " +
+      "lisait `fixtureMax` À AUCUN MOMENT, si bien qu'une charge d'un octet sous un chemin " +
+      "quelconque le rendait vert avec son compte annoncé. Il APPARIE désormais par le " +
+      "chemin déclaré, nomme l'anomalie avec les chemins réellement exécutés, et son " +
+      "`detail` annonce combien de jeux maximaux ont été appariés. ⚠️ C'ÉTAIT LE JUMEAU " +
+      "OUBLIÉ DU CONTRÔLE 3, dans le MÊME fichier, dont le libellé avait été réécrit pour " +
+      "ne plus promettre plus que sa mesure ; ici la réponse est l'INVERSE et c'est " +
+      "délibéré — le libellé du § 09 reste, parce que la mesure le rend de nouveau vrai. " +
+      "⚠️ BORNE : `fixtureMax` n'entre pas dans le manifeste — c'est un chemin sur le disque " +
+      "de l'adaptateur, et l'admission ne peut pas l'exécuter ; le contrôle 4 est et reste " +
+      "un contrôle de BUILD. ⚠️ MUTATION REJOUÉE : remettre l'appariement par " +
+      "`fixture.outil` seul fait rougir `core/adapter-kit/conformite.temoin.spec.ts`.",
+  },
+
+  // ── ADR 0037 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0037",
+    decision:
+      "Le port de journal d'amont REND le nombre de lignes écrites, et " +
+      "`refusConsignes` additionne cette valeur : un socle non armé annonce « 1 prononcé · " +
+      "0 consigné ».",
+    etat: "cousue",
+    symbole: "JOURNAL_AMONT_NON_ARME",
+    genre: "constante",
+    module: "core/transport/http/amont.ts",
+    mesureeAilleurs: "core/transport/http/amont.spec.ts",
+    motif:
+      "2 lecteurs de production mesurés, dont `core/transport/http/transport.ts`, qui y " +
+      "retombe quand le montage ne fournit rien. ⚠️ LE COMPTEUR QUI DEVAIT DIRE L'ABSENCE " +
+      "MENTAIT, et la prose du fichier promettait l'inverse mot pour mot : " +
+      "`refusConsignes` s'incrémentait INCONDITIONNELLEMENT après l'`await`, et le port " +
+      "non armé résout. Mesuré sur les CINQ refus d'amont : tous annonçaient « 1 prononcé " +
+      "· 1 consigné » alors qu'aucune ligne n'était écrite. Neuf occurrences du champ dans " +
+      "le dépôt, AUCUNE assertion dessus ; la garde d'amont compte les lignes d'un journal " +
+      "de test ARMÉ, jamais le chemin non armé. ⚠️ ET LA SECONDE MOITIÉ N'EST PAS DANS " +
+      "CETTE ENTRÉE : même corrigé, personne ne lirait ce compte en service tant que " +
+      "`serveur.ts` consomme la réponse et JETTE la trace.",
+  },
+  {
+    adr: "0037",
+    decision:
+      "Le genre servi et le `resultRef` du rejeu (étape 13) sont dérivés UNE FOIS, " +
+      "par un `switch` exhaustif, et les deux transports ne font que les emballer.",
+    etat: "cousue",
+    symbole: "ValeursServiesAuClient",
+    genre: "type",
+    module: "core/transport/contrat.ts",
+    mesureeAilleurs: "core/transport/valeurs-servies.spec.ts",
+    motif:
+      "3 importateurs de production mesurés — `core/transport/valeurs-servies.ts` (la " +
+      "dérivation unique), `core/transport/http/transport.ts` et " +
+      "`core/transport/stdio/serveur.ts` (les deux emballages). ⚠️ CE QUE LE ZÉRO A COÛTÉ, " +
+      "MESURÉ AVANT LA COUTURE : le même noyau double " +
+      'présenté aux deux transports rend `genre="rejeu"` et un `resultRef` en stdio, et ' +
+      "RIEN en HTTP — genre absent, `resultRef` absent, `structuredContent` nul, " +
+      "`isError` faux. Un client HTTP ne peut pas distinguer « ton appel a été REJOUÉ » de " +
+      "« ton appel a été exécuté et n'a rien rendu », alors que le § 13 fait du " +
+      "`resultRef` le SEUL pointeur vers le résultat d'origine. ⚠️ AUCUN des onze " +
+      "`it.fails` de `core/epreuve/lot2-le-transport-attaque.temoin.spec.ts` ne porte sur " +
+      "le rejeu : c'est le trou exact, et un corpus ne voit pas ce qu'il ne contient pas.",
+  },
+  {
+    adr: "0037",
+    decision:
+      "`journalDesRefus` et `delaiDeReprise` entrent dans les ports du service : " +
+      "tant que la fente n'existe pas, « non armé » n'est pas un réglage, c'est une " +
+      "impossibilité.",
+    etat: "cousue",
+    symbole: "PortsDuService",
+    genre: "type",
+    module: "ops/service.ts",
+    mesureeAilleurs: "ops/service.spec.ts",
+    motif:
+      "1 importateur de production mesuré : `ops/index.ts`. ⚠️ MESURE QUI FONDE LA " +
+      'DÉCISION : `grep -rn "journalDesRefus" ops` rend ZÉRO, `grep -rn "delaiDeReprise" ' +
+      "ops` rend ZÉRO. Ce n'est pas un oubli de câblage — le type n'offrait AUCUNE fente " +
+      "pour les poser. Conséquences en service : les quatre refus « HTTP seul » n'écrivent " +
+      "aucune ligne (une campagne de jetons contre la porte est invisible), et tout 429 " +
+      "sort sans `Retry-After`, contre le § 11 et le § 15. ⚠️ ET LE `Retry-After` DOIT " +
+      "VENIR D'UN CHAMP, jamais d'une relecture du message français du refus : un en-tête " +
+      "de protocole dérivé d'une phrase casse à la première reformulation, et il casse en " +
+      "silence.",
+  },
+
+  // ── ADR 0038 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0038",
+    decision:
+      "Le chemin LIBRE peut resserrer un niveau ou raccourcir une durée ; à niveau " +
+      "ET échéance égaux il ne resserre rien, et ne réécrit donc pas l'attestation d'un " +
+      "desserrage.",
+    etat: "à-coudre",
+    symbole: "resserrer",
+    genre: "fonction",
+    module: "core/policy/desserrage.ts",
+    mesureeAilleurs: "core/policy/desserrage.spec.ts",
+    motif:
+      "0 appelant de production MESURÉ : `console/` est vide, et seuls les ré-exports de " +
+      "`core/policy/index.ts` le citent. LE DÉFAUT ÉTAIT DONC LATENT — et il est sur le " +
+      "chemin que `core/chaine/etape-05-scopes.ts` nomme déjà comme outil MCP futur " +
+      "(`ops.policy.tighten`) ; il est FERMÉ au lot 3 par le refus `resserrage-sans-effet`, " +
+      "prononcé à l'égalité de niveau ET d'échéance, et seulement quand il y a une ligne en " +
+      "vigueur à cette portée exacte — sans quoi le refus parlerait d'une ligne qui " +
+      "n'existe pas. ⚠️ SEUL DÉFAUT DE CE LOT QUI SOIT D'ABORD UN DÉFAUT DU " +
+      "CAHIER DES CHARGES : le § 20 rend ce chemin « libre d'où que ça vienne » sans " +
+      "distinguer RESSERRER de RÉÉCRIRE L'ATTESTATION. Mesuré : une ligne `libre` posée " +
+      "depuis `console` avec TOTP et `ops:policy` était remplaçable par une ligne `libre` de " +
+      "même portée et même échéance venue de `mcp` ; le niveau servi ne bouge pas, " +
+      "l'ATTRIBUTION change. Le § 12, règle 2, dit que sans `channel` la protection second " +
+      "facteur est INAUDITABLE — ici le canal survit, et il ment, ce qui est pire qu'une " +
+      "colonne vide. ⚠️ LA COUPE EST À L'ÉGALITÉ D'ÉCHÉANCE, ET PAS AILLEURS : une " +
+      "échéance antérieure raccourcit, donc resserre, donc reste libre — les DEUX témoins " +
+      "inverses le mesurent, sans quoi une fonction qui refuserait tout satisferait la " +
+      "garde. ⚠️ `remplaceesDoffice` N'EST PAS TOUCHÉE : filtrer la supersession par niveau " +
+      "ou par canal fabriquerait des lignes orphelines toujours « en vigueur » que rien ne " +
+      "remplacerait jamais. Le tri se fait AVANT l'écriture. ⚠️ MUTATION REJOUÉE : retirer " +
+      "le refus `resserrage-sans-effet` fait rougir `core/policy/desserrage.spec.ts`.",
+  },
+
+  // ── ADR 0039 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0039",
+    decision:
+      "La chaîne des quatorze étapes est COMPOSÉE à la racine, et le refus de " +
+      "monter un transport sur un noyau absent devient vert parce que le noyau est là.",
+    etat: "cousue",
+    symbole: "orchestrerAppel",
+    genre: "fonction",
+    module: "core/chaine/orchestrateur.ts",
+    mesureeAilleurs: "core/chaine/orchestrateur.spec.ts",
+    motif:
+      "1 appelant de production MESURÉ : `ops/composition/noyau.ts`. LE ZÉRO EST LEVÉ, ET " +
+      "C'ÉTAIT LA MESURE DU LOT 2 — « le socle DÉMARRE et ne SERT PAS depuis son propre " +
+      "processus ». Il sert : lancement réel, réglages factices sur `stub.invalid`, " +
+      "`node dist/ops/index.js --provisionner-le-coffre-local`, 7 étage(s) franchi(s), " +
+      "28 champ(s) de `DependancesOrchestrateur` composé(s), transport stdio monté, " +
+      "0 empêchement, `tools/list` servi PAR LE PROCESSUS LUI-MÊME, code de sortie 0. Et un " +
+      "`tools/call` sur un outil inconnu est refusé à l'ÉTAPE 6, code `tool_disabled` : la " +
+      "chaîne est TRAVERSÉE, pas simulée. ⚠️ LA GARDE DE `monterLeService` N'A PAS BOUGÉ " +
+      "D'UN CARACTÈRE — elle est verte PARCE QUE LE NOYAU EST LÀ. Le témoin inverse la " +
+      "rejoue sans clé de scellement (`ops/composition/noyau.spec.ts` ③, " +
+      "`ops/service.spec.ts` « SAIT DIRE NON ») et elle refuse de nouveau. ⚠️ ET LA " +
+      "COMPOSITION BUTE ENCORE SUR LE MANQUE MESURÉ : le coffre implémente DEUX ponts de " +
+      "lecture de clé — `lireCleArgHash` et `lireCleSceauJournal` — et le port de clé des " +
+      "curseurs n'en a toujours AUCUNE. `SANS_PONT_DE_CLE_DE_CURSEUR` le NOMME et rend " +
+      "`null`, ce qui fait LEVER `creerSignataireCurseur` à la première pagination — " +
+      "fail-loud, jamais une clé de repli connue. ⚠️ **CE MOTIF A DÉCRIT PENDANT UN LOT " +
+      "ENTIER UN LANCEMENT À LA MAIN, ET AUCUNE GARDE NE LE REJOUAIT.** La recette l'a " +
+      "mesuré par la mutation que l'ADR nomme lui-même : `ops/index.ts`, " +
+      "`noyau: noyau.fabrique,` → `noyau: null,`, suite COMPLÈTE " +
+      "`Tests 1489 passed | 31 expected fail (1520)` — SURVIVANTE. Ce qui existait " +
+      "éprouvait `composerLeNoyau` en isolation et remettait un noyau fabriqué à " +
+      "`PortsDuService` : la chaîne était COMPOSABLE, et la ligne qui la COMPOSE n'était " +
+      "traversée par aucun test. `ops/racine-en-service.temoin.spec.ts` la traverse " +
+      "désormais — `demarrerLeProcessus` sur un environnement fabriqué, coffre local en " +
+      "mémoire, deux requêtes poussées sur le fil, `tools/call` refusé à l'étape DÉRIVÉE " +
+      "d'`APPEL_STEPS` — et la même mutation MEURT : `Test Files 1 failed | 132 passed`.",
+  },
+  {
+    adr: "0039",
+    decision:
+      "Un noyau PAR COLONNE : le montage appelle la fabrique une fois par " +
+      "transport, sans quoi les appels HTTP seraient servis avec la colonne de stdio.",
+    etat: "cousue",
+    symbole: "FabriqueDeNoyau",
+    genre: "type",
+    module: "core/transport/contrat.ts",
+    mesureeAilleurs: "ops/service.spec.ts",
+    motif:
+      "2 importateurs de production MESURÉS : `ops/service.ts` — dont `PortsDuService.noyau` " +
+      "EST désormais une fabrique nullable, plus un noyau nullable — et " +
+      "`ops/composition/noyau.ts`, qui la rend. Le montage l'appelle UNE FOIS PAR TRANSPORT " +
+      "MONTÉ, et `ServiceMonte.colonnesFrappees` le COMPTE. Mesuré : deux transports " +
+      "montés → colonnes demandées `[http, stdio]`, 2 noyaux frappés ; et sur la fabrique " +
+      "RÉELLE, la trace rend « demandée http → servie http · 4 étapes en amont » contre " +
+      "« demandée stdio → servie stdio · 0 étape en amont ». ⚠️ LA GARDE PORTE SUR " +
+      "L'ÉGALITÉ DEMANDÉE = SERVIE, PAS SUR LE COMPTE : un montage qui frapperait deux " +
+      "noyaux en leur passant la même colonne rendrait « 2 frappés » en restant faux, et " +
+      "l'écart d'étapes amont (4 contre 0) est ce qui empêche l'égalité d'être verte sur " +
+      "une fabrique qui ignorerait son paramètre. ⚠️ CE QUE CETTE FORME EMPÊCHE, ET QUE RIEN D'AUTRE " +
+      "NE VERRAIT : c'est le champ `transport` de `DependancesOrchestrateur` qui fait lire " +
+      "la colonne du § 11 — étapes applicables, étapes établies en amont, étapes hors " +
+      "colonne. Un noyau unique composé en `stdio` et remis aux deux transports servirait " +
+      "les appels HTTP en croyant que les quatre étapes « HTTP seul » n'existent pas, et " +
+      "`verifierCouvertureDesEtapes` ne le verrait PAS : elle boucle à l'étage 6 sur les " +
+      "NOMS de transports, jamais sur les noyaux montés. ⚠️ CE N'EST PAS UNE CONTRADICTION " +
+      "AVEC L'ADR 0025 : les deux noyaux partagent tout ce qui décide et ne diffèrent que " +
+      "par leur colonne — un seul CHEMIN, pas un seul objet.",
+  },
+  {
+    adr: "0039",
+    decision:
+      "La composition vit dans son propre dossier : `ops/index.ts` RELIE, " +
+      "`ops/main.ts` SÉQUENCE, `ops/service.ts` MONTE, `ops/composition/` COMPOSE.",
+    // ⚠️ **CETTE ENTRÉE ÉTAIT « à-nommer » ET LE DOSSIER A ATTERRI.** La garde
+    //    l'a dit le jour même, mot pour mot : « l'état « à-nommer » attend
+    //    l'ABSENCE de ops/composition/, et le dossier a atterri — l'entrée doit
+    //    nommer son symbole ». Le symbole est nommé, et l'entrée redevient
+    //    falsifiable dans les deux sens.
+    etat: "cousue",
+    symbole: "composerLeNoyau",
+    genre: "fonction",
+    module: "ops/composition/noyau.ts",
+    mesureeAilleurs: "ops/composition/noyau.spec.ts",
+    motif:
+      "1 appelant de production MESURÉ : `ops/index.ts`. ⚠️ POURQUOI UN DOSSIER À PART, ET " +
+      "PAS `ops/index.ts` : la composition écrite dans le point d'entrée serait inéprouvable " +
+      "sans lire `process.env`, et c'est exactement le motif qui a fait séparer " +
+      "`ops/service.ts` de `ops/main.ts` à l'ADR 0034. Tenu : `composerLeNoyau` ne nomme ni " +
+      "`process`, ni une variable d'environnement, ni une socket, et sa garde compose DEUX " +
+      "noyaux dans le même test. ⚠️ CE QUE LA COMPOSITION N'A PAS LE DROIT DE FABRIQUER : " +
+      "`validerEntree`, `appelAdaptateur` et `reglages` exigent un adaptateur, et aucun " +
+      "n'est admis. Ils sont composés en REFUS NOMMÉ — `ErreurAdaptateurNonAdmis`, qui " +
+      "porte le PORT et l'OUTIL —, jamais en fonctions de complaisance : une validation " +
+      "qui rendrait toujours succès serait le « vert parce qu'il ne regarde rien » dans sa " +
+      "forme la plus pure, et elle traverserait toutes les gardes du dépôt. ⚠️ ET LE TÉMOIN " +
+      "ATTEINT CE REFUS PAR LA CHAÎNE, PAS PAR SA SIGNATURE : un outil est mis à " +
+      "l'inventaire, l'appel traverse les étapes 0, 5, 6 et 7 et LÈVE sur `reglages` ; le " +
+      "journal écrit quand même sa ligne, en `decision: interrompu` — l'invariant de sortie " +
+      "du § 11 tient jusque sur le chemin d'exception.",
+  },
+
+  // ── ADR 0040 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0040",
+    etat: "hors-code",
+    decision:
+      "Le plafond de durée d'un test est POSÉ (30 000 ms, crochets compris) et sa " +
+      "marge se SURVEILLE : alerte dès qu'un test dépasse la moitié du plafond.",
+    motif:
+      "AUCUN SYMBOLE LIVRÉ, et le motif est mesurable : la décision vit dans " +
+      "`vitest.config.ts`, que `tsconfig.build.json` exclut par le motif `*.config.ts` — " +
+      "la garde des coutures en dérive le MÊME critère, donc ce fichier n'est pas un " +
+      "module de production. ⚠️ LE FAIT MESURÉ : le fichier ne posait NI `testTimeout` NI " +
+      "`hookTimeout`, donc 5 000 ms par test et 10 000 ms par crochet. Sur une exécution " +
+      "complète VERTE, cinq gardes du registre tenaient entre 3 433 et 3 895 ms — " +
+      "**22 % de marge**. C'est ce qui a fait voir 17 puis 9 tests rouges à un observateur " +
+      "pendant que la suite était verte pour un autre : les deux mesures sont vraies, et " +
+      "c'est la signature d'une marge trop mince, pas d'un désaccord. ⚠️ **ET LA MARGE A " +
+      "ÉTÉ FRANCHIE PAR CE LOT-CI, DANS LA MÊME SESSION.** Les quatorze entrées ajoutées " +
+      "ci-dessus et les six ADR neufs ont porté ces mêmes gardes à 5 719, 8 097, 8 236 et " +
+      "10 738 ms : 8 tests rouges dans 3 fichiers, tous en « Test timed out in 5000ms », " +
+      "pendant qu'elles annonçaient « 79 symbole(s) confronté(s) · 0 anomalie(s) ». LE " +
+      "REGISTRE ÉTAIT JUSTE, LES GARDES ONT EXPIRÉ — la panne exacte que l'ADR décrit, sur " +
+      "un arbre où la règle gardée était tenue. ⚠️ ET LE PLAFOND A UNE SEULE ÉCRITURE, " +
+      "DEUX LECTEURS : le contrôle de marge IMPORTE la valeur au lieu de la recopier, " +
+      "sinon il mesurerait une marge par rapport à un plafond qui n'existe plus, en " +
+      "restant vert. ⚠️ DETTE OUVERTE ET DATÉE : à 10 738 ms, le pire cas tient déjà 36 % " +
+      "du plafond neuf ; la réponse au prochain dépassement est de MÉMOÏSER le balayage " +
+      "du dépôt, jamais de remonter le plafond.",
+  },
+  {
+    adr: "0040",
+    etat: "hors-code",
+    decision:
+      "L'ARMEMENT n'écrit plus le seuil : le crochet qui fait rougir un test " +
+      "DÉRIVE sa décision du même verdict que la fonction pure, et une garde le vérifie.",
+    motif:
+      "AUCUN SYMBOLE LIVRÉ : `plafond-de-test.config.ts` et `marge-des-gardes.config.ts` " +
+      "sortent tous deux du périmètre livré par le motif `*.config.ts`, dont la garde des " +
+      "coutures dérive son critère. ⚠️ LE FAIT MESURÉ PAR LA RECETTE : le seuil était " +
+      "écrit DEUX fois — dans `verdictDeMarge().depassements`, gardé, et dans " +
+      "l'`afterEach` d'amorce sous la forme `if (dureeMs > seuilMs)`, gardé par RIEN. " +
+      "Celle des deux écritures qui faisait réellement rougir les tests du dépôt était la " +
+      "non gardée. La mutation qui la neutralise — `> PLAFOND_DE_TEST_MS`, condition qui " +
+      "ne peut plus jamais tirer puisque vitest tue le test AU plafond avant l'`afterEach` " +
+      "— a survécu à la suite complète : `Tests 1489 passed | 31 expected fail (1520)`, " +
+      "zéro fichier rouge. ⚠️ CE QUI A ÉTÉ FAIT : `alerteDeDepassement` porte la décision, " +
+      "appelle `verdictDeMarge`, et l'amorce ne fait plus que la relayer. Trois témoins " +
+      "l'éprouvent dans `core/audit/marge-des-gardes.spec.ts` — une durée fabriquée à " +
+      "60 % du plafond lève, une à 49 % ne lève pas, et le TROISIÈME lit le fichier " +
+      "d'amorce sur disque, retire sa prose, et exige 1 appel au verdict et 0 comparaison " +
+      "propre de `dureeMs`. Sans ce troisième, l'amorce pourrait reprendre sa propre " +
+      "comparaison demain sans que rien ne rougisse. ⚠️ DEUX MUTATIONS SUCCESSEURS REJOUÉES, " +
+      "TOUTES DEUX TUÉES : la part portée à 1 dans `alerteDeDepassement` (2 tests rouges) " +
+      "et l'appel remplacé par `null` dans l'amorce (1 test rouge, celui qui lit la source).",
+  },
+  {
+    adr: "0040",
+    etat: "cousue",
+    decision:
+      "La dérivation du graphe d'appels retire la prose et les liaisons UNE FOIS " +
+      "PAR FICHIER, jamais une fois par couple (entrée × fichier) : c'est le remède que " +
+      "l'ADR prescrit — rendre la garde moins chère —, et non remonter le plafond.",
+    symbole: "sansProse",
+    genre: "fonction",
+    module: "core/coutures/verifier.ts",
+    mesureeAilleurs: "core/coutures/couture.temoin.spec.ts",
+    motif:
+      "⚠️ LE FAIT MESURÉ PAR LA RECETTE, ET C'EST LE CONSTAT N° 1 DU LOT : la suite " +
+      "complète N'ÉTAIT PAS REPRODUCTIBLE. Cinq exécutions vertes, puis une rouge, sur un " +
+      "arbre inchangé — `Test Files 2 failed | 131 passed`. La cause est nommée : " +
+      "`sansProse` et `sansLiaisons` étaient appelées au cœur d'une double boucle de " +
+      "89 entrées × 134 modules, soit près de 12 000 passages de quatre expressions " +
+      "régulières globales sur des sources entières, pour un résultat qui ne dépend QUE du " +
+      "fichier. Les gardes tenaient 4 641 ms sur machine calme et 15 663 ms sur machine " +
+      "chargée — au-delà du seuil d'alerte de 15 000 ms —, si bien que l'alarme de " +
+      "l'ADR 0040 tirait sur une garde JUSTE. ⚠️ LA CONTENTION ÉTAIT RÉELLE ET IDENTIFIÉE : " +
+      "une seconde session travaillait sur un autre dépôt de la même machine, et les " +
+      "durées de la suite passaient de 25 s à 67 s. ⚠️ APRÈS : les deux fonctions sont " +
+      "PURES, leur résultat est calculé une fois par fichier, et le pire cas passe de " +
+      "4 641 ms à 1 337 ms — marge 15 % → 4 %. Mesuré : TROIS suites concurrentes, plus " +
+      "dur que la condition qui cassait, 133 fichiers verts chacune, ZÉRO alerte. " +
+      "⚠️ CE N'EST PAS UN ASSOUPLISSEMENT, ET LA MUTATION LE DIT : basculer l'entrée " +
+      "`orchestrerAppel` de `cousue` à `à-coudre` fait toujours rougir les TROIS gardes de " +
+      "désaccord, dans les DEUX fichiers — en 4 à 37 ms au lieu de plusieurs secondes. Le " +
+      "corpus confronté n'a pas changé d'un caractère ; seul le nombre de calculs a changé.",
+  },
 ];
 
 /**

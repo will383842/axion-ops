@@ -569,16 +569,27 @@ describe("TÉMOIN — les deux canaux de l'admission ne se vident pas en chemin"
       anomaliesCompletes(annonce.verdict, annonce.nom),
     );
 
+    // ⚠️ LE COMPTE ATTENDU EST DÉRIVÉ, PAS ÉCRIT. Ce témoin portait « 2 » en
+    //    dur ; le jour où l'admission a gagné une troisième garde annoncée
+    //    (§ 13.3, ADR 0036), il a rougi pour une raison ÉTRANGÈRE à ce qu'il
+    //    garde — que le canal soit rendu SUR TOUS LES CHEMINS, y compris le
+    //    refus le plus précoce. La référence est donc le chemin NOMINAL du
+    //    MÊME document : c'est lui qui dit combien de gardes s'annoncent.
+    const surLeCheminNominal = admettre(manifeste).annonces.length;
+
     console.log(
       `[témoin canal sur refus] motifs : ${motifs(resultat).join(", ")} · ` +
-        `${String(resultat.annonces.length)} annonce(s) · ${String(lignes.length)} ligne(s)`,
+        `${String(resultat.annonces.length)} annonce(s) sur le refus précoce · ` +
+        `${String(surLeCheminNominal)} sur le chemin nominal · ` +
+        `${String(lignes.length)} ligne(s)`,
     );
     for (const ligne of lignes) console.log(`  · ${ligne}`);
 
     expect(resultat.admis).toBe(false);
     expect(motifs(resultat)).toEqual(["adaptateur_absent_du_verrou"]);
-    // Les deux gardes sont rendues, et celle qui n'a rien mesuré LE DIT.
-    expect(resultat.annonces.length).toBe(2);
+    // Toutes les gardes sont rendues, et celle qui n'a rien mesuré LE DIT.
+    expect(surLeCheminNominal).toBeGreaterThan(0);
+    expect(resultat.annonces.length).toBe(surLeCheminNominal);
     expect(lignes.join(" ")).toContain("n'a pas regardé assez pour conclure");
   });
 

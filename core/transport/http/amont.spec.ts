@@ -20,15 +20,17 @@ import {
   ETAPE_HOTE,
   ETAPE_JETON,
   ETAPE_REVOCATION,
+  JOURNAL_AMONT_NON_ARME,
   franchirLAmont,
 } from "./amont.js";
 import { codeDuRefusAmont } from "./codes.js";
-import type { DependancesAmont, ReglagesAmont } from "./amont.js";
+import type { DependancesAmont, JournalDesRefusEnAmont, ReglagesAmont } from "./amont.js";
 import {
   AUDIENCE_DE_TEMOIN,
   HOTE_DE_TEMOIN,
   PORTEUR_DE_TEMOIN,
   journalDeTemoin,
+  journalQuiEchoueDeTemoin,
   ligneOpsTokenDeTemoin,
   registreDeTemoin,
   revendicationsDeTemoin,
@@ -234,6 +236,185 @@ describe("§ 11 — les étapes 1 à 4 s'exécutent dans l'ordre, et s'arrêtent
     expect(trace.lignesOpsTokenConfrontees).toBe(1);
     expect(trace.champsDeJournalInspectes).toBeGreaterThanOrEqual(15);
     expect([...trace.etapesFranchies]).toEqual([...ETAPES_DUES_AU_TRANSPORT]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ADR 0037, § 1 — LE COMPTE SUR LE CHEMIN **NON ARMÉ**
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ⚠️ **LA GARDE QUI MANQUAIT, ET SON ABSENCE A ÉTÉ MESURÉE.** La garde du § 11
+ *    ci-dessus compte `journal.consignes().length` d'un journal de TEST **ARMÉ** :
+ *    elle ne pouvait pas voir le chemin non armé, qui est pourtant celui de
+ *    toute composition d'aujourd'hui. Neuf occurrences de `refusConsignes` dans
+ *    le dépôt, **aucune assertion** — et la mutation `refusConsignes += 0`
+ *    (lot 3, M1) a survécu à la suite complète.
+ *
+ * ⚠️ **TROIS ÉTATS, ET ILS NE SE DÉDUISENT PAS L'UN DE L'AUTRE.** Port absent
+ *    (`JOURNAL_AMONT_NON_ARME`) → 0 ; port armé qui écrit → 1 ; port armé qui
+ *    ÉCHOUE à écrire → 0 avec un appel reçu. Sans le troisième, « 0 consigné »
+ *    se lirait « aucun port », et un port muet passerait pour un socle nu.
+ */
+describe("ADR 0037 — le compteur de refus consignés dit ce que le port a ÉCRIT", () => {
+  interface Cas {
+    readonly nom: string;
+    readonly journal: JournalDesRefusEnAmont;
+    /** Le port a-t-il reçu l'appel ? `null` quand on ne peut pas le savoir. */
+    readonly appelsRecus: (() => number) | null;
+    readonly consignesAttendues: number;
+  }
+
+  /** Les cinq refus d'amont, DÉRIVÉS — jamais recopiés d'une liste. */
+  const refusDAmont: ReadonlyArray<{
+    readonly nom: string;
+    readonly entetes: {
+      readonly hote: string | undefined;
+      readonly autorisation: string | undefined;
+    };
+    readonly revendications: ReturnType<typeof revendicationsDeTemoin> | null;
+    readonly ligne: ReturnType<typeof ligneOpsTokenDeTemoin> | null;
+  }> = [
+    {
+      nom: "hôte hors liste blanche",
+      entetes: { hote: "attaquant.stub.invalid", autorisation: ENTETES_CONFORMES.autorisation },
+      revendications: revendicationsDeTemoin(),
+      ligne: ligneOpsTokenDeTemoin(),
+    },
+    {
+      nom: "aucun en-tête Authorization",
+      entetes: { hote: HOTE_DE_TEMOIN, autorisation: undefined },
+      revendications: revendicationsDeTemoin(),
+      ligne: ligneOpsTokenDeTemoin(),
+    },
+    {
+      nom: "jeton refusé par l'émetteur",
+      entetes: ENTETES_CONFORMES,
+      revendications: null,
+      ligne: ligneOpsTokenDeTemoin(),
+    },
+    {
+      nom: "jeton d'une AUTRE audience",
+      entetes: ENTETES_CONFORMES,
+      revendications: revendicationsDeTemoin({ audience: "https://autre.stub.invalid/api/mcp" }),
+      ligne: ligneOpsTokenDeTemoin(),
+    },
+    {
+      nom: "jti révoqué ou inconnu",
+      entetes: ENTETES_CONFORMES,
+      revendications: revendicationsDeTemoin(),
+      ligne: null,
+    },
+  ];
+
+  it("annonce « 1 prononcé · 0 consigné » sur un socle NON ARMÉ, et « 1 · 1 » sur un socle armé", async () => {
+    const desaccords: string[] = [];
+    let refusMesures = 0;
+
+    for (const refus of refusDAmont) {
+      const cas: readonly Cas[] = [
+        {
+          nom: "port NON ARMÉ",
+          journal: JOURNAL_AMONT_NON_ARME,
+          appelsRecus: null,
+          consignesAttendues: 0,
+        },
+        (() => {
+          const arme = journalDeTemoin();
+          return {
+            nom: "port ARMÉ qui écrit",
+            journal: arme,
+            appelsRecus: () => arme.consignes().length,
+            consignesAttendues: 1,
+          };
+        })(),
+        (() => {
+          const muet = journalQuiEchoueDeTemoin();
+          return {
+            nom: "port ARMÉ qui n'a RIEN écrit",
+            journal: muet,
+            appelsRecus: () => muet.consignes().length,
+            consignesAttendues: 0,
+          };
+        })(),
+      ];
+
+      for (const cas_ of cas) {
+        const resultat = await franchirLAmont(refus.entetes, REGLAGES, {
+          verificateurDeJeton: verificateurDeTemoin(refus.revendications),
+          registreDesJetons: registreDeTemoin(refus.ligne),
+          journalDesRefus: cas_.journal,
+        });
+        refusMesures += 1;
+
+        if (resultat.genre !== "refus") {
+          desaccords.push(`${refus.nom} / ${cas_.nom} : aucun refus prononcé`);
+          continue;
+        }
+        if (resultat.trace.refusPrononces !== 1) {
+          desaccords.push(
+            `${refus.nom} / ${cas_.nom} : ${String(resultat.trace.refusPrononces)} refus ` +
+              "prononcé(s) au lieu de 1",
+          );
+        }
+        if (resultat.trace.refusConsignes !== cas_.consignesAttendues) {
+          desaccords.push(
+            `${refus.nom} / ${cas_.nom} : ${String(resultat.trace.refusConsignes)} consigné(s) ` +
+              `au lieu de ${String(cas_.consignesAttendues)}`,
+          );
+        }
+        // Le port a été APPELÉ à l'instant exact — c'est l'invariant du § 11, et
+        // il est distinct du fait qu'une ligne ait été écrite.
+        if (cas_.appelsRecus !== null && cas_.appelsRecus() !== 1) {
+          desaccords.push(
+            `${refus.nom} / ${cas_.nom} : le port a reçu ${String(cas_.appelsRecus())} appel(s) ` +
+              "au lieu de 1 — l'instant du § 11 n'a pas été atteint",
+          );
+        }
+      }
+    }
+
+    console.info(
+      `[ADR 0037 · amont non armé] ${String(refusDAmont.length)} refus d'amont × 3 états de port = ` +
+        `${String(refusMesures)} mesure(s) · ${String(desaccords.length)} désaccord(s)`,
+    );
+
+    // Planchers : la confrontation a réellement eu lieu, sur les trois états.
+    expect(refusDAmont.length).toBeGreaterThanOrEqual(5);
+    expect(refusMesures).toBe(refusDAmont.length * 3);
+    expect(desaccords).toEqual([]);
+  });
+
+  it("TÉMOIN — un port qui rendrait n'importe quoi ne fait pas monter le compte", async () => {
+    // Un port écrit en JavaScript peut rendre `undefined`, `NaN` ou un négatif.
+    // Les additionner ferait remonter un `NaN` dans la trace, c'est-à-dire un
+    // compte qu'aucune comparaison ne peut plus lire.
+    const rendus: readonly unknown[] = [undefined, Number.NaN, -3, 2.5, "1"];
+    const mesures: number[] = [];
+
+    for (const rendu of rendus) {
+      const journal: JournalDesRefusEnAmont = {
+        consigner: () => Promise.resolve(rendu as number),
+      };
+      const resultat = await franchirLAmont(
+        { hote: "attaquant.stub.invalid", autorisation: ENTETES_CONFORMES.autorisation },
+        REGLAGES,
+        {
+          verificateurDeJeton: verificateurDeTemoin(revendicationsDeTemoin()),
+          registreDesJetons: registreDeTemoin(ligneOpsTokenDeTemoin()),
+          journalDesRefus: journal,
+        },
+      );
+      mesures.push(resultat.trace.refusConsignes);
+    }
+
+    console.info(
+      `[ADR 0037 · valeurs aberrantes] ${String(rendus.length)} valeur(s) rendue(s) par le port · ` +
+        `comptes obtenus : [${mesures.join(", ")}]`,
+    );
+
+    expect(mesures).toHaveLength(rendus.length);
+    expect(mesures.every((mesure) => mesure === 0)).toBe(true);
   });
 });
 

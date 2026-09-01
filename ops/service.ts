@@ -41,7 +41,7 @@
  */
 
 import type { Transport } from "../core/chaine/orchestrateur.js";
-import type { NoyauUnique } from "../core/transport/contrat.js";
+import type { FabriqueDeNoyau, NoyauUnique } from "../core/transport/contrat.js";
 import type {
   PontDIdentite,
   RegistreDesJetons,
@@ -78,10 +78,24 @@ import type { SocleDemarre } from "./main.js";
  *    prétendrait servir des outils sans elle écrirait des appels qu'aucune ligne
  *    n'atteste. `null` veut donc dire « la chaîne n'est pas composée », et
  *    {@link monterLeService} le COMPTE plutôt que de le taire.
+ *
+ * ⚠️ **ET C'EST UNE FABRIQUE, PAS UN NOYAU — ADR 0039.** Le champ `transport` de
+ *    `DependancesOrchestrateur` fait lire à l'orchestrateur la colonne du § 11 :
+ *    quelles étapes s'appliquent, lesquelles sont établies en amont, lesquelles
+ *    ne s'appliquent pas du tout. Un noyau unique composé en `stdio` puis remis
+ *    aux DEUX transports servirait les appels HTTP en croyant que les quatre
+ *    étapes « HTTP seul » n'existent pas — et RIEN ne le verrait :
+ *    `verifierCouvertureDesEtapes` boucle à l'étage 6 sur les NOMS de
+ *    transports, jamais sur les noyaux montés. Ce montage appelle donc la
+ *    fabrique **une fois par transport monté**, avec le nom de la colonne qu'il
+ *    monte, et {@link ServiceMonte.colonnesFrappees} le COMPTE.
  */
 export interface PortsDuService {
-  /** LE SEUL chemin par lequel un appel d'outil atteint le socle (ADR 0025). */
-  readonly noyau: NoyauUnique | null;
+  /**
+   * LE SEUL chemin par lequel un appel d'outil atteint le socle (ADR 0025), et
+   * il se frappe une fois par colonne (ADR 0039).
+   */
+  readonly noyau: FabriqueDeNoyau | null;
   readonly catalogue: CatalogueServiEnStdio;
   /** § 19 bis — CALCULÉES par le socle. Le fil ne les porte jamais. */
   readonly habilitations: () => Habilitations;
@@ -144,6 +158,16 @@ export interface ServiceMonte {
    *    quand ils divergent, c'est celui-ci qui dit la vérité.
    */
   readonly transportsMontes: readonly Transport[];
+  /**
+   * COMBIEN DE NOYAUX LA FABRIQUE A ÉTÉ APPELÉE À FRAPPER — ADR 0039.
+   *
+   * ⚠️ **CE COMPTE DOIT ÉGALER `transportsMontes.length`, ET C'EST LA SEULE
+   *    FAÇON DE VOIR LE DÉFAUT QUE L'ADR 0039 FERME.** Un montage qui frapperait
+   *    UN noyau et le remettrait aux deux transports rendrait ici 1 pour 2
+   *    transports montés — et rien d'autre, dans tout le socle, ne le dirait :
+   *    la garde de couverture des étapes boucle sur les noms de transports.
+   */
+  readonly colonnesFrappees: number;
   /** § 23 — les appels d'outils sont-ils servis, et par quel chemin ? */
   readonly sertLesOutils: boolean;
   /**
@@ -215,8 +239,8 @@ export function monterLeService(
         "un terminal.",
     );
   }
-  const noyau = ports.noyau;
-  if (noyau === null) {
+  const fabriqueDuNoyau = ports.noyau;
+  if (fabriqueDuNoyau === null) {
     empechements.push(
       "la chaîne des quatorze étapes n'est pas composée : aucun noyau n'a été remis au montage. " +
         "Un transport monté sur un noyau absent servirait des appels qu'aucune ligne d'`ops_audit` " +
@@ -224,15 +248,30 @@ export function monterLeService(
     );
   }
 
-  const sertLesOutils = empechements.length === 0 && noyau !== null;
+  const sertLesOutils = empechements.length === 0 && fabriqueDuNoyau !== null;
 
   let transportHttp: TransportHttp | null = null;
   let serveurHttp: ServeurHttp | null = null;
   let serveurStdio: ServeurStdio | null = null;
   let attacheStdio: AttacheAuxFlux | null = null;
   const montes: Transport[] = [];
+  // ⚠️ **UN NOYAU PAR COLONNE, FRAPPÉ AU MOMENT DU MONTAGE — ADR 0039.** Frapper
+  //    une fois hors de la boucle et réutiliser l'objet est EXACTEMENT le défaut
+  //    que la fabrique existe pour rendre impossible.
+  let colonnesFrappees = 0;
+  const frapperLeNoyauDe = (transport: Transport): NoyauUnique => {
+    if (fabriqueDuNoyau === null) {
+      throw new ErreurDeMontageDuService(
+        `aucune fabrique de noyau pour la colonne « ${transport} » — ce chemin est ` +
+          "inatteignable tant que `sertLesOutils` est vrai ; s'il est atteint, c'est que le " +
+          "montage a cessé de dériver sa condition de l'absence de noyau.",
+      );
+    }
+    colonnesFrappees += 1;
+    return fabriqueDuNoyau(transport);
+  };
 
-  if (sertLesOutils && noyau !== null) {
+  if (sertLesOutils && fabriqueDuNoyau !== null) {
     if (reglages.transports.includes("http")) {
       const verificateur = ports.verificateurDeJeton;
       const registre = ports.registreDesJetons;
@@ -259,7 +298,7 @@ export function monterLeService(
           verificateurDeJeton: verificateur,
           registreDesJetons: registre,
           pontDIdentite: ports.pontDIdentite,
-          noyau,
+          noyau: frapperLeNoyauDe("http"),
           maintenant: ports.maintenant,
         },
       );
@@ -281,7 +320,7 @@ export function monterLeService(
         );
       }
       serveurStdio = creerServeurStdio({
-        noyau,
+        noyau: frapperLeNoyauDe("stdio"),
         catalogue: ports.catalogue,
         habilitations: ports.habilitations,
         maintenant: ports.maintenant,
@@ -304,6 +343,7 @@ export function monterLeService(
     serveurStdio,
     attacheStdio,
     transportsMontes: montes,
+    colonnesFrappees,
     sertLesOutils,
     empechements,
     ecouter: async (): Promise<{ readonly adresse: string; readonly port: number } | null> => {

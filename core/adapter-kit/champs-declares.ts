@@ -83,6 +83,12 @@
 
 import { sousSchemas } from "./fermeture.js";
 import type { ObjetJson, ValeurJson } from "./json.js";
+// ADR 0035 — la borne et les FORMES de la mesure sont posées dans
+// `capacite.ts` et IMPORTÉES ici. Recopier le nombre en ferait une seconde
+// vérité : l'encadrement `45 ≤ 64 < 160` ne porterait plus que sur l'une des
+// deux copies, et c'est toujours l'autre qui sert.
+import { BORNE_DE_FERMETURE } from "./capacite.js";
+import type { MesureDeCapacite, MesurerLaCapacite, RaisonDeNonBorne } from "./capacite.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  CE QUI REFERME L'ENSEMBLE DES VALEURS D'UN CHAMP
@@ -101,18 +107,46 @@ import type { ObjetJson, ValeurJson } from "./json.js";
  *    transporte une chaîne de requête arbitraire. Le format est respecté et le
  *    contenu sort quand même — c'est la définition d'une exfiltration.
  *
- * Les formats retenus décrivent des ensembles où l'on ne loge pas de prose :
- * dates, durées, identifiants, adresses réseau.
+ * ⚠️ **TROIS DES SEPT SONT SORTIS — ADR 0035, ET C'ÉTAIT LE JUMEAU OUBLIÉ DU
+ *    DÉFAUT DE `pattern`.** La règle « un mot-clé ne referme que s'il BORNE LA
+ *    CAPACITÉ » s'applique ici mot pour mot, et personne ne l'avait mesuré :
+ *
+ *    | format      | forme canonique la plus longue           | bornée ? |
+ *    | ----------- | ---------------------------------------- | -------- |
+ *    | `date`      | `2026-09-01` — 10                        | oui      |
+ *    | `uuid`      | 36                                       | oui      |
+ *    | `ipv4`      | `255.255.255.255` — 15                   | oui      |
+ *    | `ipv6`      | 45                                       | oui      |
+ *    | `time`      | fraction de seconde de longueur LIBRE    | **non**  |
+ *    | `date-time` | idem                                     | **non**  |
+ *    | `duration`  | `P` + un nombre de chiffres LIBRE        | **non**  |
+ *
+ *    Combiné au fait que `format` ne valide RIEN, un
+ *    `{ "type": "string", "format": "duration" }` refermait un champ qui accepte
+ *    n'importe quoi — **un contournement plus court à écrire que celui trouvé par
+ *    l'audit**, puisqu'il n'y a même pas de motif à fabriquer.
+ *
+ *    Les trois écartés ne referment plus SEULS. Ils referment accompagnés d'un
+ *    `maxLength` sous la borne ou d'un `pattern` borné, comme n'importe quel
+ *    autre champ textuel. C'est un RESSERRAGE, donc il est libre (§ 20,
+ *    protection 1) : il ne peut faire que de la surveillance en plus.
+ *
+ * Les quatre formats retenus décrivent des ensembles bornés sous
+ * {@link BORNE_DE_FERMETURE}, où l'on ne loge donc pas de prose.
  */
-export const FORMATS_CONTRAIGNANTS: ReadonlySet<string> = new Set([
-  "date",
-  "time",
-  "date-time",
-  "duration",
-  "uuid",
-  "ipv4",
-  "ipv6",
-]);
+export const FORMATS_CONTRAIGNANTS: ReadonlySet<string> = new Set(["date", "uuid", "ipv4", "ipv6"]);
+
+/**
+ * LES `format` QUE L'ADR 0035 A ÉCARTÉS, ET POURQUOI ILS SONT NOMMÉS ICI.
+ *
+ * ⚠️ **UN RETRAIT QUI NE LAISSE PAS DE TRACE EST UN RETRAIT QU'ON REFAIT À
+ *    L'ENVERS.** Sans cette liste, rien n'empêche un futur lot de remettre
+ *    `duration` dans {@link FORMATS_CONTRAIGNANTS} « parce qu'une durée n'est pas
+ *    de la prose » — et le contournement le plus court du dépôt rouvrirait en
+ *    une ligne. La garde DÉRIVE d'ici la liste qu'elle confronte : elle ne la
+ *    recopie pas, et un écarté remis en service fait rougir au lieu de passer.
+ */
+export const FORMATS_ECARTES_PAR_CAPACITE: readonly string[] = ["time", "date-time", "duration"];
 
 /**
  * TÉMOINS DE PROSE, confrontés à un `pattern` pour savoir s'il referme.
@@ -157,25 +191,386 @@ function typesDe(schema: ObjetJson): readonly string[] {
   return [];
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  ADR 0035 — LA CAPACITÉ D'UN MOTIF, DÉRIVÉE DE SA SYNTAXE
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **CE N'EST PAS UN ANALYSEUR D'EXPRESSIONS RÉGULIÈRES COMPLET, ET LE
+//    PRÉTENDRE SERAIT LA FAUTE EXACTE QUE L'ADR 0035 CORRIGE.** Le sous-ensemble
+//    reconnu est DÉCLARÉ ci-dessous ; tout ce qui en sort rend `null`, et `null`
+//    ne referme JAMAIS. La direction est fail-closed sans exception : le seul
+//    risque résiduel est de refuser la fermeture à un motif honnête, et il coûte
+//    une confirmation, jamais une fuite.
+//
+// ⚠️ **LE MOTIF N'EST JAMAIS EXÉCUTÉ SUR AUTRE CHOSE QUE LES TÉMOINS.** Il vient
+//    d'un manifeste possiblement fédéré (§ 29) : ce qui le concerne se décide par
+//    LECTURE de sa syntaxe. L'exécution ne sert qu'au filet subordonné, sur trois
+//    chaînes que le socle a lui-même écrites.
+
+/** L'état d'un parcours de motif. Il porte le COMPTE des atomes lus. */
+interface Curseur {
+  readonly motif: string;
+  position: number;
+  noeudsLus: number;
+  raison: RaisonDeNonBorne | null;
+}
+
+/** Le caractère à `decalage` du curseur, ou la chaîne vide en fin de motif. */
+function courant(curseur: Curseur, decalage = 0): string {
+  return curseur.motif[curseur.position + decalage] ?? "";
+}
+
+/**
+ * Marque le parcours comme NON BORNÉ et rend `null`.
+ *
+ * ⚠️ LA PREMIÈRE RAISON GAGNE. Un motif qui porte à la fois un `+` et une vision
+ *    avant est non borné pour la première construction rencontrée ; réécrire la
+ *    raison à chaque nœud ferait dire au rapport la DERNIÈRE cause plutôt que
+ *    celle qui a réellement fermé la question.
+ */
+function nonBorne(curseur: Curseur, raison: RaisonDeNonBorne): null {
+  curseur.raison ??= raison;
+  return null;
+}
+
+/** Consomme `[…]` en entier. Rend `false` si la classe n'est pas refermée. */
+function sauterLaClasse(curseur: Curseur): boolean {
+  curseur.position += 1; // `[`
+  while (curseur.position < curseur.motif.length) {
+    const caractere = courant(curseur);
+    if (caractere === "\\") {
+      curseur.position += 2;
+      continue;
+    }
+    if (caractere === "]") {
+      curseur.position += 1;
+      return true;
+    }
+    curseur.position += 1;
+  }
+  return false;
+}
+
+/** Consomme jusqu'à la parenthèse fermante du groupe courant, incluse. */
+function sauterLeGroupe(curseur: Curseur): void {
+  let profondeur = 1;
+  while (curseur.position < curseur.motif.length && profondeur > 0) {
+    const caractere = courant(curseur);
+    if (caractere === "\\") {
+      curseur.position += 2;
+      continue;
+    }
+    if (caractere === "[") {
+      sauterLaClasse(curseur);
+      continue;
+    }
+    if (caractere === "(") profondeur += 1;
+    if (caractere === ")") profondeur -= 1;
+    curseur.position += 1;
+  }
+}
+
+/** Consomme jusqu'au caractère `fin`, inclus. */
+function sauterJusquA(curseur: Curseur, fin: string): void {
+  while (curseur.position < curseur.motif.length && courant(curseur) !== fin) {
+    curseur.position += 1;
+  }
+  if (curseur.position < curseur.motif.length) curseur.position += 1;
+}
+
+/** La contribution d'un caractère échappé. `\b` et `\B` valent ZÉRO : ce sont des ancres. */
+function borneDeLEchappement(curseur: Curseur): number | null {
+  curseur.position += 1; // `\`
+  const suite = courant(curseur);
+  if (suite === "") return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+  if (suite === "b" || suite === "B") {
+    curseur.position += 1;
+    return 0;
+  }
+  // `\1`…`\9` et `\k<nom>` : la longueur dépend d'une CAPTURE, donc du texte
+  // soumis et non du motif. Rien n'est dérivable — fail-closed.
+  if (suite >= "1" && suite <= "9") {
+    while (/[0-9]/.test(courant(curseur))) curseur.position += 1;
+    return nonBorne(curseur, "reference-arriere");
+  }
+  if (suite === "k") {
+    sauterJusquA(curseur, ">");
+    return nonBorne(curseur, "reference-arriere");
+  }
+  if (suite === "u") {
+    curseur.position += 1;
+    if (courant(curseur) === "{") sauterJusquA(curseur, "}");
+    else curseur.position += 4;
+    return 1;
+  }
+  if (suite === "x") {
+    curseur.position += 3;
+    return 1;
+  }
+  if (suite === "p" || suite === "P") {
+    curseur.position += 1;
+    sauterJusquA(curseur, "}");
+    return 1;
+  }
+  // `\d \w \s \D \W \S`, les caractères de contrôle et tout littéral échappé.
+  curseur.position += 1;
+  return 1;
+}
+
+/** La contribution d'un groupe : celle de son contenu. Les VISIONS rendent `null`. */
+function borneDuGroupe(curseur: Curseur): number | null {
+  curseur.position += 1; // `(`
+  if (courant(curseur) === "?") {
+    const marqueur = courant(curseur, 1);
+    if (marqueur === ":") {
+      curseur.position += 2;
+    } else if (marqueur === "=" || marqueur === "!") {
+      // Une vision AVANT ne consomme rien et peut décrire n'importe quoi : elle
+      // ne contribue pas à la longueur, mais elle rend le raisonnement faux.
+      curseur.position += 2;
+      sauterLeGroupe(curseur);
+      return nonBorne(curseur, "avant-ou-arriere-vision");
+    } else if (marqueur === "<") {
+      const apres = courant(curseur, 2);
+      if (apres === "=" || apres === "!") {
+        curseur.position += 3;
+        sauterLeGroupe(curseur);
+        return nonBorne(curseur, "avant-ou-arriere-vision");
+      }
+      const fin = curseur.motif.indexOf(">", curseur.position + 2);
+      if (fin === -1) {
+        sauterLeGroupe(curseur);
+        return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+      }
+      curseur.position = fin + 1; // `(?<nom>` — un groupe nommé, rien de plus.
+    } else {
+      curseur.position += 1;
+      sauterLeGroupe(curseur);
+      return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+    }
+  }
+  const dedans = borneDeLAlternance(curseur);
+  if (courant(curseur) !== ")") return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+  curseur.position += 1;
+  return dedans;
+}
+
+/** La contribution d'un ATOME, quantificateur non compris. Incrémente `noeudsLus`. */
+function borneDeLAtome(curseur: Curseur): number | null {
+  const caractere = courant(curseur);
+  curseur.noeudsLus += 1;
+  if (caractere === "^" || caractere === "$") {
+    curseur.position += 1;
+    return 0; // Une ancre ne consomme aucun caractère.
+  }
+  if (caractere === ".") {
+    curseur.position += 1;
+    return 1;
+  }
+  if (caractere === "[") {
+    if (!sauterLaClasse(curseur)) return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+    return 1;
+  }
+  if (caractere === "\\") return borneDeLEchappement(curseur);
+  if (caractere === "(") return borneDuGroupe(curseur);
+  if (caractere === "*" || caractere === "+" || caractere === "?" || caractere === "{") {
+    // Un quantificateur sans atome à quantifier : hors du sous-ensemble reconnu.
+    curseur.position += 1;
+    return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+  }
+  curseur.position += 1;
+  return 1;
+}
+
+/** `{n}` → n · `{n,m}` → m · `{n,}` `*` `+` → non borné. */
+const MOTIF_DE_REPETITION = /^(\d+)(,(\d*))?$/;
+
+/** Consomme le `?` de paresse d'un quantificateur, s'il y en a un. */
+function sauterLeParesseux(curseur: Curseur): void {
+  if (courant(curseur) === "?") curseur.position += 1;
+}
+
+/** Le FACTEUR par lequel multiplier l'atome qui précède. `1` en l'absence de quantificateur. */
+function borneDuQuantificateur(curseur: Curseur): number | null {
+  const caractere = courant(curseur);
+  if (caractere === "?") {
+    curseur.position += 1;
+    sauterLeParesseux(curseur);
+    return 1; // Au plus UNE occurrence.
+  }
+  if (caractere === "*" || caractere === "+") {
+    curseur.position += 1;
+    sauterLeParesseux(curseur);
+    return nonBorne(curseur, "quantificateur-non-borne");
+  }
+  if (caractere === "{") {
+    const fin = curseur.motif.indexOf("}", curseur.position);
+    if (fin === -1) {
+      curseur.position += 1;
+      return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+    }
+    const corps = curseur.motif.slice(curseur.position + 1, fin);
+    curseur.position = fin + 1;
+    sauterLeParesseux(curseur);
+    const lu = MOTIF_DE_REPETITION.exec(corps);
+    if (lu === null) return nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+    const bas = lu[1] ?? "";
+    const haut = lu[3] ?? "";
+    // `{n,}` — une borne basse sans borne haute est exactement un `*` décalé.
+    if (lu[2] !== undefined && haut === "") return nonBorne(curseur, "quantificateur-non-borne");
+    return Number(haut === "" ? bas : haut);
+  }
+  return 1;
+}
+
+/** La contribution d'une CONCATÉNATION : la SOMME de ses termes. */
+function borneDeLaSequence(curseur: Curseur): number | null {
+  let total = 0;
+  let bornee = true;
+  while (curseur.position < curseur.motif.length) {
+    const caractere = courant(curseur);
+    if (caractere === "|" || caractere === ")") break;
+    const avant = curseur.position;
+    const atome = borneDeLAtome(curseur);
+    const facteur = borneDuQuantificateur(curseur);
+    if (atome === null || facteur === null) bornee = false;
+    else total += atome * facteur;
+    // ⚠️ GARDE D'ARRÊT. Un parcours qui n'avance pas boucle sans fin sur une
+    //    donnée d'adaptateur. Elle ne doit jamais mordre — et si elle mord, elle
+    //    rend `null`, jamais une borne.
+    if (curseur.position === avant) {
+      curseur.position += 1;
+      bornee = false;
+      nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+    }
+  }
+  if (!bornee) return null;
+  // Une somme qui a débordé les entiers sûrs n'est plus une mesure.
+  if (!Number.isSafeInteger(total)) return nonBorne(curseur, "quantificateur-non-borne");
+  return total;
+}
+
+/** La contribution d'une ALTERNATION : le MAXIMUM de ses branches. */
+function borneDeLAlternance(curseur: Curseur): number | null {
+  let maximum = 0;
+  let bornee = true;
+  for (;;) {
+    const branche = borneDeLaSequence(curseur);
+    if (branche === null) bornee = false;
+    else maximum = Math.max(maximum, branche);
+    if (courant(curseur) !== "|") break;
+    curseur.position += 1;
+  }
+  return bornee ? maximum : null;
+}
+
+/**
+ * Le motif compilé, ou `null` s'il ne compile pas.
+ *
+ * ⚠️ FAIL-CLOSED, ET C'EST LA FORME LA PLUS FACILE À FABRIQUER DEPUIS UN DÉPÔT
+ *    TIERS. Un motif illisible ne referme rien : le tenir pour une fermeture
+ *    ouvrirait la porte qui ne demande aucun effort.
+ */
+function compiler(motif: string): RegExp | null {
+  try {
+    return new RegExp(motif, "u");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * LA MESURE D'UN `pattern` — les QUATRE conditions de l'ADR 0035, ensemble.
+ *
+ * Elle rend des NOMBRES et une raison, jamais un booléen seul : `noeudsLus`
+ * interdit qu'une mesure ayant lu ZÉRO atome rende une borne, et
+ * `raisonDeNonBorne` dit LAQUELLE des cinq constructions non bornables a produit
+ * le `null`. Sans ces deux comptes, la fonction pourrait rendre « fermé » sans
+ * avoir rien lu — exactement comme trois phrases rendaient « fermé » sans rien
+ * prouver.
+ */
+export const mesurerLaCapacite: MesurerLaCapacite = (motif: string): MesureDeCapacite => {
+  const regex = compiler(motif);
+  const compile = regex !== null;
+  // Un motif non ancré aux DEUX bouts ne contraint qu'une sous-chaîne : le reste
+  // de la valeur demeure libre, et c'est là que la prose se loge.
+  const ancreAuxDeuxBouts = motif.startsWith("^") && motif.endsWith("$");
+
+  const curseur: Curseur = { motif, position: 0, noeudsLus: 0, raison: null };
+  let longueurMaximale: number | null = null;
+  if (regex === null) {
+    curseur.raison = "motif-qui-ne-compile-pas";
+  } else {
+    const brut = borneDeLAlternance(curseur);
+    // Un parcours qui s'arrête AVANT la fin du motif n'a pas lu ce qui reste :
+    // conclure sur ce qu'il a vu serait borner la moitié d'un langage.
+    if (curseur.position < motif.length) nonBorne(curseur, "syntaxe-hors-sous-ensemble");
+    else longueurMaximale = brut;
+  }
+
+  // Le filet SUBORDONNÉ, conservé et COMPTÉ. Il ne prouve plus rien à lui seul ;
+  // il continue d'INFIRMER, ce qui est la seule chose qu'un témoin sache faire.
+  const lecteur = regex;
+  const temoinsConfrontes = TEMOINS_DE_PROSE.length;
+  const temoinsRejetes =
+    lecteur === null ? 0 : TEMOINS_DE_PROSE.filter((temoin) => !lecteur.test(temoin)).length;
+
+  return {
+    motif,
+    compile,
+    ancreAuxDeuxBouts,
+    longueurMaximale,
+    raisonDeNonBorne:
+      longueurMaximale === null ? (curseur.raison ?? "syntaxe-hors-sous-ensemble") : null,
+    noeudsLus: curseur.noeudsLus,
+    temoinsConfrontes,
+    temoinsRejetes,
+    referme:
+      compile &&
+      ancreAuxDeuxBouts &&
+      curseur.noeudsLus > 0 &&
+      longueurMaximale !== null &&
+      longueurMaximale <= BORNE_DE_FERMETURE &&
+      temoinsRejetes === temoinsConfrontes,
+  };
+};
+
 /**
  * Le `pattern` de ce sous-schéma referme-t-il réellement l'ensemble des valeurs ?
  *
- * Fail-closed sur un motif qui ne compile pas : un motif illisible ne referme
- * rien, et c'est la forme la plus facile à fabriquer depuis un dépôt tiers.
+ * ⚠️ **IL NE PORTE PLUS SA PROPRE RÈGLE — ADR 0035.** Le verdict est celui de
+ *    {@link mesurerLaCapacite}, et il tient QUATRE conditions ensemble : le motif
+ *    compile, il est ancré aux deux bouts, la longueur maximale du langage qu'il
+ *    accepte est FINIE et tient sous {@link BORNE_DE_FERMETURE}, et il rejette
+ *    les {@link TEMOINS_DE_PROSE}.
+ *
+ * ⚠️ **CE QUE LA TROISIÈME CONDITION A FERMÉ, ET QUI ÉTAIT OUVERT.** Les trois
+ *    témoins ne se distinguent de la prose ordinaire que par des ACCENTS et par
+ *    la ponctuation d'URL : `^[A-Za-z0-9 ,.'()-]{1,2000}$` les rejetait tous les
+ *    trois et admettait deux mille caractères de consigne ASCII. Le champ passait
+ *    pour fermé, `porteUnArgumentLibre` tombait à `false`, et l'étape 11 délivrait
+ *    un laissez-passer aux TROIS niveaux. **Un jeu de témoins n'a jamais prouvé
+ *    une fermeture ; il ne peut que l'infirmer.**
  */
 export function patternReferme(motif: string): boolean {
-  let regex: RegExp;
-  try {
-    regex = new RegExp(motif, "u");
-  } catch {
-    return false;
-  }
-  // Un motif non ancré aux DEUX bouts ne contraint qu'une sous-chaîne : le reste
-  // de la valeur demeure libre, et c'est là que la prose se loge.
-  if (!motif.startsWith("^") || !motif.endsWith("$")) return false;
-  // Et il doit REJETER de la prose. Un `^[\s\S]*$` est ancré des deux côtés et
-  // n'exclut rien : seule la mesure les distingue.
-  return TEMOINS_DE_PROSE.every((temoin) => !regex.test(temoin));
+  return mesurerLaCapacite(motif).referme;
+}
+
+/**
+ * `maxLength` REFERME-T-IL CE CHAMP ? — ADR 0035.
+ *
+ * ⚠️ FAIL-CLOSED SUR TOUT CE QUI N'EST PAS UN ENTIER POSITIF SOUS LA BORNE. Un
+ *    `maxLength: 1.5`, `-1` ou `"64"` est une déclaration qu'aucun validateur
+ *    n'appliquera comme son auteur le croit ; la lire comme une fermeture
+ *    rendrait la surveillance du § 20 achetable par une faute de frappe.
+ */
+function maxLengthReferme(valeur: ValeurJson | undefined): boolean {
+  return (
+    typeof valeur === "number" &&
+    Number.isInteger(valeur) &&
+    valeur >= 0 &&
+    valeur <= BORNE_DE_FERMETURE
+  );
 }
 
 /**
@@ -218,6 +613,12 @@ export function estValeurLibre(schema: ObjetJson, niveau = 0): boolean {
   if (niveau > PROFONDEUR_VALEUR) return true; // fail-closed : trop profond pour conclure.
   if (schema["enum"] !== undefined) return false;
   if (schema["const"] !== undefined) return false;
+
+  // ADR 0035 — `maxLength` est le SEUL des trois mots-clés que JSON Schema
+  // draft 2020-12 VALIDE réellement, et donc le seul qu'un adaptateur puisse
+  // écrire sans se tromper. Il referme sous la même borne que le `pattern` : la
+  // fermeture se mesure en capacité, quel que soit le mot-clé qui la déclare.
+  if (maxLengthReferme(schema["maxLength"])) return false;
 
   const format = schema["format"];
   if (typeof format === "string" && FORMATS_CONTRAIGNANTS.has(format)) return false;
@@ -470,10 +871,13 @@ export function remedeIdFieldSansEffet(nom: string): string {
     "déclaration est SANS EFFET sur la surveillance du § 20, qui ne croit plus aucune " +
     "déclaration à l'entrée (ADR 0015). Un contenu lu peut donc encore se loger dans ce " +
     "champ, et un appel vers un autre domaine demandera une confirmation. Le remède est une " +
-    "ligne de schéma, chez l'adaptateur : un `format` contraignant " +
-    `(${[...FORMATS_CONTRAIGNANTS].join(", ")}), un \`pattern\` ancré aux DEUX bouts qui ` +
-    "rejette la prose (`^[0-9]{1,20}$`), un `enum`/`const`, ou un type non textuel. " +
-    "En Zod : `z.string().uuid()`, `z.string().regex(/^[0-9]{1,20}$/)`."
+    "ligne de schéma, chez l'adaptateur : `maxLength: " +
+    `${String(BORNE_DE_FERMETURE)}\` ou moins — le plus simple, et le seul des trois que ` +
+    "JSON Schema valide réellement —, un `format` contraignant " +
+    `(${[...FORMATS_CONTRAIGNANTS].join(", ")}), un \`pattern\` ancré aux DEUX bouts dont la ` +
+    `longueur maximale acceptée tient sous ${String(BORNE_DE_FERMETURE)} caractères ` +
+    "(`^[0-9]{1,20}$`), un `enum`/`const`, ou un type non textuel. " +
+    "En Zod : `z.string().uuid()`, `z.string().max(64)`, `z.string().regex(/^[0-9]{1,20}$/)`."
   );
 }
 

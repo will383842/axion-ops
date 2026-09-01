@@ -8,6 +8,125 @@ construction, de croisement et d'épreuve.
 > du jeton Coolify — ne sont pas posées. C'est la raison d'être de cette
 > retenue, pas une négligence.
 
+> ### 🟢 2026-09-01 — LOT 3, RECETTE : LE SOCLE SERT DEPUIS SON PROPRE PROCESSUS, ET UNE GARDE LE REJOUE
+>
+> **Le jalon du lot 2 est franchi, et il est mesuré deux fois.**
+>
+> **① Lancement réel**, `npx tsx ops/index.ts --provisionner-le-coffre-local`,
+> réglages factices sur `stub.invalid`, aucun réseau, aucune base :
+>
+> ```
+> [chaîne] 28 champ(s) de `DependancesOrchestrateur` composé(s) · 0 outil(s) au catalogue · fabrique : posée
+> [démarrage] 7 étage(s) confronté(s), 7 franchi(s) · sert : true · coffre : « ouvert » ·
+>             transports MONTÉS : [stdio] · colonnes FRAPPÉES : 1 · 0 empêchement(s)
+> {"jsonrpc":"2.0","id":1,"result":{"tools":[]}}
+> {"jsonrpc":"2.0","id":2,"result":{"isError":true,"step":6,"code":"tool_disabled", …}}
+> CODE=0
+> ```
+>
+> Le `tools/call` est ce qui distingue « le transport répond » de « la chaîne est
+> traversée » : `tools/list` ne touche pas le noyau, le refus à l'**étape 6** si.
+>
+> **② Une garde le rejoue**, et c'est elle qui manquait :
+> `ops/racine-en-service.temoin.spec.ts` appelle `demarrerLeProcessus` — jamais
+> `composerLeNoyau`, jamais un `PortsDuService` fabriqué — sur des flux en
+> mémoire, et lit ce que le socle a servi.
+>
+> #### 🔴 CE QUE LA RECETTE A TROUVÉ, ET FERMÉ — deux mutations qui survivaient
+>
+> | #   | Défaut                                                                                     | Mutation                                                            | Avant                                            | Après                                                |
+> | --- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------- |
+> | 1   | La ligne qui **compose** la chaîne n'était traversée par aucun test                        | `ops/index.ts` · `noyau: noyau.fabrique,` → `noyau: null,`          | **SURVIVANTE** — 132 fichiers verts, 1 489 tests | **TUÉE** — 1 fichier rouge                           |
+> | 2   | Le seuil de marge était écrit **deux fois**, et l'écriture qui mordait était la non gardée | `marge-des-gardes.config.ts` · `> seuilMs` → `> PLAFOND_DE_TEST_MS` | **SURVIVANTE** — 0 fichier rouge                 | **structurellement impossible** : une seule écriture |
+>
+> Le défaut 2 mérite d'être lu en entier : la condition mutée ne pouvait **plus
+> jamais tirer**, puisque vitest tue le test AU plafond avant que l'`afterEach`
+> ne s'exécute. L'alarme devenait morte, en silence. `alerteDeDepassement` porte
+> désormais la décision, l'amorce ne fait que la relayer, et un troisième témoin
+> **lit le fichier d'amorce sur disque** et exige 1 appel au verdict et
+> 0 comparaison propre — sans quoi l'amorce pourrait reprendre sa comparaison
+> demain sans que rien ne rougisse. Les deux mutations successeurs ont été
+> rejouées : toutes deux **TUÉES**.
+>
+> #### 🔴 CONSTAT N° 1 — LA SUITE N'ÉTAIT PAS REPRODUCTIBLE, ET LA CAUSE EST NOMMÉE
+>
+> Cinq exécutions vertes, puis une rouge, sur un **arbre inchangé** :
+> `Test Files 2 failed | 131 passed (133)`. Les deux fichiers rouges étaient
+> ceux qui balaient le dépôt, et le message était celui de l'ADR 0040 :
+> `« annonce les comptes… » a pris 15 663 ms, au-delà de 15 000 ms`.
+>
+> **L'alarme faisait son travail ; c'est la garde qui coûtait trop.**
+> `sansProse` et `sansLiaisons` étaient appelées au cœur d'une double boucle de
+> 89 entrées × 134 modules — près de **12 000 passages** de quatre expressions
+> régulières globales sur des sources entières, pour un résultat qui ne dépend
+> **que du fichier**.
+>
+> **La contention était réelle et identifiée** : une seconde session travaillait
+> sur un autre dépôt de la même machine ; les durées de suite passaient de 25 s
+> à 67 s. Le facteur deux que l'ADR 0040 s'accorde à 50 % du plafond ne couvrait
+> pas un facteur mesuré à ~5,5.
+>
+> **Contre-épreuve avant de corriger** : avec l'armement d'origine restauré et la
+> même contention, la suite rougissait à l'identique — 3 fichiers, 7 tests,
+> 12 messages ADR 0040 par exécution. **Le défaut n'était pas celui du lot ; il
+> était déjà là.**
+>
+> | Mesure                                                            | Avant                      | Après                  |
+> | ----------------------------------------------------------------- | -------------------------- | ---------------------- |
+> | Pire garde                                                        | 4 641 ms (15 % du plafond) | **1 337 ms (4 %)**     |
+> | `core/coutures/registre.spec.ts`                                  | 10 081 ms                  | **~1 400 ms**          |
+> | `lot1d-le-registre-sans-sa-garde`                                 | 23 698 ms                  | **~1 400 ms**          |
+> | Temps de test de la suite                                         | 56,7 s                     | **16,0 s**             |
+> | 5 exécutions séquentielles                                        | 5 vertes / 1 rouge à la 6ᵉ | **5 vertes sur 5**     |
+> | **3 suites concurrentes** (plus dur que la condition qui cassait) | non mesuré                 | **3 vertes, 0 alerte** |
+>
+> **Et ce n'est pas un assouplissement** : basculer l'entrée `orchestrerAppel` de
+> `cousue` à `à-coudre` fait toujours rougir les **trois** gardes de désaccord,
+> dans les **deux** fichiers — en 4 à 37 ms au lieu de plusieurs secondes.
+>
+> #### CE QUE LA RECETTE A VÉRIFIÉ SANS RIEN Y TOUCHER
+>
+> Six mutations rejouées au hasard par le protocole complet (empreinte, ancre
+> unique, suite **complète**, restauration, empreinte reconfrontée) :
+> **m15**, **m19**, **R1**, **R6** — TUÉES, comme annoncé.
+> **A7** et **B16** — SURVIVANTES, ce sont les deux ci-dessus.
+>
+> #### 🔴 CE QUI RESTE OUVERT — mesuré par la recette, pas recopié
+>
+> - **ADR 0037, décisions 2 et 3 : pas atterries.** `PortsDuService` ne porte ni
+>   `journalDesRefus` ni `delaiDeReprise` — `grep` sur `ops/**` hors gardes :
+>   **0 ligne**. Contre-mesure qui exclut l'erreur de périmètre : les mêmes
+>   formes sous `core/transport/**` rendent **27 lignes**. La fente existe au
+>   transport, elle manque au service : en production, les refus d'amont
+>   n'écrivent rien et tout 429 sort sans `Retry-After`.
+> - **ADR 0036, décision 1 : pas atterrie.** L'étape 7 de l'orchestrateur
+>   (ligne 1570) ne fait que `if (!estServi(outil, profil))` — aucun comptage
+>   contre `PLAFOND_OUTILS_PAR_PROFIL`. `mesurerBudgetProfil` a **0 appelant de
+>   production**. Et la réimplémentation que l'ADR ordonnait de supprimer est
+>   toujours à `core/__tests__/integration.spec.ts:485` : le dépôt éprouve le
+>   sosie de la règle au lieu de la règle. Aucun `it.fails` ne nomme cette dette.
+> - **`upstream_unavailable` n'est émis par aucun module de production** — un
+>   des treize codes du § 15. Ses deux seules occurrences hors `core/types.ts`
+>   sont dans `ops/codes-hors-tableau.ts`, dont l'une décrit ce que ce code
+>   aurait **menti**.
+> - **Le filet anti-fuite du § 20 ne couvre qu'un transport sur deux.**
+>   `verifierAucuneFuite` a **1 appelant de production**,
+>   `core/transport/http/transport.ts:390`. Le fil stdio transporte le même
+>   jeton de confirmation et n'a aucun équivalent.
+> - **`prisma/migrations/` n'existe pas.** Le schéma est _validé_, les dix
+>   tables du § 12 ne sont matérialisables par aucun chemin reproductible — et
+>   le script d'ajout-seul, qui se déclare « APRÈS `prisma migrate deploy` », n'a
+>   rien après quoi s'appliquer.
+> - **La prose du registre des coutures n'est confrontée à rien.** Inverser le
+>   sens d'un champ `decision` laisse la suite verte : `cousue` mesure le nombre
+>   d'**appelants de production** d'un symbole, jamais l'atterrissage de la
+>   décision. Le mécanisme est aveugle exactement là où la décision porte sur un
+>   symbole déjà cousu — **et les deux entrées que ce lot vient d'écrire sont
+>   logées à la même enseigne.**
+> - **Les 24 `it.fails` du lot 2 sont toujours 24 : aucun n'a été fermé.** Le
+>   compte est passé à **31** parce que sept ont été **ouverts**. Ce sont des
+>   dettes nommées, pas des régressions — mais le solde du lot est +7, pas −n.
+>
 > ### ⚠️ 2026-09-01 — LOT 2, RECETTE : LE SOCLE DÉMARRE, ET IL RÉPOND — MAIS PAS ENCORE DEPUIS SON PROPRE PROCESSUS
 >
 > Le lot 2 a livré les deux transports, l'émetteur de jetons, la politique

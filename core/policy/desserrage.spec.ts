@@ -7,13 +7,14 @@ import {
   desserrer,
   niveauPourEcran,
   resserrer,
+  MOTIFS_REFUS_CHANGEMENT,
   SCOPE_DESSERRAGE,
   TTL_DESSERRAGE_MAX_MS,
   type ContexteDesserrage,
   type DemandeChangement,
   type DependancesDesserrage,
 } from "./desserrage.js";
-import { ligneDeDemarrage } from "./ligne.js";
+import { ligneDeDemarrage, ligneEnVigueur } from "./ligne.js";
 import { niveauApplique } from "./niveau.js";
 import {
   codeTotp,
@@ -510,5 +511,169 @@ describe("core/policy/desserrage — l'écran dérive du même calcul (§ 20)", 
 
     expect(mesures).toBe(3);
     expect(vus).toEqual(["confirmé", "confirmé", "brouillon"]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Garde 5 — RESSERRER NE RÉÉCRIT PAS L'ATTESTATION D'UN DESSERRAGE (ADR 0038)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ═══ LE DÉFAUT MESURÉ, ET C'EST D'ABORD UN DÉFAUT DU CAHIER DES CHARGES ═══
+ *
+ * Le § 20 accorde au chemin de resserrage d'être « exécuté immédiatement d'où
+ * que ça vienne », et ne distingue pas RESSERRER de RÉÉCRIRE L'ATTESTATION d'un
+ * desserrage. `remplaceesDoffice` marque donc `supersededAt` sur toute ligne en
+ * vigueur de même `scope`, sans filtre de niveau ni de canal.
+ *
+ * Conséquence mesurée sur le dépôt en mémoire : une ligne `libre` écrite par
+ * `desserrer` — TOTP vérifié, `ops:policy`, canal `console`, TTL borné — était
+ * remplacée par une ligne `libre` de MÊME portée et de MÊME échéance venue de
+ * `mcp`, dont l'appelant choisit `setBy` et `reason`. **Le niveau servi ne
+ * bouge pas ; ce qui bouge est l'ATTRIBUTION.** Le § 12, règle 2, dit que sans
+ * `channel` la protection second facteur est INAUDITABLE : ici le canal
+ * survit, et il ment — ce qui est pire qu'une colonne vide, parce qu'une
+ * colonne vide se voit.
+ *
+ * ⚠️ LA COUPE EST À L'ÉGALITÉ, ET PAS AILLEURS. Une échéance strictement
+ *    antérieure RACCOURCIT : c'est un resserrage authentique, il reste libre,
+ *    et la supersession y est légitime. Les deux témoins inverses ci-dessous le
+ *    mesurent — sans eux, une fonction qui refuserait tout satisferait la
+ *    garde.
+ */
+
+/** Les lignes en vigueur sur un scope, et leur canal : c'est ce que la garde annonce. */
+async function ligneEnVigueurSur(
+  depot: DepotPolitiqueMemoire,
+  scope: string,
+  maintenant: Date,
+): Promise<{ readonly ids: readonly string[]; readonly canaux: readonly string[] }> {
+  const retenues = (await depot.lignes()).filter(
+    (ligne) => ligne.scope === scope && ligneEnVigueur(ligne, maintenant),
+  );
+  return { ids: retenues.map((l) => l.id), canaux: retenues.map((l) => l.channel) };
+}
+
+/** Un socle DESSERRÉ par la console, dans les formes : TOTP, `ops:policy`, TTL borné. */
+async function socleDesserreParLaConsole(echeance: Date): Promise<DepotPolitiqueMemoire> {
+  const depot = socleAuDemarrage();
+  const pose = await desserrer(
+    demande({
+      id: "L-console",
+      level: "libre",
+      scope: "*",
+      channel: "console",
+      expiresAt: echeance,
+      setBy: "will",
+      reason: "desserrage attesté par la console",
+    }),
+    contexte(),
+    deps(depot),
+  );
+  if (!pose.applique) throw new Error(`garde : le desserrage témoin a échoué — ${pose.motif}`);
+  return depot;
+}
+
+describe("core/policy/desserrage — resserrer ne réécrit pas une attestation (ADR 0038)", () => {
+  it("REFUSE la ligne venue de `mcp` à niveau ET échéance ÉGAUX — la ligne console SURVIT", async () => {
+    const echeance = new Date(T0.getTime() + 3_600_000);
+    const depot = await socleDesserreParLaConsole(echeance);
+
+    const avant = niveauApplique(await depot.lignes(), OUTIL, T0);
+    const enVigueurAvant = await ligneEnVigueurSur(depot, "*", T0);
+
+    const resultat = await resserrer(
+      demande({
+        id: "L-mcp",
+        level: "libre",
+        scope: "*",
+        channel: "mcp",
+        expiresAt: echeance,
+        setBy: "un-appelant-mcp",
+        reason: "reprise en main",
+      }),
+      depot,
+    );
+
+    const apres = niveauApplique(await depot.lignes(), OUTIL, T0);
+    const enVigueurApres = await ligneEnVigueurSur(depot, "*", T0);
+    const posee = (await depot.lignes()).find((ligne) => ligne.id === "L-console");
+
+    console.info(
+      `[garde ADR 0038 · égalité] niveau « ${avant.niveau} » → « ${apres.niveau} » · ` +
+        `canal en vigueur ${enVigueurAvant.canaux.join(", ")} → ` +
+        `${enVigueurApres.canaux.join(", ")} · ` +
+        `${String(avant.mesures)} ligne(s) examinée(s) · ` +
+        `refus : ${resultat.applique ? "(aucun)" : resultat.motif}`,
+    );
+
+    expect(resultat.applique, "à niveau et échéance égaux, rien n'est resserré").toBe(false);
+    if (!resultat.applique) expect(resultat.motif).toBe("resserrage-sans-effet");
+    // La ligne que la décision protège : celle de la console, toujours en vigueur.
+    expect(enVigueurApres.ids).toEqual(["L-console"]);
+    expect(posee?.supersededAt ?? null).toBeNull();
+    expect(enVigueurApres.canaux).toEqual(["console"]);
+  });
+
+  it("TÉMOIN INVERSE 1 — un niveau STRICTEMENT plus strict reste libre, et remplace", async () => {
+    const echeance = new Date(T0.getTime() + 3_600_000);
+    const depot = await socleDesserreParLaConsole(echeance);
+
+    const resultat = await resserrer(
+      demande({
+        id: "L-mcp-strict",
+        level: "brouillon",
+        scope: "*",
+        channel: "mcp",
+        expiresAt: null,
+        reason: "refermer la surface",
+      }),
+      depot,
+    );
+
+    const enVigueur = await ligneEnVigueurSur(depot, "*", T0);
+    console.info(
+      `[garde ADR 0038 · témoin inverse 1] niveau plus strict depuis « mcp » — ` +
+        `appliqué : ${String(resultat.applique)} · en vigueur : ${enVigueur.ids.join(", ")}`,
+    );
+
+    expect(resultat.applique).toBe(true);
+    expect(enVigueur.ids).toEqual(["L-mcp-strict"]);
+  });
+
+  it("TÉMOIN INVERSE 2 — à niveau égal, une échéance PLUS PROCHE resserre, et remplace", async () => {
+    const echeance = new Date(T0.getTime() + 3_600_000);
+    const depot = await socleDesserreParLaConsole(echeance);
+
+    const resultat = await resserrer(
+      demande({
+        id: "L-mcp-court",
+        level: "libre",
+        scope: "*",
+        channel: "mcp",
+        // Strictement AVANT : la surface se referme plus tôt.
+        expiresAt: new Date(echeance.getTime() - 60_000),
+        reason: "refermer plus tôt",
+      }),
+      depot,
+    );
+
+    const enVigueur = await ligneEnVigueurSur(depot, "*", T0);
+    console.info(
+      `[garde ADR 0038 · témoin inverse 2] échéance rapprochée de 60 000 ms — ` +
+        `appliqué : ${String(resultat.applique)} · en vigueur : ${enVigueur.ids.join(", ")}`,
+    );
+
+    expect(resultat.applique).toBe(true);
+    expect(enVigueur.ids).toEqual(["L-mcp-court"]);
+  });
+
+  it("le motif `resserrage-sans-effet` est DÉCLARÉ dans l'union des motifs", () => {
+    // Un motif prononcé sans être déclaré ne compilerait pas ; celui-ci vérifie
+    // l'inverse — que l'union le porte, donc qu'un appelant peut l'aiguiller.
+    console.info(
+      `[garde ADR 0038 · motifs] ${String(MOTIFS_REFUS_CHANGEMENT.length)} motif(s) déclaré(s)`,
+    );
+    expect(MOTIFS_REFUS_CHANGEMENT as readonly string[]).toContain("resserrage-sans-effet");
   });
 });

@@ -109,13 +109,41 @@ export interface JournalCompteur extends JournalDesRefusEnAmont {
   readonly consignes: () => readonly RefusEnAmont[];
 }
 
+/**
+ * Un journal ARMÉ : il écrit UNE ligne et rend `1` (ADR 0037, § 1).
+ *
+ * ⚠️ C'est le TÉMOIN INVERSE de `JOURNAL_AMONT_NON_ARME`. Sans lui, une
+ *    garde qui exigerait « 0 consigné » serait satisfaite par un port qui ne
+ *    saurait rien écrire du tout — le vert pour la mauvaise raison.
+ */
 export function journalDeTemoin(): JournalCompteur {
   const consignes: RefusEnAmont[] = [];
   return {
     consignes: () => [...consignes],
-    consigner(refus: RefusEnAmont): Promise<void> {
+    consigner(refus: RefusEnAmont): Promise<number> {
       consignes.push(refus);
-      return Promise.resolve();
+      return Promise.resolve(1);
+    },
+  };
+}
+
+/**
+ * UN JOURNAL QUI ÉCHOUE À ÉCRIRE — armé, appelé, et il n'a rien posé.
+ *
+ * ⚠️ **C'EST LE TROISIÈME ÉTAT, ET IL N'EST NI L'UN NI L'AUTRE DES DEUX
+ *    PRÉCÉDENTS.** Un port peut être fourni ET ne rien écrire : table
+ *    injoignable, écriture refusée. Un booléen l'aurait confondu avec « pas de
+ *    port » ; le nombre les distingue, et c'est pourquoi la décision porte sur
+ *    un NOMBRE. La garde le fabrique pour que « 0 consigné » ne puisse pas être
+ *    lu comme « aucun port ».
+ */
+export function journalQuiEchoueDeTemoin(): JournalCompteur {
+  const consignes: RefusEnAmont[] = [];
+  return {
+    consignes: () => [...consignes],
+    consigner(refus: RefusEnAmont): Promise<number> {
+      consignes.push(refus);
+      return Promise.resolve(0);
     },
   };
 }

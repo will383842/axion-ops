@@ -177,6 +177,33 @@ export function verifierLesCoutures(
   const production = fichiers.filter((fichier) => critere.estLivre(fichier.chemin));
   const cheminsSoumis = new Set(fichiers.map((fichier) => fichier.chemin));
 
+  /**
+   * ⚠️ **LA PROSE EST RETIRÉE UNE FOIS PAR FICHIER, PAS UNE FOIS PAR COUPLE
+   *    (ENTRÉE × FICHIER) — ADR 0040, ET C'EST LE REMÈDE QU'IL NOMME.**
+   *
+   * `sansProse` était appelé au CŒUR de la double boucle : 89 entrées ×
+   * 134 modules de production = près de 12 000 passages de deux expressions
+   * régulières globales sur des sources entières, pour un résultat qui ne
+   * dépend QUE du fichier. Mesuré : la garde qui l'emploie tenait 4 641 ms sur
+   * une machine calme et **15 155 ms** sur une machine chargée, au-delà du
+   * seuil d'alerte de 15 000 ms — la suite complète cessait alors d'être
+   * reproductible, verte cinq fois puis rouge, sur un arbre inchangé.
+   *
+   * ⚠️ **CE N'EST PAS UN ASSOUPLISSEMENT.** `sansProse` est PURE et ne dépend
+   *    que de `fichier.source` : le corpus confronté est exactement le même,
+   *    entrée par entrée. Ce qui change est le nombre de fois qu'on le calcule.
+   */
+  const corpsSansProse = new Map<string, string>(
+    production.map((fichier) => [fichier.chemin, sansProse(fichier.source)]),
+  );
+  /** Idem pour `sansLiaisons`, pure elle aussi et appelée dans la même boucle. */
+  const corpsSansLiaisons = new Map<string, string>(
+    production.map((fichier) => [
+      fichier.chemin,
+      sansLiaisons(corpsSansProse.get(fichier.chemin) ?? ""),
+    ]),
+  );
+
   const verdicts: VerdictDUneCouture[] = [];
   const anomalies: string[] = [];
   const parEtat: Record<string, number> = {};
@@ -230,7 +257,7 @@ export function verifierLesCoutures(
       // « 1 appelant » sur une fonction morte.
       if (fichier.chemin === entree.module) continue;
 
-      const nu = sansProse(fichier.source);
+      const nu = corpsSansProse.get(fichier.chemin) ?? "";
       if (entree.genre === "type") {
         // Un type ne s'appelle pas : son IMPORT EST la couture. C'est tout ce
         // qu'un type peut faire — contraindre une signature ailleurs.
@@ -242,7 +269,7 @@ export function verifierLesCoutures(
         continue;
       }
 
-      const corps = sansLiaisons(nu);
+      const corps = corpsSansLiaisons.get(fichier.chemin) ?? "";
       // ⚠️ **UNE CONSTANTE LUE EST UNE CONSTANTE IMPORTÉE — SANS EXCEPTION.**
       //    Ce dépôt est en modules ES : il n'a aucune portée globale, donc un
       //    module qui LIT une constante d'un autre l'importe nécessairement.

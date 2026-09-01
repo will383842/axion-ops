@@ -361,7 +361,14 @@ describe("G2 · ADR 0016 — `governanceFields` est admis, cumulé, et LU par l'
     for (const nom of ECHAPPES) {
       // Un champ de gouvernance REFERMÉ par son schéma : la branche 4 (« argument
       // libre ») ne peut donc pas jouer, et l'on isole la branche 1.
-      const schema = schemaFerme({ [nom]: { type: "string", format: "date-time" } });
+      //
+      // ⚠️ `format: "uuid"` ET NON `"date-time"` — ADR 0035. Ce dernier a quitté
+      //    `FORMATS_CONTRAIGNANTS` : sa forme canonique admet une fraction de
+      //    seconde de longueur LIBRE, et `format` ne valide rien. Le garder ici
+      //    aurait laissé le champ LIBRE, et ce témoin serait resté vert en
+      //    n'isolant plus rien — une garde verte pour une mauvaise raison. Les
+      //    quatre formats retenus sont bornés sous la borne de fermeture.
+      const schema = schemaFerme({ [nom]: { type: "string", format: "uuid" } });
       const analyse = analyserArgumentsDuSchema(schema, AUCUN_CHAMP_DE_GOUVERNANCE);
       if (analyse.porteUnArgumentDeGouvernance) surveilles.push(nom);
       // Pire cas pour la garde : MÊME domaine. Le § 20 dit « JAMAIS », sans
@@ -398,7 +405,9 @@ describe("G2 · ADR 0016 — `governanceFields` est admis, cumulé, et LU par l'
     let perdus = 0;
 
     for (const nom of ECHAPPES) {
-      const schema = schemaFerme({ [nom]: { type: "string", format: "date-time" } });
+      // ADR 0035 — même motif qu'au test précédent : `uuid` referme, l'ancien
+      // `format` daté ne referme plus.
+      const schema = schemaFerme({ [nom]: { type: "string", format: "uuid" } });
       const analyse = analyserArgumentsDuSchema(schema, [nom]);
       if (analyse.porteUnArgumentDeGouvernance) surveilles.push(nom);
       ajoutes += analyse.ajoutesParLaDeclaration.length;

@@ -314,3 +314,90 @@ describe("§ 15 — un corps sans plafond serait une panne de mémoire à la dem
     expect(reponse.corps).not.toContain("x".repeat(64));
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ADR 0037, § 5 — LA TRACE REMONTE JUSQU'À UN LECTEUR
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ⚠️ **CE QUE CETTE GARDE FERME, ET IL EST DISTINCT DE TOUT CE QUI PRÉCÈDE.**
+ *    Les gardes ci-dessus lisent la trace par un transport ENVELOPPÉ, écrit pour
+ *    le test : elles prouvent ce que le transport a mesuré, jamais ce que le
+ *    SERVEUR en fait. Or il la jetait — `traitement.reponse` était consommée,
+ *    `traitement.trace` tombait. Un compteur juste que personne ne lit vaut le
+ *    compteur faux qu'il remplace, et c'est la seconde moitié du défaut d'amont.
+ */
+describe("ADR 0037 — le serveur REMET la trace au lieu de la jeter", () => {
+  it("appelle l'observateur une fois par requête, avec la trace de CETTE requête", async () => {
+    const observees: TraceDeTraitement[] = [];
+    let differe: TransportHttp | null = null;
+    const enveloppant: TransportHttp = {
+      traiter: (requete) => {
+        if (differe === null) throw new Error("transport non monté");
+        return differe.traiter(requete);
+      },
+    };
+    const propre = creerServeurHttp(enveloppant, {
+      port: 0,
+      octetsMaxDuCorps: OCTETS_MAX,
+      observateur: (trace) => observees.push(trace),
+    });
+    const liee = await propre.ecouter();
+    differe = creerTransportHttp(
+      {
+        hotesAdmis: [`${ADRESSE_DE_BOUCLE_LOCALE}:${String(liee.port)}`],
+        audienceAttendue: AUDIENCE_DE_TEMOIN,
+        budgetMs: BUDGET_MS,
+      },
+      {
+        verificateurDeJeton: {
+          verifier: (): Promise<ReturnType<typeof revendicationsDeTemoin> | null> =>
+            Promise.resolve(revendicationsDeTemoin()),
+        },
+        registreDesJetons: registreDeTemoin(ligneOpsTokenDeTemoin()),
+        pontDIdentite: PONT_DE_TEMOIN,
+        noyau: () => Promise.resolve(resultatDeSucces({ servi: "par le noyau" })),
+      },
+    );
+
+    try {
+      // Deux requêtes, dont un REFUS d'amont : c'est sur le refus que les
+      // comptes d'amont existent, et c'est celui-là qu'on ne voyait pas.
+      const servie = await appeler({
+        port: liee.port,
+        porteur: PORTEUR_DE_TEMOIN,
+        corps: enveloppeDeTemoin({ nom: "demo.outil.lire" }),
+      });
+      const refusee = await appeler({
+        port: liee.port,
+        hote: "attaquant.stub.invalid",
+        porteur: PORTEUR_DE_TEMOIN,
+        corps: enveloppeDeTemoin({ nom: "demo.outil.lire" }),
+      });
+
+      const identifiants = new Set(observees.map((trace) => trace.requestId));
+      const avecAmont = observees.filter((trace) => trace.amont !== null);
+
+      console.info(
+        `[ADR 0037 · trace remise] 2 requête(s) émises · ` +
+          `${String(observees.length)} trace(s) observée(s) · ` +
+          `${String(identifiants.size)} identifiant(s) distinct(s) · ` +
+          `${String(avecAmont.length)} portant une trace d'amont · ` +
+          `statuts ${String(servie.statut)} et ${String(refusee.statut)}`,
+      );
+
+      // Une trace par requête, et deux identifiants DIFFÉRENTS : un observateur
+      // qui recevrait deux fois la même trace serait vert sur un simple compte.
+      expect(observees).toHaveLength(2);
+      expect(identifiants.size).toBe(2);
+      expect(avecAmont).toHaveLength(2);
+      // Et le refus d'amont porte ses comptes : c'est ce qui n'existait pas en
+      // service tant que la trace mourait à la socket.
+      const traceDuRefus = observees[1];
+      expect(traceDuRefus?.amont?.refusPrononces).toBe(1);
+      expect(traceDuRefus?.amont?.refusConsignes).toBe(0);
+    } finally {
+      await propre.fermer();
+    }
+  });
+});

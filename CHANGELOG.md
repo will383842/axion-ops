@@ -5,6 +5,89 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 3 — fermer les constats, tuer les mutations survivantes, composer la chaîne — 2026-09-01
+
+Le lot 2 s'était terminé sur un jalon manqué, écrit en toutes lettres : **le
+socle démarrait et ne servait pas depuis son propre processus.** Le lot 3 ferme
+ce manque, et l'audit qui l'a précédé a mesuré le reste par **113 mutations**
+appliquées au vrai code, suite complète relancée à chaque fois : 86,5 % de mises
+à mort au cœur, 73,3 % sur la chaîne, 89,1 % sur le transport — **18
+comportements que rien ne vérifiait.**
+
+### Le jalon est franchi, et il est mesuré deux fois
+
+**Lancement réel**, `ops/index.ts --provisionner-le-coffre-local`, réglages
+factices sur `stub.invalid`, aucun réseau, aucune base : 7 étages franchis,
+28 champs de `DependancesOrchestrateur` composés, transport stdio monté,
+**0 empêchement**, `tools/list` servi, et un `tools/call` sur un outil inconnu
+refusé à l'**étape 6** — la chaîne est traversée, pas simulée. Code de sortie 0.
+
+**Et une garde le rejoue** : `ops/racine-en-service.temoin.spec.ts` appelle
+`demarrerLeProcessus` sur des flux en mémoire — jamais `composerLeNoyau`, jamais
+un `PortsDuService` fabriqué.
+
+### Ce que la recette a trouvé, et fermé
+
+**Bloquants** — deux mutations survivaient, toutes deux vérifiées par la recette
+sur la suite complète avant correction, et tuées après.
+
+- **La ligne qui compose la chaîne n'était traversée par aucun test.**
+  `ops/index.ts`, `noyau: noyau.fabrique,` → `noyau: null,` : suite complète
+  **verte**, 132 fichiers, 1 489 tests. Ce qui existait — `ops/composition/noyau.spec.ts`
+  en isolation, `ops/service.spec.ts` avec son propre noyau — mesurait que la
+  chaîne était _composable_. `demarrerLeProcessus` n'avait qu'un seul appelant
+  dans tout le dépôt, l'amorce, et aucun `.spec.ts`.
+- **Le seuil de marge était écrit deux fois, et celle des deux écritures qui
+  mordait était la non gardée.** `marge-des-gardes.config.ts` portait son propre
+  `if (dureeMs > seuilMs)`. Le remplacer par `> PLAFOND_DE_TEST_MS` laissait la
+  suite entièrement verte — et rendait l'alarme **structurellement morte**,
+  puisque vitest tue le test AU plafond avant que l'`afterEach` ne s'exécute.
+  `alerteDeDepassement` porte désormais la décision, l'amorce ne fait que la
+  relayer, et un témoin **lit le fichier d'amorce sur disque** pour exiger
+  1 appel au verdict et 0 comparaison propre.
+
+- **CONSTAT N° 1 : la suite n'était pas reproductible.** Cinq exécutions vertes,
+  puis une rouge, sur un **arbre inchangé** — et c'est l'alarme de l'ADR 0040
+  qui tirait, sur une garde JUSTE. `sansProse` et `sansLiaisons` étaient
+  appelées au cœur d'une double boucle de 89 entrées × 134 modules, soit près de
+  12 000 passages de quatre expressions régulières globales, pour un résultat
+  qui ne dépend que du fichier. La contention était réelle et identifiée : une
+  seconde session travaillait sur un autre dépôt de la même machine. **Contre-
+  épreuve faite avant de corriger** — avec l'armement d'origine restauré et la
+  même contention, la suite rougissait à l'identique : le défaut était déjà là.
+  Le remède est celui que l'ADR 0040 prescrit, **rendre la garde moins chère,
+  jamais remonter le plafond** : pire garde 4 641 ms → **1 337 ms** (15 % → 4 %
+  du plafond), temps de test de la suite 56,7 s → **16,0 s**. Vérifié sous
+  **trois suites concurrentes** — plus dur que la condition qui cassait — :
+  133 fichiers verts chacune, **zéro alerte**.
+
+**Vérifié sans y toucher** — six mutations rejouées au hasard par le protocole
+complet : **m15**, **m19**, **R1**, **R6** tuées comme annoncé ; **A7** et
+**B16** survivantes, ce sont les deux ci-dessus.
+
+### Ce qui reste ouvert
+
+Voir **`docs/ETAT.md`**. En bref : deux décisions d'ADR marquées « acceptée » ne
+sont **pas atterries** (0037 § 2-3, 0036 § 1), un code du § 15 n'est émis par
+personne, le filet anti-fuite ne couvre qu'un transport sur deux,
+`prisma/migrations/` n'existe pas, la prose du registre des coutures n'est
+confrontée à rien — et **aucun des 24 `it.fails` du lot 2 n'a été fermé** : le
+compte passe à 31 parce que sept ont été ouverts.
+
+### Mesures de fin de lot
+
+| Gate                   | Résultat                                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`       | vert                                                                                                  |
+| `pnpm lint`            | vert, 0 avertissement                                                                                 |
+| `pnpm format:check`    | vert                                                                                                  |
+| `pnpm prisma:validate` | vert (URL stub)                                                                                       |
+| `pnpm test`            | **133 fichiers · 1 494 verts · 31 `it.fails` attendus · 0 rouge** · temps de test 56,7 s → **16,0 s** |
+| `ops/temoin-ci.ts`     | **4 gates éprouvées sur 4, 0 anomalie** — chacune rougit sur un défaut fabriqué                       |
+| Reproductibilité       | **5 exécutions sur 5 identiques**, et **3 suites concurrentes vertes, 0 alerte**                      |
+
+---
+
 ## Lot 2 — le socle démarre et répond — 2026-09-01
 
 Le lot 1d s'était terminé sur un manque nommé en toutes lettres : **rien

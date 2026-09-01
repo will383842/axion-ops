@@ -261,6 +261,38 @@ export const MOTIFS_REFUS = [
    * commande la seule branche de l'étape 11 qu'aucune confirmation ne rattrape.
    */
   "champs_de_gouvernance_en_double",
+  /**
+   * Un outil déclare un champ de `compaction.tier2` qui est OBLIGATOIRE à son
+   * schéma de sortie — § 13.3, ADR 0036.
+   *
+   * ═══ CE QUE CE REFUS REFERME ═══
+   *
+   * Au deuxième palier de la cascade du § 13.3, le socle RETIRE les champs de
+   * rang 2 (`retirerRang2()`, `core/chaine/etape-14-execution.ts`). Si le
+   * schéma que l'outil PUBLIE les exige, la charge compactée ne valide plus ce
+   * schéma — et c'est le schéma publié que le client a lu.
+   *
+   * La règle n'était tenue qu'AU BUILD (`analyserDefinition()`, contrôle
+   * C13.3), donc seulement pour un adaptateur TypeScript passant par le kit. Or
+   * c'est le mode FÉDÉRÉ que la règle vise, et un manifeste fédéré est produit
+   * dans un AUTRE dépôt — le CRM en PHP, dépôt public à jamais (§ 29). Le mode
+   * visé était le seul pour lequel elle ne s'appliquait jamais.
+   *
+   * ⚠️ IL REFUSE, LÀ OÙ UN `idFields` SANS EFFET EST SEULEMENT ANNONCÉ
+   *    (ADR 0015). On n'interdit pas ce qu'on IGNORE — mais ici la règle est
+   *    TENUE au build, et admettre ce que le build refuse est exactement « le
+   *    build accepte ce que l'admission refuse, ou l'inverse, ce qui est pire »
+   *    (ADR 0003).
+   *
+   * ⚠️ LA MESURE EST FAITE PAR `requisDuSchema()`, LA MÊME FONCTION QUE LE
+   *    BUILD. La réécrire ici ferait deux définitions de « quels champs ce
+   *    schéma exige-t-il », et c'est la seconde qui ne suit jamais.
+   *
+   * ⚠️ RIEN NE RATTRAPE EN AVAL : `outputSchema` n'est validé à aucun moment du
+   *    runtime, et l'étape 14 l'écrit elle-même — « ici on retire, on ne
+   *    revalide pas ».
+   */
+  "rang2_obligatoire_au_schema",
 ] as const;
 
 export type MotifRefus = (typeof MOTIFS_REFUS)[number];

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FORMATS_CONTRAIGNANTS,
+  FORMATS_ECARTES_PAR_CAPACITE,
   analyserChampsDeclares,
   cumulerChampsDeGouvernance,
   estValeurLibre,
@@ -54,7 +55,31 @@ describe("`estValeurLibre` — ce qui referme un champ, et ce qui fait semblant"
     { nom: "`enum`", schema: { type: "string", enum: ["a", "b"] }, libre: false },
     { nom: "`const`", schema: { type: "string", const: "a" }, libre: false },
     { nom: "`format: uuid`", schema: { type: "string", format: "uuid" }, libre: false },
-    { nom: "`format: date-time`", schema: { type: "string", format: "date-time" }, libre: false },
+    // ⚠️ ADR 0035 — `date-time` A CHANGÉ DE CAMP, ET C'EST LA DÉCISION. Sa forme
+    //    canonique admet une fraction de seconde de longueur LIBRE, et `format`
+    //    ne valide rien : il refermait un champ capable de tout porter, sans
+    //    qu'un seul motif soit à écrire. Il referme encore, mais ACCOMPAGNÉ.
+    {
+      nom: "`format: date-time` seul",
+      schema: { type: "string", format: "date-time" },
+      libre: true,
+    },
+    {
+      nom: "`format: date-time` + `maxLength`",
+      schema: { type: "string", format: "date-time", maxLength: 40 },
+      libre: false,
+    },
+    // ADR 0035 — le mot-clé le plus honnête des trois : le seul que JSON Schema
+    // draft 2020-12 valide réellement.
+    { nom: "`maxLength` sous la borne", schema: { type: "string", maxLength: 64 }, libre: false },
+    { nom: "`maxLength` au-dessus", schema: { type: "string", maxLength: 65 }, libre: true },
+    // ⚠️ LE CONTOURNEMENT EXACT TROUVÉ PAR L'AUDIT : ancré aux deux bouts,
+    //    rejetant les TROIS témoins de prose, et admettant 2 000 caractères.
+    {
+      nom: "`pattern` ancré, sans accent, qui admet 2 000 caractères",
+      schema: { type: "string", pattern: "^[A-Za-z0-9 ,.'()-]{1,2000}$" },
+      libre: true,
+    },
     // ⚠️ `format` est une ANNOTATION en draft 2020-12 : il ne valide rien. Un
     //    format inventé par l'adaptateur ne referme donc RIEN.
     { nom: "`format` inventé", schema: { type: "string", format: "texte-long" }, libre: true },
@@ -142,11 +167,29 @@ describe("`estValeurLibre` — ce qui referme un champ, et ce qui fait semblant"
     expect(estValeurLibre({ type: "string", pattern: illisible })).toBe(true);
   });
 
-  it("porte une liste de `format` NON VIDE — sinon la fermeture par format serait morte", () => {
-    console.log(`[garde formats] ${String(FORMATS_CONTRAIGNANTS.size)} format(s) contraignant(s)`);
-    expect(FORMATS_CONTRAIGNANTS.size).toBeGreaterThanOrEqual(5);
+  it("porte une liste de `format` NON VIDE, et AUCUN des écartés de l'ADR 0035", () => {
+    const revenus = FORMATS_ECARTES_PAR_CAPACITE.filter((format) =>
+      FORMATS_CONTRAIGNANTS.has(format),
+    );
+
+    console.log(
+      `[garde formats] ${String(FORMATS_CONTRAIGNANTS.size)} format(s) contraignant(s) : ` +
+        `${[...FORMATS_CONTRAIGNANTS].join(", ")} · ` +
+        `${String(FORMATS_ECARTES_PAR_CAPACITE.length)} écarté(s) par l'ADR 0035 · ` +
+        `${String(revenus.length)} revenu(s) en service`,
+    );
+
+    // Plancher : la fermeture par format n'a pas été vidée.
+    expect(FORMATS_CONTRAIGNANTS.size).toBeGreaterThanOrEqual(4);
     // `uri` est EXCLU délibérément — voir la note du module.
     expect(FORMATS_CONTRAIGNANTS.has("uri")).toBe(false);
+    // ⚠️ LA LISTE CONFRONTÉE EST DÉRIVÉE DU MODULE, jamais recopiée : un écarté
+    //    remis en service rougit ici au lieu de rouvrir le contournement le plus
+    //    court du dépôt.
+    expect(
+      revenus,
+      "un `format` de longueur LIBRE est revenu dans la liste des contraignants (ADR 0035)",
+    ).toEqual([]);
   });
 });
 

@@ -126,6 +126,7 @@ export {
   ADRESSE_DE_BOUCLE_LOCALE,
   ErreurCorpsTropGrand,
   creerServeurHttp,
+  type ObservateurDeTraitement,
   type ReglagesServeurHttp,
   type ServeurHttp,
 } from "./serveur.js";

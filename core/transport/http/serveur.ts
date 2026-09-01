@@ -33,7 +33,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import type { RequeteHttp, TransportHttp } from "./transport.js";
+import type { RequeteHttp, TraceDeTraitement, TransportHttp } from "./transport.js";
 
 /** L'adresse par défaut. Le § 28 veut une porte ; on ne l'ouvre pas tout seul. */
 export const ADRESSE_DE_BOUCLE_LOCALE = "127.0.0.1";
@@ -53,6 +53,28 @@ export class ErreurCorpsTropGrand extends Error {
   }
 }
 
+/**
+ * LE LECTEUR DE LA TRACE — **ADR 0037, § 5.**
+ *
+ * ⚠️ **CE PORT EXISTE PARCE QUE LA TRACE ÉTAIT JETÉE.** Ce fichier consommait
+ *    `traitement.reponse` et laissait tomber `traitement.trace` : tous les
+ *    comptes d'amont — étapes franchies, refus prononcés, refus consignés,
+ *    `Retry-After` absent sur un 429 — mouraient à la socket. **Un compteur juste
+ *    que personne ne lit vaut le compteur faux qu'il remplace** : la correction
+ *    du § 1 de l'ADR n'aurait rien changé en service tant que rien ici ne lisait.
+ *
+ * ⚠️ **IL EST FACULTATIF AU TYPE, ET LA COMPOSITION DOIT LE FOURNIR.** Le serveur
+ *    doit pouvoir être monté nu dans une garde ; ce qui ne peut pas rester
+ *    facultatif est le CÂBLAGE de production, et c'est la garde de composition
+ *    (`ops/`) qui l'exige — voir l'interface déclarée au rapport du lot 3.
+ *
+ * ⚠️ **IL NE PEUT PAS FAIRE ÉCHOUER UNE RÉPONSE.** Une observation qui lèverait
+ *    ferait perdre au client une réponse déjà calculée : ce serait faire payer au
+ *    service le prix de sa propre télémétrie. L'exception est donc avalée, et
+ *    c'est le seul endroit du fichier où on avale quoi que ce soit.
+ */
+export type ObservateurDeTraitement = (trace: TraceDeTraitement) => void;
+
 /** Les réglages d'écoute. Aucun défaut sur ce qui engage la mémoire ou l'exposition. */
 export interface ReglagesServeurHttp {
   readonly port: number;
@@ -60,6 +82,8 @@ export interface ReglagesServeurHttp {
   readonly adresse?: string;
   /** Plafond du corps, en octets. Obligatoire — voir l'en-tête de ce fichier. */
   readonly octetsMaxDuCorps: number;
+  /** § 24 — où va ce que le traitement a MESURÉ. Voir {@link ObservateurDeTraitement}. */
+  readonly observateur?: ObservateurDeTraitement;
 }
 
 /** Un serveur monté. Il ne tient aucun état applicatif. */
@@ -154,6 +178,16 @@ export function creerServeurHttp(
     void transport
       .traiter(requete)
       .then((traitement) => {
+        // ADR 0037, § 5 — LA TRACE VA À UN LECTEUR AVANT QUE LA RÉPONSE PARTE.
+        // Elle était jetée ici, et avec elle tout ce que l'amont avait compté.
+        if (reglages.observateur !== undefined) {
+          try {
+            reglages.observateur(traitement.trace);
+          } catch {
+            // Voir `ObservateurDeTraitement` : une observation ne fait pas perdre
+            // une réponse déjà calculée.
+          }
+        }
         // ⚠️ DRAINER PLUTÔT QUE LAISSER EN SUSPENS. Le corps n'a pas été lu —
         //    c'est le comportement voulu d'un refus d'étape 1 — mais un flux non
         //    consommé retient la connexion jusqu'au délai du client.

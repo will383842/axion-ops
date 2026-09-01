@@ -101,11 +101,22 @@
  * ═══ CE QUE CE FICHIER NE FAIT PAS ═══
  *
  *  · Il ne vérifie pas que les champs de rang 2 sont OPTIONNELS au schéma de
- *    sortie. C'est la « règle qui manquait » du § 13.3, et elle est déjà tenue,
- *    plus tôt et mieux : `core/adapter-kit/conformite.ts`, contrôle
- *    `tier2-optionnel`, la refuse AU BUILD du manifeste. La redoubler ici en
- *    ferait une seconde source de vérité, et l'étape 14 arrive de toute façon
- *    trop tard — l'outil est déjà enregistré et déjà appelé.
+ *    sortie. C'est la « règle qui manquait » du § 13.3, et elle est tenue plus
+ *    tôt, à DEUX endroits qui appellent la MÊME fonction (`requisDuSchema`) :
+ *    `core/adapter-kit/conformite.ts`, contrôle `tier2-optionnel`, la refuse AU
+ *    BUILD du manifeste, et `core/registry/enregistrer.ts` la refuse À
+ *    L'ADMISSION, sous le motif `rang2_obligatoire_au_schema` (ADR 0036).
+ *
+ *    ⚠️ CETTE PROSE A ÉTÉ FAUSSE, ET C'EST LA MESURE QUI L'A DIT. Elle a écrit
+ *       jusqu'au lot 3 que la règle était tenue « plus tôt et mieux » au BUILD,
+ *       sans ajouter que le build ne voit QUE les adaptateurs TypeScript
+ *       passant par le kit — c'est-à-dire jamais le mode FÉDÉRÉ, celui que la
+ *       règle vise. Un manifeste produit ailleurs (le CRM en PHP, § 29) était
+ *       ADMIS avec un champ de rang 2 obligatoire, et le seul étage en aval
+ *       était celui-ci, qui ne revalide pas.
+ *
+ *    La redoubler ICI en ferait une TROISIÈME écriture, et l'étape 14 arrive de
+ *    toute façon trop tard — l'outil est déjà enregistré et déjà appelé.
  *  · Il ne produit PAS toute l'enveloppe du § 13.2 : cinq champs de `meta`
  *    n'appartiennent pas à cette étape. Voir `CHAMPS_META_HORS_ETAPE_14`, qui
  *    les nomme au lieu de les laisser manquants en silence.
@@ -569,8 +580,12 @@ export function raccourcirLibres(
  *
  * Le § 13.3 exige que ces champs soient OPTIONNELS au schéma `output`, faute de
  * quoi la charge compactée ne validerait plus le schéma que l'outil publie.
- * Cette exigence est tenue AU BUILD par `core/adapter-kit/conformite.ts`
- * (contrôle `tier2-optionnel`) : ici on retire, on ne revalide pas.
+ * Cette exigence est tenue DEUX FOIS EN AMONT, par la même fonction
+ * (`requisDuSchema`) : AU BUILD par `core/adapter-kit/conformite.ts` (contrôle
+ * `tier2-optionnel`), et À L'ADMISSION par `core/registry/enregistrer.ts`
+ * (motif `rang2_obligatoire_au_schema`, ADR 0036) — c'est ce second point qui
+ * couvre le mode FÉDÉRÉ, seul mode que le build ne voit pas. Ici on retire, on
+ * ne revalide pas.
  */
 export function retirerRang2(
   items: readonly unknown[],

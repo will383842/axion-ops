@@ -35,15 +35,33 @@ import type { IdentiteAppelante, Transport } from "../core/chaine/orchestrateur.
 import { TRANSPORTS } from "../core/chaine/orchestrateur.js";
 import type { EtatIndexProvenance } from "../core/chaine/etape-11-provenance.js";
 import { IndexProvenanceMemoire } from "../core/chaine/etape-11-provenance.js";
+import type { OutilDuCatalogue } from "../core/chaine/index.js";
 import { HOTE_SANS_MAGASIN_PARTAGE } from "../core/instance/postgres.js";
+import { JournalMemoire } from "../core/audit/index.js";
+import { DepotIdempotenceEnMemoire, DepotQuotaEnMemoire } from "../core/limits/index.js";
 import { DepotPolitiqueMemoire } from "../core/policy/index.js";
+import type { ProfileName } from "../core/profiles/index.js";
 import type {
   CatalogueServiEnStdio,
   DescripteurOutilServi,
 } from "../core/transport/stdio/index.js";
 import type { PontDIdentite } from "../core/transport/http/index.js";
 import type { EtatCoffre } from "../core/vault/index.js";
-import { Coffre, DepotEnMemoire, depuisEnvironnement } from "../core/vault/index.js";
+import {
+  Coffre,
+  DepotEnMemoire,
+  NOM_CLE_ARG_HASH,
+  NOM_CLE_SCEAU_JOURNAL,
+  VERSION_CLE_ARG_HASH,
+  VERSION_CLE_SCEAU_JOURNAL,
+  depuisEnvironnement,
+} from "../core/vault/index.js";
+import type { NoyauCompose } from "./composition/index.js";
+import {
+  SANS_PONT_DE_CLE_DE_CURSEUR,
+  TTL_IDEMPOTENCE_MAX_MS,
+  composerLeNoyau,
+} from "./composition/index.js";
 import type { DependancesDuSocle, SocleDemarre } from "./main.js";
 import {
   PLANIFICATEUR_PAR_INTERVALLE,
@@ -78,6 +96,16 @@ export const VARIABLES_DU_SERVICE = {
   adresseHttp: "OPS_HTTP_ADDRESS",
   /** La période du battement de veille, en millisecondes. */
   periodeDeVeilleMs: "OPS_WATCH_PERIOD_MS",
+  /**
+   * § 09/§ 26 — la durée de vie d'une réservation d'idempotence.
+   *
+   * ⚠️ **ELLE N'A PAS DE DÉFAUT NON PLUS, ET LE CAHIER DES CHARGES N'EN DONNE
+   *    AUCUN.** `core/limits/config.ts` pose une BORNE HAUTE
+   *    (`TTL_IDEMPOTENCE_MAX_MS`, 24 h) et aucune valeur nominale. En inventer
+   *    une reviendrait à décider, depuis le montage, combien de temps un `send`
+   *    reste non rejouable — c'est-à-dire à quel moment un envoi peut repartir.
+   */
+  ttlIdempotenceMs: "OPS_IDEMPOTENCY_TTL_MS",
 } as const;
 
 /**
@@ -224,6 +252,80 @@ function coffreLocalDemande(urlDeBase: string | undefined): boolean {
   return urlDeBase !== undefined && urlDeBase.includes(HOTE_SANS_MAGASIN_PARTAGE);
 }
 
+/**
+ * **LES CLÉS HMAC QUE LE COFFRE LOCAL REÇOIT DE L'ENVIRONNEMENT, ET LEUR
+ * UNIQUE LECTEUR.**
+ *
+ * ═══ LE MANQUE QUE CETTE TABLE COMBLE ═══
+ *
+ * `.env.example` déclare `OPS_ARGHASH_KEY` et `OPS_JOURNAL_SEAL_KEY` depuis le
+ * lot 1, avec leur prose « FAIL-LOUD si elle manque » — et **aucun module du
+ * dépôt ne les lisait**, mesuré au `grep` : zéro occurrence hors du modèle de
+ * configuration. Symétriquement, `Coffre.lireCleArgHash` et
+ * `Coffre.lireCleSceauJournal` lisent `ops_secret`, et **rien n'y écrit**. Les
+ * deux bouts existaient ; le fil manquait.
+ *
+ * ⚠️ **CE SEMIS NE VAUT QUE POUR LE COFFRE LOCAL**, celui qui vit en mémoire et
+ *    meurt avec le processus. Sur un magasin partagé, poser un secret est un
+ *    geste d'exploitation — le faire tout seul au démarrage écraserait à chaque
+ *    redéploiement une clé de scellement dont la rotation rend INVÉRIFIABLE tout
+ *    le journal déjà scellé. {@link demarrerLeProcessus} ne l'appelle donc que
+ *    sur le chemin `stub.invalid`.
+ *
+ * ⚠️ **LES NOMS ET LES VERSIONS SONT CEUX DU COFFRE, IMPORTÉS.** Les réécrire
+ *    ici fabriquerait un second nom pour le même secret, et le coffre relirait
+ *    éternellement une ligne que personne n'écrit — verte des deux côtés.
+ */
+export const CLES_HMAC_DU_COFFRE_LOCAL = [
+  {
+    variable: "OPS_JOURNAL_SEAL_KEY",
+    nom: NOM_CLE_SCEAU_JOURNAL,
+    version: VERSION_CLE_SCEAU_JOURNAL,
+    pourquoi:
+      "ADR 0002 — sans elle, la chaîne d'`ops_audit` n'est pas scellée et aucun appel " +
+      "d'outil n'est servi",
+  },
+  {
+    variable: "OPS_ARGHASH_KEY",
+    nom: NOM_CLE_ARG_HASH,
+    version: VERSION_CLE_ARG_HASH,
+    pourquoi: "§ 12, règle 2 — `argHash` est un HMAC, jamais un SHA nu",
+  },
+] as const;
+
+/**
+ * Sème dans le coffre LOCAL les clés lues dans l'environnement, et rend combien
+ * de secrets ont été RÉELLEMENT écrits.
+ *
+ * ⚠️ **UNE VARIABLE ABSENTE N'EST PAS SEMÉE, ET CE N'EST PAS UN ÉCHEC ICI.** Le
+ *    refus appartient à qui a besoin de la clé : `creerScelleurJournal` lève
+ *    bruyamment, `composerLeNoyau` en fait un empêchement nommé, et le montage
+ *    ne monte aucun transport d'outils. Refuser ici ferait dire « clé absente »
+ *    à un socle qui n'aurait pas encore essayé de s'en servir.
+ *
+ * ⚠️ **AUCUNE VALEUR N'EST JOURNALISÉE.** Le compte rendu ne porte que des NOMS
+ *    de variables et un nombre — § 29, le dépôt est public.
+ */
+async function semerLesClesDuCoffreLocal(
+  coffre: Coffre,
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<{ readonly semees: readonly string[]; readonly absentes: readonly string[] }> {
+  const semees: string[] = [];
+  const absentes: string[] = [];
+  for (const cle of CLES_HMAC_DU_COFFRE_LOCAL) {
+    const brute = env[cle.variable];
+    // Test de VÉRACITÉ, pas de nullité : une variable déclarée mais VIDE n'est
+    // pas nullish, et une clé vide produit un HMAC parfaitement stable — public.
+    if (brute === undefined || brute.trim().length === 0) {
+      absentes.push(cle.variable);
+      continue;
+    }
+    await coffre.ecrire(cle.nom, cle.version, Buffer.from(brute.trim(), "utf8"));
+    semees.push(cle.variable);
+  }
+  return { semees, absentes };
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  LES PORTS QUE CE PROCESSUS SAIT FOURNIR
 // ═════════════════════════════════════════════════════════════════════════════
@@ -304,9 +406,18 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
   );
   const port = lireUnEntierBorne(deps.env, VARIABLES_DU_SERVICE.portHttp, 65_535);
   const veille = lireUnEntierBorne(deps.env, VARIABLES_DU_SERVICE.periodeDeVeilleMs, 3_600_000);
+  // ⚠️ LA BORNE HAUTE EST IMPORTÉE, JAMAIS RECOPIÉE. Recopier `24 * 3 600 000`
+  //    ici resterait juste jusqu'au jour où `core/limits/config.ts` change — et
+  //    ce jour-là le montage accepterait un TTL que `reserver()` refuse, sur un
+  //    message qui parlerait d'autre chose.
+  const ttlIdempotence = lireUnEntierBorne(
+    deps.env,
+    VARIABLES_DU_SERVICE.ttlIdempotenceMs,
+    TTL_IDEMPOTENCE_MAX_MS,
+  );
   const { transports, inconnus } = lireLesTransports(deps.env[VARIABLES_DU_SERVICE.transports]);
 
-  const refusDeReglage = [budget.refus, corps.refus, veille.refus].filter(
+  const refusDeReglage = [budget.refus, corps.refus, veille.refus, ttlIdempotence.refus].filter(
     (refus): refus is string => refus !== null,
   );
   if (transports.length === 0) {
@@ -360,6 +471,22 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
       "[démarrage · coffre] Coffre local PROVISIONNÉ pour ce processus. Il vit en mémoire et " +
         "disparaît à l'arrêt : aucun secret n'est écrit sur le disque.",
     );
+    // ⚠️ **LE SEMIS SUIT LA PROVISION, ET LUI SEULE.** Un coffre déjà ouvert au
+    //    démarrage porte ses propres secrets ; les écraser depuis
+    //    l'environnement remplacerait une clé de scellement dont la rotation
+    //    rend INVÉRIFIABLE tout le journal déjà scellé (§ 31, douze mois
+    //    archivés). Ici le coffre vient de naître : il ne peut rien y avoir.
+    const semis = await semerLesClesDuCoffreLocal(coffre, deps.env);
+    dire(
+      `[démarrage · coffre] ${String(semis.semees.length)} clé(s) HMAC semée(s) dans le coffre ` +
+        `local sur ${String(CLES_HMAC_DU_COFFRE_LOCAL.length)} confrontée(s) ` +
+        `[${semis.semees.join(", ") || "aucune"}]` +
+        (semis.absentes.length === 0
+          ? "."
+          : ` · ${String(semis.absentes.length)} variable(s) absente(s) ou vide(s) ` +
+            `[${semis.absentes.join(", ")}] : la chaîne des quatorze étapes ne se composera ` +
+            "PAS, et le motif sera écrit ci-dessous."),
+    );
   }
 
   const lireLEtatDuCoffre = (): Promise<EtatCoffre> => {
@@ -375,6 +502,11 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
 
   // ── LE SOCLE ────────────────────────────────────────────────────────────────
   const index = new IndexProvenanceMemoire({ maintenant: deps.maintenant });
+  // ⚠️ **UN SEUL DÉPÔT DE POLITIQUE POUR LE DÉMARRAGE ET POUR LA CHAÎNE.** Deux
+  //    dépôts distincts feraient calculer le niveau de l'étape 10 sur des lignes
+  //    où la ligne `setBy: "boot"` de l'étage 4 n'existerait pas — un socle qui
+  //    aurait écrit sa ligne de démarrage et ne la verrait pas.
+  const depotPolitique = new DepotPolitiqueMemoire();
   const dependancesDuSocle: DependancesDuSocle = {
     urlDeBase: environnement.urlDeBase,
     ouvrirLaSessionDeVerrou: null,
@@ -383,7 +515,7 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     lireLEtatDuCoffre,
     reglagesDAuthentification: environnement.reglagesDAuthentification,
     controlerLAuthentification: null,
-    depotPolitique: new DepotPolitiqueMemoire(),
+    depotPolitique,
     motifDuDemarrage: "démarrage du processus (ops/index.ts)",
     lireLeLockDAdaptateurs: () => Promise.resolve({ present: false, brut: null }),
     manifestesAAdmettre: [],
@@ -399,16 +531,83 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
 
   const socle = await demarrerLeSocle(dependancesDuSocle);
 
+  // ── LA CHAÎNE ───────────────────────────────────────────────────────────────
+  //
+  // ⚠️ **APRÈS LES SEPT ÉTAGES, ET C'EST LA MÊME RAISON QU'AILLEURS.** Composer
+  //    avant l'étage 1 ferait lire la clé de scellement à un processus qui n'a
+  //    pas encore pris le verrou d'instance — donc, derrière un répartiteur, à
+  //    un second socle qui va sortir.
+  //
+  // ⚠️ **UN SOCLE QUI NE SERT PAS NE COMPOSE PAS.** Sous coffre `absent` ou
+  //    `verrouillé`, `lireCleSceauJournal` LÈVE (`exigerOuvert`) : composer
+  //    quand même transformerait le deuxième état du § 23 — le socle vit, sert
+  //    la console, refuse les outils — en une panne de démarrage.
+  //
+  // ⚠️ **L'INVENTAIRE EST VIDE, ET LE ZÉRO EST UNE MESURE, PAS UN BOUCHON.**
+  //    L'étage 5 admet les manifestes que le verrou épingle ; ce processus n'en
+  //    soumet aucun (`manifestesAAdmettre: []`), donc aucun outil n'est servi et
+  //    l'étape 6 refuse tout `tools/call`. C'est la seule liste, et le catalogue
+  //    de la chaîne EN DÉRIVE — deux listes finiraient par se contredire.
+  const outilsEpingles: readonly OutilDuCatalogue[] = [];
+  const noyau: NoyauCompose =
+    socle.demarrage.sert && socle.demarrage.appelsDOutilsAcceptes && coffre !== null
+      ? await composerLeNoyau({
+          coffreDuSceau: coffre,
+          coffreDeLArgHash: coffre,
+          coffreDuCurseur: SANS_PONT_DE_CLE_DE_CURSEUR,
+          journalStore: new JournalMemoire(),
+          coffre,
+          inventaire: () => Promise.resolve(outilsEpingles),
+          // § 14 — `ops_runtime` n'est pas câblé : aucune ligne ne couvre ce
+          // principal. `null` fait DÉRIVER le repli à l'orchestrateur
+          // (`profilLeMoinsExposant` sur l'inventaire) ; élire un profil ici
+          // reviendrait à choisir la surface servie depuis le montage.
+          profilActif: (): Promise<ProfileName | null> => Promise.resolve(null),
+          depotPolitique,
+          depotQuota: new DepotQuotaEnMemoire(),
+          depotIdempotence: new DepotIdempotenceEnMemoire(),
+          index,
+          ttlIdempotenceMs: ttlIdempotence.valeur ?? 0,
+          secoursDAlerte: (incident) => {
+            // § 24 — le dernier recours. Il ne porte ni secret ni contenu : le
+            // nom complet de l'outil, la cause, et le compte d'écarts.
+            dire(
+              `[chaîne · § 20] ALERTE D'ÉPINGLAGE NON ÉMISE (${incident.cause}) pour ` +
+                `« ${incident.alerte.nomComplet} » · ` +
+                `${String(incident.alerte.ecarts.length)} écart(s) sur ` +
+                `${String(incident.alerte.champsCompares)} champ(s) · outil désactivé : ` +
+                `${String(incident.alerte.outilDesactive)}. Aucun canal du § 24 n'est câblé.`,
+            );
+          },
+          maintenant: deps.maintenant,
+        })
+      : {
+          fabrique: null,
+          empechement:
+            "le socle ne sert pas d'appels d'outils, ou son coffre n'est pas ouvert : la " +
+            "chaîne n'a pas été composée. Le motif exact est celui que les sept étages ont " +
+            "déjà écrit ci-dessus — il n'est pas récrit ici, une seconde rédaction finirait " +
+            "par diverger de la première.",
+          champsDeLOrchestrateur: 0,
+          colonnesFrappees: (): number => 0,
+        };
+  dire(
+    `[chaîne] ${String(noyau.champsDeLOrchestrateur)} champ(s) de ` +
+      `\`DependancesOrchestrateur\` composé(s) · ${String(outilsEpingles.length)} outil(s) au ` +
+      `catalogue · fabrique : ${noyau.fabrique === null ? "AUCUNE" : "posée"}`,
+  );
+  if (noyau.empechement !== null) dire(`[chaîne] ${noyau.empechement}`);
+
   // ── LE SERVICE ──────────────────────────────────────────────────────────────
   const catalogue = catalogueDesAdaptateursAdmis([]);
   const ports: PortsDuService = {
-    // ⚠️ **LA CHAÎNE N'EST PAS COMPOSÉE, ET LE ZÉRO EST UNE MESURE.** Les
-    //    quatorze étapes exigent un journal SCELLÉ (ADR 0002), des dépôts de
-    //    quota et d'idempotence, un catalogue épinglé — aucun n'est câblé dans
-    //    ce dépôt. Remettre un noyau de fortune ferait servir des appels
-    //    qu'aucune ligne d'`ops_audit` n'atteste : `monterLeService` compte
-    //    l'empêchement et ne monte rien.
-    noyau: null,
+    // ⚠️ **LA FABRIQUE, OU `null` — ET LE `null` RESTE UNE MESURE.** Un noyau
+    //    absent fait compter à `monterLeService` l'empêchement « la chaîne des
+    //    quatorze étapes n'est pas composée », MOT POUR MOT : c'est la garde
+    //    qui interdit qu'un transport serve des appels qu'aucune ligne
+    //    d'`ops_audit` n'atteste. Elle n'a pas été assouplie ; elle est
+    //    satisfaite quand la fabrique est là.
+    noyau: noyau.fabrique,
     catalogue: catalogue.catalogue,
     habilitations: () => ({ peutVoirAppels: false }),
     verificateurDeJeton: null,
@@ -442,6 +641,7 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
       `appels d'outils acceptés : ${String(sante?.corps.appelsDOutilsAcceptes ?? false)} · ` +
       `transports NOMMÉS : [${transports.join(", ")}] · ` +
       `transports MONTÉS : [${service.transportsMontes.join(", ") || "aucun"}] · ` +
+      `colonnes FRAPPÉES : ${String(service.colonnesFrappees)} · ` +
       `${String(service.empechements.length)} empêchement(s)`,
   );
   for (const empechement of service.empechements) dire(`[service] ${empechement}`);

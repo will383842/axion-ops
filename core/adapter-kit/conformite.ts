@@ -332,10 +332,28 @@ export async function executerHarnais<TProfile extends string>(
   // ───────────────────────────────────────────────────────────────────────────
   //  4 · Aucune sortie ne dépasse son `maxBytes` sur son `fixtureMax`
   // ───────────────────────────────────────────────────────────────────────────
+  //
+  // ⚠️ L'APPARIEMENT SE FAIT PAR LE CHEMIN DÉCLARÉ — ADR 0036, décision 7.
+  //    Le corps de ce contrôle appariait par `fixture.outil` SEUL et ne lisait
+  //    `fixtureMax` à aucun moment : une charge d'un octet sous un chemin
+  //    quelconque le rendait VERT, avec son compte annoncé (« 1 fixture(s)
+  //    exécutée(s) pour 1 outil(s) »), alors que le jeu maximal DÉCLARÉ n'avait
+  //    jamais été mesuré — et le message d'anomalie appelait « le jeu maximal »
+  //    n'importe quelle fixture reçue.
+  //
+  //    C'est le JUMEAU OUBLIÉ du contrôle 3, quelques lignes plus haut, dont le
+  //    libellé a été réécrit pour ne plus promettre plus que sa mesure. Ici la
+  //    réponse est l'inverse et c'est délibéré (ADR 0036) : le libellé du § 09
+  //    RESTE, parce que la mesure le rend de nouveau vrai. Faire les deux —
+  //    réécrire le libellé ET apparier — serait avouer qu'on mesure moins que
+  //    ce qu'on annonce tout en mesurant autant.
   {
     const anomalies: string[] = [];
     const parNom = new Map(definition.tools.map((outil) => [outil.name, outil]));
     const outilsCouverts = new Set<string>();
+    /** Les chemins RÉELLEMENT exécutés, par outil : c'est ce que l'anomalie doit dire. */
+    const cheminsParOutil = new Map<string, string[]>();
+    let jeuxMaximauxApparies = 0;
 
     for (const fixture of entree.fixtures) {
       const outil = parNom.get(fixture.outil);
@@ -347,6 +365,7 @@ export async function executerHarnais<TProfile extends string>(
         continue;
       }
       outilsCouverts.add(outil.name);
+      cheminsParOutil.set(outil.name, [...(cheminsParOutil.get(outil.name) ?? []), fixture.chemin]);
       let octets: number;
       try {
         octets = octetsCanoniques(versValeurJson(fixture.charge, fixture.chemin));
@@ -358,8 +377,15 @@ export async function executerHarnais<TProfile extends string>(
         continue;
       }
       if (octets > outil.maxBytes) {
+        // Le mot « jeu maximal » n'est employé que pour la fixture qui l'EST :
+        // l'appeler ainsi sur une autre était précisément le mensonge que
+        // l'appariement ci-dessous referme.
+        const quoi =
+          fixture.chemin === outil.fixtureMax
+            ? `le jeu maximal ${fixture.chemin}`
+            : `la fixture ${fixture.chemin} (le jeu maximal déclaré est ${outil.fixtureMax})`;
         anomalies.push(
-          `« ${outil.name} » : le jeu maximal ${fixture.chemin} pèse ${String(octets)} octets ` +
+          `« ${outil.name} » : ${quoi} pèse ${String(octets)} octets ` +
             `pour un maxBytes de ${String(outil.maxBytes)} ` +
             `(${String(Math.round((octets / outil.maxBytes) * 100))} %). ` +
             "La cascade de compaction du § 13.3 devrait donc s'appliquer à CHAQUE appel " +
@@ -378,6 +404,27 @@ export async function executerHarnais<TProfile extends string>(
       );
     }
 
+    // ⚠️ DEUX CAUSES, DEUX ANOMALIES. L'outil sans AUCUNE fixture est déjà
+    //    nommé au-dessus ; celui-ci a des fixtures, et aucune n'est le jeu
+    //    maximal qu'il déclare. Les confondre ferait chercher au mauvais
+    //    endroit (§ 15), donc l'anomalie ci-dessous ne vise QUE les outils
+    //    couverts.
+    for (const outil of definition.tools) {
+      const chemins = cheminsParOutil.get(outil.name);
+      if (chemins === undefined) continue;
+      if (chemins.includes(outil.fixtureMax)) {
+        jeuxMaximauxApparies += 1;
+        continue;
+      }
+      anomalies.push(
+        `« ${outil.name} » : le jeu maximal déclaré ${outil.fixtureMax} n'a pas été exécuté — ` +
+          `${String(chemins.length)} fixture(s) fournie(s) pour cet outil : ${chemins.join(", ")}. ` +
+          "Le contrôle mesurerait alors une charge quelconque en l'appelant « le jeu " +
+          "maximal », et le § 09 promet la mesure SUR le `fixtureMax`. Exécuter le jeu " +
+          "déclaré, ou corriger `fixtureMax` pour qu'il désigne le jeu réellement produit.",
+      );
+    }
+
     controles.push({
       numero: 4,
       cle: "maxbytes-fixtures",
@@ -388,7 +435,9 @@ export async function executerHarnais<TProfile extends string>(
       anomalies,
       detail:
         `${String(entree.fixtures.length)} fixture(s) exécutée(s) pour ` +
-        `${String(definition.tools.length)} outil(s).`,
+        `${String(definition.tools.length)} outil(s), dont ` +
+        `${String(jeuxMaximauxApparies)} jeu(x) maximal(aux) déclaré(s) apparié(s) par leur ` +
+        "chemin.",
     });
   }
 

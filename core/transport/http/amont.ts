@@ -132,19 +132,39 @@ export interface RefusEnAmont {
  * (ADR 0023), pas du transport.
  */
 export interface JournalDesRefusEnAmont {
-  consigner(refus: RefusEnAmont): Promise<void>;
+  /**
+   * Consigne un refus d'amont et rend **LE NOMBRE DE LIGNES ÉCRITES** —
+   * **ADR 0037, § 1.**
+   *
+   * ⚠️ **UN NOMBRE, ET NON UN BOOLÉEN, ET LE MOTIF EST MESURABLE.** Un port réel
+   *    peut écrire une ligne, ou zéro — écriture refusée, journal injoignable.
+   *    Un booléen dirait « ça s'est bien passé » ; un nombre dit COMBIEN, et
+   *    c'est un compte qu'on peut confronter à `refusPrononces`. Ce dépôt
+   *    n'accepte pas les couleurs à la place des nombres.
+   */
+  consigner(refus: RefusEnAmont): Promise<number>;
 }
 
 /**
- * L'IMPLÉMENTATION QUI NE FAIT RIEN, ET QUI LE DIT.
+ * L'IMPLÉMENTATION QUI NE FAIT RIEN, ET QUI LE DIT — **ELLE REND `0`.**
  *
- * ⚠️ ELLE N'EST PAS UN DÉFAUT SILENCIEUX : `TraceAmont.refusConsignes` compte
- *    les appels, si bien qu'un socle non armé annonce « 1 refus prononcé ·
- *    0 consigné » plutôt que de laisser croire que la ligne existe.
+ * ⚠️ ELLE N'EST PAS UN DÉFAUT SILENCIEUX : `TraceAmont.refusConsignes`
+ *    ADDITIONNE ce que le port a écrit, si bien qu'un socle non armé annonce
+ *    « 1 refus prononcé · 0 consigné » plutôt que de laisser croire que la ligne
+ *    existe.
+ *
+ * 🔴 **CETTE PROMESSE A ÉTÉ FAUSSE, MOT POUR MOT, JUSQU'À L'ADR 0037.** La prose
+ *    annonçait « 1 prononcé · 0 consigné » et le code faisait l'inverse :
+ *    `refusConsignes += 1` s'exécutait INCONDITIONNELLEMENT après l'`await`, et
+ *    ce port-ci résout. Mesuré sur les CINQ refus d'amont : tous annonçaient
+ *    « 1 prononcé · 1 CONSIGNÉ » alors qu'aucune ligne n'était écrite — le
+ *    compteur affirmait exactement la ligne qu'il existait pour démentir. Neuf
+ *    occurrences du champ dans le dépôt, AUCUNE assertion dessus : la mutation
+ *    `refusConsignes += 0` a survécu à la suite complète (lot 3, M1).
  */
 export const JOURNAL_AMONT_NON_ARME: JournalDesRefusEnAmont = {
-  consigner(): Promise<void> {
-    return Promise.resolve();
+  consigner(): Promise<number> {
+    return Promise.resolve(0);
   },
 };
 
@@ -261,10 +281,17 @@ export async function franchirLAmont(
   ): Promise<ResultatAmont> => {
     const code = codeDuRefusAmont(cle);
     refusPrononces += 1;
-    // L'invariant du § 11, à l'instant exact où il se joue. Le port livré ne
-    // fait rien ; le compte dit qu'il n'a rien fait.
-    await dependances.journalDesRefus.consigner({ etape, code, motif });
-    refusConsignes += 1;
+    // L'invariant du § 11, à l'instant exact où il se joue. **Le compte ADDITIONNE
+    // ce que le port a ÉCRIT** (ADR 0037, § 1) : le port livré ne fait rien et
+    // rend `0`, donc un socle non armé annonce « 1 prononcé · 0 consigné ».
+    // Incrémenter de 1 après l'`await` — ce que ce fichier faisait — affirmait la
+    // ligne que ce compteur existe pour démentir.
+    const ecrites = await dependances.journalDesRefus.consigner({ etape, code, motif });
+    // ⚠️ FAIL-CLOSED SUR LA VALEUR RENDUE. Un port écrit en JavaScript peut
+    //    rendre `undefined`, `NaN` ou un négatif ; les compter ferait remonter
+    //    un `NaN` dans une trace, c'est-à-dire un compte qu'aucune comparaison ne
+    //    peut plus lire. Ce qui n'est pas un entier positif ne compte pour RIEN.
+    refusConsignes += Number.isInteger(ecrites) && ecrites > 0 ? ecrites : 0;
     return { genre: "refus", etape, code, motif, defi, trace: trace() };
   };
 

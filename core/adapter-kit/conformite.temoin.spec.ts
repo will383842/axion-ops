@@ -103,9 +103,14 @@ function entreeAvecSources(
     symbolesAutorises: ["listInbox"],
     symbolesExportes: ["listInbox", "getAgendaFenetre"],
     plancherSymboles: 1,
+    // ⚠️ LE CHEMIN EST CELUI QUE L'OUTIL DÉCLARE — `outil.fixtureMax`, jamais
+    //    un chemin fabriqué ici. Depuis l'ADR 0036, le contrôle 4 APPARIE la
+    //    fixture au jeu maximal déclaré : un chemin quelconque ferait rougir
+    //    une règle VOISINE de celle que chacun de ces témoins isole, et
+    //    l'anomalie observée ne porterait plus sur la règle visée.
     fixtures: definition.tools.map((outil) => ({
       outil: outil.name,
-      chemin: `fixtures/${outil.name}.json`,
+      chemin: outil.fixtureMax,
       charge: { submissionId: "s1", extrait: "x" },
     })),
     clesDAutorisation: CLES,
@@ -385,5 +390,143 @@ describe("TÉMOIN — contrôle 2 du § 09 : la garde sait-elle rougir ?", () =>
     expect(controle?.mesures).toBe(0);
     expect(controle?.anomalies.length).toBeGreaterThan(0);
     expect(rapport.conforme).toBe(false);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  TÉMOIN — CONTRÔLE 4 DU § 09 : LE `fixtureMax` DÉCLARÉ EST-IL EXÉCUTÉ ?
+//  (ADR 0036, décision 7 — le jumeau oublié du contrôle 3)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ═══ LE DÉFAUT MESURÉ ═══
+ *
+ * Le § 09 énonce le contrôle 4 comme « aucune sortie ne dépasse son `maxBytes`
+ * SUR SON `fixtureMax` », et le libellé du harnais reprenait cette phrase mot
+ * pour mot. Le corps du contrôle, lui, itérait `entree.fixtures` en appariant
+ * par `fixture.outil` et **ne lisait `fixtureMax` à aucun moment** : une charge
+ * d'un octet sous un chemin quelconque rendait le contrôle VERT, avec son
+ * compte annoncé — « 1 fixture(s) exécutée(s) pour 1 outil(s) » — alors que le
+ * jeu maximal déclaré n'avait jamais été mesuré. Le message d'anomalie appelait
+ * même « le jeu maximal » n'importe quelle fixture reçue.
+ *
+ * C'est exactement le défaut que LE MÊME FICHIER a corrigé pour le contrôle 3,
+ * dont le libellé a été réécrit pour ne plus promettre plus que sa mesure. La
+ * correction n'avait pas été portée à son voisin immédiat.
+ */
+
+/** Le contrôle 4, isolé du reste du rapport. */
+function controle4(rapport: RapportHarnais) {
+  const controle = rapport.controles.find((candidat) => candidat.cle === "maxbytes-fixtures");
+  expect(controle, "le contrôle 4 doit exister dans le rapport").toBeDefined();
+  return controle;
+}
+
+/** Une entrée de harnais par ailleurs conforme, dont on ne change que les fixtures. */
+function entreeAvecFixtures(
+  fixtures: readonly {
+    readonly outil: string;
+    readonly chemin: string;
+    readonly charge: unknown;
+  }[],
+): EntreeHarnais<Profil> {
+  return {
+    ...entreeAvecSources([{ chemin: "src/adapter.ts", source: "export const a = 1;" }]),
+    fixtures,
+  };
+}
+
+describe("TÉMOIN — contrôle 4 du § 09 : le `fixtureMax` déclaré est-il exécuté ?", () => {
+  it("ROUGIT quand la seule fixture fournie porte un chemin AUTRE que le `fixtureMax`", async () => {
+    const outil = outilTemoin();
+    const rapport = await executerHarnais(
+      entreeAvecFixtures([
+        {
+          outil: outil.name,
+          // Un chemin quelconque, et une charge d'un octet : c'est la sonde de
+          // l'audit, mot pour mot.
+          chemin: "fixtures/une-charge-quelconque.json",
+          charge: 0,
+        },
+      ]),
+    );
+
+    const quatre = controle4(rapport);
+    console.log(
+      `[témoin contrôle 4 · chemin étranger] fixtureMax déclaré : ${outil.fixtureMax} · ` +
+        `${String(quatre?.mesures ?? -1)} fixture(s) exécutée(s) · ` +
+        `${String(quatre?.anomalies.length ?? -1)} anomalie(s) · ` +
+        `conforme : ${String(rapport.conforme)}`,
+    );
+
+    // La mesure d'AVANT, transcrite : le contrôle voyait bien une fixture, et
+    // ne voyait pas qu'elle n'était pas le jeu maximal.
+    expect(quatre?.mesures).toBe(1);
+    expect(
+      quatre?.anomalies.some((anomalie) => anomalie.includes(outil.fixtureMax)),
+      "l'anomalie doit NOMMER le jeu maximal déclaré",
+    ).toBe(true);
+    expect(
+      quatre?.anomalies.some((anomalie) =>
+        anomalie.includes("fixtures/une-charge-quelconque.json"),
+      ),
+      "… et les chemins RÉELLEMENT exécutés",
+    ).toBe(true);
+    expect(rapport.conforme).toBe(false);
+  });
+
+  it("CONTRE-TÉMOIN — la même charge au bon chemin rend le contrôle 4 VERT", async () => {
+    // Sans lui, le refus ci-dessus serait indistinguable d'un contrôle qui
+    // rougirait sur toute fixture.
+    const outil = outilTemoin();
+    const rapport = await executerHarnais(
+      entreeAvecFixtures([{ outil: outil.name, chemin: outil.fixtureMax, charge: 0 }]),
+    );
+
+    const quatre = controle4(rapport);
+    console.log(
+      `[témoin contrôle 4 · contre-témoin] ${outil.fixtureMax} exécuté — ` +
+        `${String(quatre?.mesures ?? -1)} fixture(s) · ` +
+        `${String(quatre?.anomalies.length ?? -1)} anomalie(s)`,
+    );
+
+    expect(quatre?.anomalies).toEqual([]);
+    expect(quatre?.mesures).toBe(1);
+  });
+
+  it("ROUGIT AUSSI quand un outil sur deux a son jeu maximal — le compte est LU", async () => {
+    // Deux outils, une seule fixture au bon chemin : le compte global reste
+    // « 2 fixtures pour 2 outils », et c'est précisément ce compte-là qui
+    // rendait le contrôle vert.
+    const premier = outilTemoin();
+    const second: DefinitionOutil<Profil> = {
+      ...premier,
+      name: "agenda.fenetre",
+      fixtureMax: "fixtures/agenda-max.json",
+    };
+    const base = entreeAvecSources([{ chemin: "src/adapter.ts", source: "export const a = 1;" }]);
+    const rapport = await executerHarnais({
+      ...base,
+      definition: { ...base.definition, tools: [premier, second] },
+      fixtures: [
+        { outil: premier.name, chemin: premier.fixtureMax, charge: 0 },
+        { outil: second.name, chemin: "fixtures/pas-le-maximal.json", charge: 0 },
+      ],
+    });
+
+    const quatre = controle4(rapport);
+    const nommant = quatre?.anomalies.filter((a) => a.includes(second.fixtureMax)) ?? [];
+    console.log(
+      `[témoin contrôle 4 · un sur deux] 2 outil(s) · ` +
+        `${String(quatre?.mesures ?? -1)} fixture(s) exécutée(s) · ` +
+        `${String(quatre?.anomalies.length ?? -1)} anomalie(s), dont ` +
+        `${String(nommant.length)} nommant ${second.fixtureMax}`,
+    );
+
+    expect(quatre?.mesures).toBe(2);
+    expect(nommant.length).toBe(1);
+    // L'outil dont le jeu maximal EST exécuté ne doit pas être nommé : une
+    // anomalie qui accuserait les deux ferait chercher au mauvais endroit.
+    expect(quatre?.anomalies.filter((a) => a.includes(premier.fixtureMax))).toEqual([]);
   });
 });

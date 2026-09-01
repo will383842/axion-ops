@@ -77,10 +77,33 @@ function parcourir(relatif: string, acc: FichierSoumis[]): void {
   }
 }
 
+/**
+ * ⚠️ **LE BALAYAGE EST MÉMOÏSÉ, ET C'EST LE REMÈDE QUE L'ADR 0040 NOMME.**
+ *
+ * Ces trois fonctions lisaient le disque et rescannaient 273 fichiers À CHAQUE
+ * TEST. Mesuré : sur une machine calme, 2,5 s par test ; sur une machine
+ * chargée — deux suites concurrentes —, **15 531 ms**, au-delà du seuil
+ * d'alerte de 15 000 ms. La suite complète cessait alors d'être reproductible :
+ * cinq exécutions vertes, puis une rouge, sur un arbre inchangé.
+ *
+ * L'ADR 0040 écrit le remède mot pour mot — « rendre la garde MOINS CHÈRE —
+ * mémoïser le balayage du dépôt, lire les sources une fois pour tous les tests
+ * d'un fichier —, jamais de remonter le plafond ». C'est ce qui est fait ici.
+ *
+ * ⚠️ **CE QUE LA MÉMOÏSATION NE CHANGE PAS.** Le registre de modules d'un worker
+ *    vitest est isolé PAR FICHIER de test : le cache naît et meurt avec ce
+ *    fichier-ci, et aucune garde d'un autre fichier ne lit ce qu'il a retenu.
+ *    Chaque test reçoit exactement le même rapport qu'avant, et continue
+ *    d'ANNONCER ses comptes — le nombre d'éléments mesurés, jamais la couleur.
+ */
+let memoireDuProgramme: FichierSoumis[] | null = null;
+
 /** Tous les `.ts` du programme, gardes comprises. Le tri des livrés vient après. */
 function programme(): FichierSoumis[] {
+  if (memoireDuProgramme !== null) return memoireDuProgramme;
   const acc: FichierSoumis[] = [];
   for (const dossier of DOSSIERS_DU_PROGRAMME) parcourir(`${dossier}/`, acc);
+  memoireDuProgramme = acc;
   return acc;
 }
 
@@ -112,7 +135,10 @@ function echapper(texte: string): string {
  *    production, chaque `à-coudre` gagnerait des appelants de test, et la mesure
  *    entière changerait de sens sans un mot.
  */
+let memoireDuCritere: CritereDeProduction | null = null;
+
 function critereDeLivraison(): CritereDeProduction {
+  if (memoireDuCritere !== null) return memoireDuCritere;
   const brut = readFileSync(fileURLToPath(new URL("tsconfig.build.json", RACINE)), "utf8");
   // `tsconfig.build.json` porte des commentaires de ligne : `JSON.parse` les refuse.
   const lu = JSON.parse(brut.replace(/^\s*\/\/[^\n]*$/gm, "")) as { exclude?: readonly string[] };
@@ -130,7 +156,24 @@ function critereDeLivraison(): CritereDeProduction {
       return forme.test(chemin) || forme.test(base);
     });
 
-  return { estLivre: (chemin) => !estExclu(chemin), motifsLus: motifs.length };
+  memoireDuCritere = { estLivre: (chemin) => !estExclu(chemin), motifsLus: motifs.length };
+  return memoireDuCritere;
+}
+
+/**
+ * LE RAPPORT SUR LE REGISTRE RÉEL, calculé UNE FOIS pour les quatre tests qui
+ * le lisent. Les témoins FABRIQUÉS appellent `verifierLesCoutures` directement :
+ * eux ne passent jamais par ici, sans quoi la mémoire les confondrait.
+ */
+let memoireDuRapport: ReturnType<typeof verifierLesCoutures> | null = null;
+
+function rapportDuRegistreReel(): ReturnType<typeof verifierLesCoutures> {
+  memoireDuRapport ??= verifierLesCoutures(
+    programme(),
+    REGISTRE_DES_COUTURES,
+    critereDeLivraison(),
+  );
+  return memoireDuRapport;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -140,7 +183,7 @@ function critereDeLivraison(): CritereDeProduction {
 describe("G1 — le registre des coutures confronté au graphe d'appels", () => {
   it("annonce, symbole par symbole, combien d'appelants de PRODUCTION et lesquels", () => {
     const critere = critereDeLivraison();
-    const rapport = verifierLesCoutures(programme(), REGISTRE_DES_COUTURES, critere);
+    const rapport = rapportDuRegistreReel();
 
     for (const verdict of rapport.verdicts) {
       const entree = verdict.entree;
@@ -178,7 +221,7 @@ describe("G1 — le registre des coutures confronté au graphe d'appels", () => 
   });
 
   it("ne trouve AUCUN désaccord entre la prose du registre et le graphe d'appels", () => {
-    const rapport = verifierLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
 
     console.info(
       `[G1 · désaccords] ${String(rapport.symbolesConfrontes)} symbole(s) confronté(s) · ` +
@@ -192,7 +235,7 @@ describe("G1 — le registre des coutures confronté au graphe d'appels", () => 
   });
 
   it("mesure la PROPORTION de décisions réellement cousues, et la nomme", () => {
-    const rapport = verifierLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
     const avecAppelant = rapport.verdicts.filter((verdict) => verdict.appelants.length > 0);
     const adrAvecAppelant = new Set(avecAppelant.map((verdict) => verdict.entree.adr));
     const adrInscrits = new Set(REGISTRE_DES_COUTURES.map((entree) => entree.adr));
@@ -227,7 +270,7 @@ describe("G1 — le registre des coutures confronté au graphe d'appels", () => 
   const NON_ECRITS_LE_2026_08_31 = ["estLigneDIntention"] as const;
 
   it("tient le CLIQUET des symboles inscrits mais JAMAIS ÉCRITS", () => {
-    const rapport = verifierLesCoutures(programme(), REGISTRE_DES_COUTURES, critereDeLivraison());
+    const rapport = rapportDuRegistreReel();
     const introuvables = rapport.verdicts
       .filter((verdict) => !verdict.defini)
       .map((verdict) => verdict.entree)

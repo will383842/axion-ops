@@ -148,6 +148,37 @@ export const MOTIFS_REFUS_CHANGEMENT = [
    */
   "resserrage-qui-recule-la-fermeture",
   /**
+   * Le chemin LIBRE a demandé une ligne qui, à niveau ET à échéance ÉGAUX, ne
+   * resserre rien — elle ne ferait que RÉATTRIBUER la ligne en vigueur.
+   * **ADR 0038.**
+   *
+   * ═══ CE QUE CE REFUS PROTÈGE ═══
+   *
+   * Une ligne `libre` posée par `desserrer` porte une attestation : TOTP
+   * vérifié, `ops:policy` présenté, canal `console`, TTL borné.
+   * `remplaceesDoffice` ne filtre ni le niveau ni le canal — une ligne `libre`
+   * de même portée et de même échéance venue de `mcp` la remplaçait donc, sans
+   * second facteur et sans scope. **Le niveau servi ne bougeait pas ; ce qui
+   * bougeait était l'ATTRIBUTION** : `channel`, `setBy` et `reason` devenaient
+   * ceux de l'appelant.
+   *
+   * Le § 12, règle 2, écrit que sans `channel` la protection second facteur est
+   * INAUDITABLE. Ici le canal survit, et il MENT — ce qui est pire qu'une
+   * colonne vide : une colonne vide se voit.
+   *
+   * ⚠️ LA COUPE EST À L'ÉGALITÉ, ET PAS AILLEURS. Une échéance strictement
+   *    antérieure RACCOURCIT : c'est un resserrage authentique, il reste libre,
+   *    et la supersession y est légitime — la ligne neuve ferme plus tôt que
+   *    celle qu'elle remplace. Élargir ce refus au cas « échéance antérieure »
+   *    retirerait au chemin libre sa fonction, qui est de refermer vite d'où
+   *    que ça vienne. Ce refus lui retire SEULEMENT ce qu'il n'a jamais eu.
+   *
+   * ⚠️ LE § 20 NE DISTINGUAIT PAS RESSERRER DE RÉÉCRIRE UNE ATTESTATION. C'est
+   *    le premier défaut du cahier des charges que le socle corrige plutôt
+   *    qu'il n'applique ; le découpage est daté dans l'ADR 0038.
+   */
+  "resserrage-sans-effet",
+  /**
    * Une ligne de politique est illisible : le plancher est le repli fail-closed
    * et non ce que les lignes disent. On ne desserre pas au-dessus d'une
    * politique qu'on ne sait pas lire — mais on le DIT, au lieu de rendre
@@ -318,6 +349,12 @@ export async function resserrer(
     }
   }
 
+  // Les lignes que cette écriture REMPLACERAIT. Elle est dérivée ici, avant les
+  // deux refus qui suivent, parce que le second a besoin de NOMMER la ligne
+  // qu'il protège : un refus qui ne dit pas quelle ligne il défend ne se relit
+  // pas.
+  const remplacees = remplaceesDoffice(lignes, demande.scope, demande.maintenant);
+
   if (demande.level === classement.niveauAvant) {
     // Rien n'est resserré en NIVEAU. La seule chose que cette ligne puisse
     // changer est la durée — et l'allonger ouvre.
@@ -339,10 +376,52 @@ export async function resserrer(
         classement.dominantes,
       );
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  LE CAS D'ÉGALITÉ — RESSERRER N'EST PAS RÉÉCRIRE UNE ATTESTATION
+    // ═════════════════════════════════════════════════════════════════════════
+    //
+    // ADR 0038. Le refus juste au-dessus coupe à `finDemandee > finCourante`.
+    // Le trou était l'ÉGALITÉ, qui tombait dans le chemin nominal : à niveau
+    // égal et à échéance égale, cette ligne ne resserre ni le niveau ni la
+    // durée. Ce qu'elle change, et la seule chose qu'elle change, c'est
+    // `channel`, `setBy` et `reason` de la ligne en vigueur — l'ATTESTATION
+    // d'un desserrage que quelqu'un a dû obtenir avec un second facteur et
+    // `ops:policy`.
+    //
+    // ⚠️ TROISIÈME CONDITION : IL FAUT QU'IL Y AIT UNE ATTESTATION À RÉÉCRIRE.
+    //    Sans ligne en vigueur à cette portée exacte, cette écriture ne
+    //    remplace rien — elle POSE une ligne là où il n'y en avait pas, et le
+    //    message ci-dessous parlerait d'une ligne qui n'existe pas. La
+    //    condition est DÉRIVÉE de `remplaceesDoffice`, la fonction qui décide
+    //    de la supersession, et non d'un second calcul de « qu'y a-t-il en
+    //    vigueur ? ».
+    //
+    // ⚠️ ON NE TOUCHE PAS À `remplaceesDoffice`. Filtrer la supersession par
+    //    niveau ou par canal fabriquerait des lignes orphelines toujours « en
+    //    vigueur » que rien ne remplacerait jamais — une seconde panne, plus
+    //    difficile à voir que la première. Le tri se fait AVANT l'écriture,
+    //    ici.
+    if (finDemandee === finCourante && remplacees.length > 0) {
+      const protegees = remplacees.map(
+        (l) => `« ${l.id} » (canal ${l.channel}, posée par ${l.setBy})`,
+      );
+      return refus(
+        "resserrage-sans-effet",
+        `À niveau égal (« ${demande.level} ») ET à échéance égale ` +
+          `(${demande.expiresAt === null ? "aucune" : demande.expiresAt.toISOString()}), ` +
+          "cette ligne ne resserre rien : elle ne changerait que le canal, l'auteur et la " +
+          `raison de ${String(remplacees.length)} ligne(s) en vigueur — ${protegees.join(", ")}. ` +
+          "Le chemin libre a le droit de REFERMER, pas celui de réécrire l'attestation d'un " +
+          "desserrage (§ 20, découpé par l'ADR 0038). Pour refermer la surface, poser un " +
+          "niveau plus strict ou une échéance plus proche ; pour reprendre la main sur un " +
+          "desserrage, passer par `desserrer`, avec second facteur et `ops:policy`.",
+        remplacees,
+      );
+    }
   }
 
   const ligne = construireLigne(demande);
-  const remplacees = remplaceesDoffice(lignes, demande.scope, demande.maintenant);
 
   // L'état d'après, DÉRIVÉ avant l'écriture — même motif que dans `desserrer` :
   // une relecture postérieure à l'écriture rendrait un échec sur une ligne
