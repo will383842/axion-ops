@@ -3022,6 +3022,31 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "OÙ CE DÉPÔT ADMET QU'UNE GARDE PORTE SA LISTE : un cliquet n'est pas une règle, c'est " +
       "un ÉTAT DATÉ dont on interdit l'aggravation, et il est produit par la garde elle-même.",
   },
+  {
+    adr: "0049",
+    decision:
+      "La voie vocale A est retenue ; les valeurs que Claude exige pour se connecter sont " +
+      "posées comme une TABLE confrontée à la documentation d'Anthropic, jamais déduites.",
+    etat: "à-coudre",
+    symbole: "motifDeRefusDUnRappelNatif",
+    genre: "fonction",
+    module: "core/auth/surfaces-claude.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/auth/surfaces-claude.spec.ts",
+      nom: "REFUSE les sept témoins fabriqués, chacun pour un motif distinct",
+      nomme: ["motifDeRefusDUnRappelNatif", "RAPPELS_DECLARES_PAR_CLAUDE_CODE"],
+    },
+    motif:
+      "⚠️ ENTRÉE PARTICULIÈRE, ET C'EST ASSUMÉ : ce module ne compte AUCUN importateur de " +
+      "production. L'ADR 0049 POSE les valeurs, le lot suivant les CÂBLE. C'est exactement le " +
+      "cas que l'axe « assertion » de l'ADR 0041 a créé — elle porte donc le nom d'un test qui " +
+      "rougit si la décision dérive, plutôt qu'un appelant qui n'existe pas encore. Sept " +
+      "témoins de rappel refusés, chacun pour un motif DISTINCT, dont " +
+      "« http://localhost.attaquant.test/callback » — un sous-domaine tiers qu'une comparaison " +
+      "sur la chaîne brute laisserait passer. Le port, lui, est IGNORÉ : Claude Code écoute " +
+      "sur un port éphémère et déclare ses rappels sans port.",
+  },
 ];
 
 /**
