@@ -39,16 +39,36 @@ import { createHash, randomBytes } from "node:crypto";
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * Les suffixes de domaine des centres de données Zoho.
+ * **LES HÔTES DES CENTRES DE DONNÉES ZOHO. UNE SEULE ÉCRITURE.**
  *
  * ⚠️ **UN CLIENT OAUTH N'EST VALIDE QUE DANS SA RÉGION.** Un `client_id` créé
  *    sur `api-console.zoho.eu` et présenté à `accounts.zoho.com` est refusé —
  *    et le message de Zoho parle d'un client inconnu, pas d'une région. C'est un
  *    quart d'heure perdu pour qui ne sait pas que la liste existe.
+ *
+ * ⚠️ **CE N'EST PAS UNE CONCATÉNATION, ET C'EST LE POINT.** La v1 dérivait
+ *    l'hôte par une interpolation sur la région, ce qui rendait `accounts.zoho.ca`
+ *    — **faux**. Le Canada est servi par `accounts.zohocloud.ca` : c'est le seul
+ *    centre dont le domaine de second niveau change. Une règle à sept cas justes
+ *    et un faux ne se voit pas ; elle ne rougit que chez le client canadien, le
+ *    jour du consentement. Mesuré le 2026-09-01 sur la table multi-DC de Zoho,
+ *    qui liste aussi le Royaume-Uni — absent de la v1.
  */
-export const REGIONS_ZOHO = ["eu", "com", "in", "com.au", "jp", "ca", "sa"] as const;
+export const HOTES_DES_COMPTES = {
+  eu: "accounts.zoho.eu",
+  com: "accounts.zoho.com",
+  in: "accounts.zoho.in",
+  "com.au": "accounts.zoho.com.au",
+  jp: "accounts.zoho.jp",
+  ca: "accounts.zohocloud.ca",
+  sa: "accounts.zoho.sa",
+  uk: "accounts.zoho.uk",
+} as const;
 
-export type RegionZoho = (typeof REGIONS_ZOHO)[number];
+export type RegionZoho = keyof typeof HOTES_DES_COMPTES;
+
+/** Les régions connues — **dérivées** de la table, jamais recopiées à côté. */
+export const REGIONS_ZOHO = Object.keys(HOTES_DES_COMPTES) as readonly RegionZoho[];
 
 /**
  * La région du client de Will. § 27 : « Région UE : `accounts.zoho.eu`,
@@ -59,12 +79,14 @@ export const REGION_DU_CLIENT: RegionZoho = "eu";
 /** Rend `null` si la chaîne n'est pas une région connue. Aucun repli silencieux. */
 export function regionDepuisLaChaine(brut: string | undefined): RegionZoho | null {
   if (brut === undefined) return null;
-  return (REGIONS_ZOHO as readonly string[]).includes(brut) ? (brut as RegionZoho) : null;
+  return Object.prototype.hasOwnProperty.call(HOTES_DES_COMPTES, brut)
+    ? (brut as RegionZoho)
+    : null;
 }
 
-/** L'hôte des comptes, DÉRIVÉ de la région. Jamais écrit trois fois. */
+/** L'hôte des comptes, LU dans la table. Jamais fabriqué par concaténation. */
 export function hoteDesComptes(region: RegionZoho): string {
-  return `accounts.zoho.${region}`;
+  return HOTES_DES_COMPTES[region];
 }
 
 /** L'endpoint d'autorisation — celui que Will ouvre dans son navigateur. */
@@ -128,15 +150,33 @@ export const SCOPES_DU_CDC: readonly ScopeDemande[] = [
     retenu: true,
   },
   {
+    // ⚠️ CE SCOPE N'EXISTE PAS CHEZ ZOHO. Le § 27 l'a inventé, et l'amorçage l'a
+    //    recopié mot pour mot — fidèlement, ce qui est le comportement attendu :
+    //    **la faute est au cahier des charges, pas à ce fichier.**
+    //
+    //    MESURÉ le 2026-09-01 sur la documentation Zoho, DEUX pages indépendantes,
+    //    l'envoi ET le téléchargement d'une pièce jointe :
+    //      · POST /messages/attachments  → « ZohoMail.messages.ALL (or) ZohoMail.messages.CREATE »
+    //      · GET  attachment content     → « ZohoMail.messages.ALL (or) ZohoMail.messages.READ »
+    //    Aucune des deux ne nomme un scope commençant par `ZohoMail.attachments`.
+    //
+    //    LA GRAMMAIRE ZOHO est `service.scope_name.OPERATION`, où `scope_name` est
+    //    un MODULE. `attachments` n'est pas un module : les pièces jointes sont
+    //    servies par le module `messages`.
+    //
+    //    LE RETIRER NE PERD AUCUNE CAPACITÉ — `ZohoMail.messages.ALL`, retenu
+    //    ci-dessus, couvre déjà l'envoi et le téléchargement. La ligne reste dans
+    //    la table à `retenu: false` pour que personne ne la réintroduise en croyant
+    //    combler un oubli.
     nom: "ZohoMail.attachments.ALL",
     motif:
-      "pièces jointes — § 27 : « si l'outil est retenu ». RETENU AU CONSENTEMENT, " +
-      "PAS À L'USAGE : consentir sans implémenter l'outil ne coûte rien ; ne pas consentir " +
-      "et en avoir besoin coûte un amorçage entier, pris sur un budget plafonné. " +
-      "L'arbitrage du § 27 (« attachment_download écrit sur le disque et contredit le " +
-      "§ 31 ») porte sur l'OUTIL, pas sur le scope, et il reste entier.",
+      "N'EXISTE PAS CHEZ ZOHO — mesuré le 2026-09-01. Les pièces jointes relèvent du " +
+      "module `messages` : l'envoi exige `ZohoMail.messages.ALL (or) ZohoMail.messages.CREATE`, " +
+      "le téléchargement `ZohoMail.messages.ALL (or) ZohoMail.messages.READ`. Le retirer ne " +
+      "perd aucune capacité. Le demander risquait un `invalid_scope` sur le SEUL écran de " +
+      "consentement d'un budget d'amorçage qui ne se recharge pas.",
     outils: ["zoho.mail.attachment_*"],
-    retenu: true,
+    retenu: false,
   },
 ];
 

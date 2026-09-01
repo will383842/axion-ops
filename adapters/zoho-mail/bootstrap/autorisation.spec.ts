@@ -52,9 +52,31 @@ describe("l'URL d'autorisation porte ce sans quoi tout l'adaptateur s'écroule",
         `hôte : ${url.host} · chemin : ${url.pathname}`,
     );
 
-    // ── LE PLANCHER, sans lequel la garde serait verte en ne lisant rien ────
+    // ── LES NOMS EXACTS, PAS UN PLANCHER ─────────────────────────────
+    //    Un plancher `>= 3` est resté VERT pendant que la table portait
+    //    `ZohoMail.attachments.ALL`, un scope qui n'existe pas chez Zoho. La
+    //    garde comptait des LIGNES là où la seule chose qui compte est le NOM.
+    //    Chaque nom ci-dessous est adossé à l'endpoint qui l'exige.
     expect(SCOPES_DU_CDC.length).toBeGreaterThanOrEqual(4);
-    expect(scopesRetenus().length).toBeGreaterThanOrEqual(3);
+    expect([...scopesRetenus()]).toEqual([
+      // GET /api/accounts → « ZohoMail.accounts.ALL (or) ZohoMail.accounts.READ »
+      "ZohoMail.accounts.READ",
+      // messages, brouillons, envoi — ET les pièces jointes, dans les deux sens
+      "ZohoMail.messages.ALL",
+      // GET /accounts/{id}/folders → « ZohoMail.folders.ALL (or) ZohoMail.folders.READ »
+      "ZohoMail.folders.READ",
+    ]);
+
+    // Aucun scope retenu ne peut nommer un module que Zoho ne sert pas. La
+    // grammaire est `service.module.OP` : `attachments` n'EST PAS un module.
+    const MODULES_SERVIS_PAR_ZOHO_MAIL = ["accounts", "messages", "folders"];
+    for (const scope of scopesRetenus()) {
+      const module = scope.split(".")[1];
+      expect(
+        MODULES_SERVIS_PAR_ZOHO_MAIL,
+        `le scope ${scope} nomme le module ${module ?? "?"}, que Zoho ne sert pas`,
+      ).toContain(module);
+    }
 
     // Les scopes de l'URL sont EXACTEMENT ceux que la table retient. Dérivé des
     // deux côtés : une ligne retirée de la table fait rougir ici.
@@ -128,6 +150,19 @@ describe("la région décide de l'hôte, et un client n'est valide que dans la s
     expect(REGION_DU_CLIENT).toBe("eu");
     expect(urlDAutorisation("eu")).toBe("https://accounts.zoho.eu/oauth/v2/auth");
     expect(urlDesJetons("eu")).toBe("https://accounts.zoho.eu/oauth/v2/token");
+
+    // ⚠️ LE CANADA EST LE TÉMOIN DE LA CONCATÉNATION. Tant que l'hôte était
+    //    fabriqué en collant la région derrière `accounts.zoho.`, cette ligne
+    //    rendait `accounts.zoho.ca` — faux, et invisible depuis l'Europe.
+    expect(hoteDesComptes("ca")).toBe("accounts.zohocloud.ca");
+    expect(hoteDesComptes("uk")).toBe("accounts.zoho.uk");
+
+    // Deux régions ne rendent jamais le même hôte, et aucun hôte n'est vide —
+    // une table à valeurs vides passerait autrement les deux lignes ci-dessus.
+    const hotes = REGIONS_ZOHO.map((r) => hoteDesComptes(r));
+    expect(new Set(hotes).size).toBe(REGIONS_ZOHO.length);
+    for (const hote of hotes) expect(hote).toMatch(/^accounts\.[a-z][a-z.]+[a-z]$/);
+
     // Deux régions différentes ne peuvent pas rendre le même hôte.
     expect(hoteDesComptes("eu")).not.toBe(hoteDesComptes("com"));
 
