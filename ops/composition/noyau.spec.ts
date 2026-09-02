@@ -336,9 +336,10 @@ describe("ADR 0039 · ④ ce que la composition N'A PAS LE DROIT de fabriquer", 
     //    Le 2026-09-02, `appelAdaptateur` a cessé d'être un `Promise.reject` :
     //    la composition sait désormais joindre un adaptateur distant quand on
     //    lui donne de quoi le faire. Mais servir un outil fédéré de bout en
-    //    bout demande QUATRE autres ports — `reglages`, `validerEntree`,
-    //    `empreinteFiltres`, `fabriqueMasquage` — qui exigent, eux, un
-    //    validateur de schéma distant : un arbitrage, pas une improvisation.
+    //    bout a demandé quatre autres ports. Trois sont branchés depuis
+    //    (`validerEntree` par ajv, `empreinteFiltres`, `fabriqueMasquage`) ;
+    //    reste `reglages`, dont les trois valeurs n'existent encore ni dans
+    //    `ops_tool` ni dans le catalogue — une couture avec migration.
     //
     //    Ce test dit donc exactement où en est la chaîne : le port d'appel est
     //    branché, et ce qui bute est le PREMIER des quatre restants. Il ne
@@ -373,7 +374,7 @@ describe("ADR 0039 · ④ ce que la composition N'A PAS LE DROIT de fabriquer", 
 
     console.info(
       `[④ bis · fédéré] port fédéré : fourni · levée : ${leve === null ? "AUCUNE" : leve.port} · ` +
-        "ports restant à brancher : reglages, validerEntree, empreinteFiltres, fabriqueMasquage",
+        "port restant à brancher : reglages (couture ops_tool → catalogue + migration)",
     );
 
     expect(leve, "la chaîne devait encore buter — quatre ports manquent").not.toBeNull();

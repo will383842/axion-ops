@@ -113,6 +113,7 @@ import { appelerAdaptateurFedere } from "../../core/federe/appel.js";
 import { construireRaccordement } from "../../core/federe/raccordement.js";
 import { creerCalculFiltersHash } from "../../core/federe/filtres.js";
 import { masquageDelegueALAdaptateur } from "../../core/federe/masquage.js";
+import { creerValidateurFedere } from "../../core/federe/validation.js";
 import type { LectureDesAdaptateurs, LectureDuCoffre } from "../../core/federe/raccordement.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -439,8 +440,14 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
     reglages(outil: OutilDuCatalogue): ReglagesDeLOutil {
       throw new ErreurAdaptateurNonAdmis("reglages", outil.name);
     },
-    validerEntree(outil: OutilDuCatalogue): ResultatValidation<unknown> {
-      throw new ErreurAdaptateurNonAdmis("validerEntree", outil.name);
+    validerEntree(outil: OutilDuCatalogue, input: unknown): ResultatValidation<unknown> {
+      // ÉTAPE 8 — l'entrée contre le JSON Schema ÉPINGLÉ du manifeste (ajv,
+      // strict, sans coercition). Décision de Will du 2026-09-02 : une
+      // bibliothèque éprouvée, pas un validateur maison qui laisserait passer.
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("validerEntree", outil.name);
+      }
+      return validateurFedere.valider(outil, input).resultat;
     },
     empreinteFiltres(outil: OutilDuCatalogue, valide: unknown): Promise<string> {
       // § 13.1 — HMAC à clé du curseur, domaine propre. Il ne dépend d'aucun
@@ -512,6 +519,10 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
   };
 
   let colonnes = 0;
+  // Un validateur PAR NOYAU : ses compilations sont mémorisées par empreinte de
+  // schéma et n'ont pas à survivre au noyau.
+  const validateurFedere = creerValidateurFedere();
+
   const fabrique: FabriqueDeNoyau = (transport: Transport): NoyauUnique => {
     colonnes += 1;
     const dependances: DependancesOrchestrateur = { ...partage, transport };
