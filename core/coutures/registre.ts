@@ -3047,6 +3047,75 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "sur la chaîne brute laisserait passer. Le port, lui, est IGNORÉ : Claude Code écoute " +
       "sur un port éphémère et déclare ses rappels sans port.",
   },
+
+  // ── ADR 0050 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0050",
+    decision:
+      "Une ré-admission ne réécrit JAMAIS les cinq colonnes que la console possède — " +
+      "`enabled`, `retiredAt`, `sunsetAt`, `limit`, `warnAt`.",
+    etat: "à-coudre",
+    symbole: "COLONNES_POSSEDEES_PAR_LA_CONSOLE",
+    genre: "constante",
+    module: "core/registry/depot.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/registry/depot.spec.ts",
+      nom: "PRISMA : l'outil activé en console reste activé après une seconde admission",
+      nomme: ["COLONNES_POSSEDEES_PAR_LA_CONSOLE", "DepotDuRegistrePrisma"],
+    },
+    motif:
+      "AUCUN appelant de production aujourd'hui : le dépôt est POSÉ par ce lot, le câblage de " +
+      "la racine appartient au lot suivant. La décision ne se mesure de toute façon PAS en " +
+      "appelants — une prise qui réécrirait `enabled` compilerait et aurait des appelants. " +
+      "L'assertion ADMET DEUX FOIS, pose entre-temps le geste de console, et RELIT la valeur : " +
+      "le socle admet ses adaptateurs à chaque démarrage, donc une prise fautive annulerait à " +
+      "chaque déploiement la bascule d'urgence du § 14, correction 3, en silence.",
+  },
+  {
+    adr: "0050",
+    decision:
+      "Un outil disparu du manifeste est NOMMÉ (`outilsOrphelins`), jamais supprimé ni " +
+      "désactivé.",
+    etat: "à-coudre",
+    symbole: "ResultatEcritureDuRegistre",
+    genre: "type",
+    module: "core/registry/depot.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/registry/depot.spec.ts",
+      nom: "rend `outilsOrphelins` sans supprimer la ligne ni la désactiver",
+      nomme: ["outilsOrphelins", "DepotDuRegistreEnMemoire"],
+    },
+    motif:
+      "Les deux gestes qu'on n'a PAS faits sont ceux qui coûteraient : supprimer effacerait " +
+      "les réglages d'un outil que le § 13.4 veut « retiré de la liste, encore appelable six " +
+      "mois » ; désactiver serait la mise à jour silencieuse que le § 20 interdit dans l'autre " +
+      "sens. L'assertion relit la ligne orpheline APRÈS la seconde admission et exige qu'elle " +
+      "soit là ET encore activée — une garde qui ne vérifierait que le compte d'orphelins " +
+      "serait verte sur une prise qui les désactive.",
+  },
+  {
+    adr: "0050",
+    decision:
+      "`nomComplet` et `retireDeLaListe` ne sont pas persistés : ce sont des DÉRIVÉS, du " +
+      "préfixe et de `ops_tool.retiredAt`.",
+    etat: "à-coudre",
+    symbole: "versEnregistrementOutil",
+    genre: "fonction",
+    module: "core/registry/depot.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/registry/depot.spec.ts",
+      nom: "retire `nomComplet` et `retireDeLaListe`, et conserve tout le reste",
+      nomme: ["versEnregistrementOutil", "retireDeLaListe"],
+    },
+    motif:
+      "Une seule conversion, à un seul endroit : deux appelants qui la recopieraient ne " +
+      "laisseraient pas tomber les mêmes champs. L'assertion DÉRIVE la liste des champs tombés " +
+      "par différence des clés, plutôt que de la recopier — c'est ce qui la fait rougir le " +
+      "jour où un champ de plus tomberait sans qu'on l'ait décidé.",
+  },
 ];
 
 /**
