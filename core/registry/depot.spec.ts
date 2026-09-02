@@ -225,6 +225,13 @@ function clientFeint(): ClientFeint {
               a.name === b.name ? a.version.localeCompare(b.version) : a.name.localeCompare(b.name),
             ),
           ),
+        updateMany: ({ where, data }) => {
+          const k = cle(where.name, where.version);
+          const existante = outils.get(k);
+          if (existante === undefined) return Promise.resolve({ count: 0 });
+          outils.set(k, { ...existante, enabled: data.enabled });
+          return Promise.resolve({ count: 1 });
+        },
         upsert: ({ where, create, update }) => {
           const k = cle(where.name_version.name, where.name_version.version);
           const existante = outils.get(k);
@@ -542,6 +549,7 @@ describe("l'ordre d'écriture suit la clé étrangère", () => {
       },
       opsTool: {
         findMany: feint.client.opsTool.findMany.bind(feint.client.opsTool),
+        updateMany: feint.client.opsTool.updateMany.bind(feint.client.opsTool),
         upsert: vi.fn((args: Parameters<typeof feint.client.opsTool.upsert>[0]) => {
           ordre.push("outil");
           return feint.client.opsTool.upsert(args);
@@ -556,5 +564,52 @@ describe("l'ordre d'écriture suit la clé étrangère", () => {
 
     console.info(`[ordre] ${ordre.join(" → ")}`);
     expect(ordre).toEqual(["adaptateur", "outil", "outil"]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Garde 9 — le geste de la console : `enabled`, et RIEN d'autre
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("`basculerActivation` — le geste de la console, sur les deux prises", () => {
+  it("active, désactive, et n'écrit QUE `enabled` — les autres réglages survivent", async () => {
+    for (const [nom, depot] of [
+      ["mémoire", new DepotDuRegistreEnMemoire()],
+      ["prisma", new DepotDuRegistrePrisma(clientFeint().client)],
+    ] as const) {
+      await depot.ecrireAdmission(ADAPTATEUR, [outil()]);
+
+      const active = await depot.basculerActivation("inbox.recent", "1.0.0", true);
+      const apresActivation = (await depot.listerOutils())[0];
+      const desactive = await depot.basculerActivation("inbox.recent", "1.0.0", false);
+      const apresDesactivation = (await depot.listerOutils())[0];
+
+      console.info(
+        `[console · ${nom}] activation → ${String(active)} ligne(s), enabled=` +
+          `${String(apresActivation?.enabled)} · désactivation → ${String(desactive)} ligne(s), ` +
+          `enabled=${String(apresDesactivation?.enabled)}`,
+      );
+
+      expect(active).toBe(1);
+      expect(apresActivation?.enabled).toBe(true);
+      expect(desactive).toBe(1);
+      expect(apresDesactivation?.enabled).toBe(false);
+      // Ce que la bascule N'A PAS touché : l'admission reste intacte.
+      expect(apresDesactivation?.bytes).toBe(4031);
+      expect(apresDesactivation?.retiredAt).toBeNull();
+    }
+  });
+
+  it("rend ZÉRO sur une ligne absente — une bascule posée sur rien se DIT", async () => {
+    for (const depot of [
+      new DepotDuRegistreEnMemoire(),
+      new DepotDuRegistrePrisma(clientFeint().client),
+    ]) {
+      const touchees = await depot.basculerActivation("inconnu", "9.9.9", true);
+      expect(touchees).toBe(0);
+    }
+    console.info(
+      "[console] bascule sur une ligne absente : 0 ligne(s) touchée(s), pas d'exception",
+    );
   });
 });

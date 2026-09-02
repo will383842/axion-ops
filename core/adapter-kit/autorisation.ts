@@ -474,6 +474,26 @@ export function clesDAutorisationDepuisSource(
  * Et l'import de `APPEL_STEPS` en tête de fichier fait rompre la COMPILATION
  * avant cela — ce test le vérifie.
  */
+/**
+ * LES DEUX FICHIERS OÙ LES DÉCLARATIONS PEUVENT VIVRE, DANS L'ORDRE.
+ *
+ * ⚠️ **LE SECOND N'EST PAS UN REPLI DE CONFORT : C'EST LE SEUL QUI EXISTE EN
+ *    PRODUCTION.** `tsconfig.build.json` émet du `.js` et du `.d.ts` ; il ne
+ *    COPIE aucun `.ts`. Sous `node dist/ops/index.js`, `../types.ts` n'existe
+ *    donc pas, et cette fonction levait `ENOENT` — c'est-à-dire que le contrôle 7
+ *    du § 09 était impossible à armer dans le seul environnement qui sert des
+ *    appels. Le défaut n'avait jamais paru parce qu'aucun appelant de production
+ *    ne l'invoquait encore.
+ *
+ * ⚠️ **LE `.d.ts` PORTE LES MÊMES DÉCLARATIONS, ÉMISES PAR LE COMPILATEUR DEPUIS
+ *    LE MÊME FICHIER.** Ce n'est pas une seconde source de vérité : c'est la
+ *    même, projetée. Les planchers (`PLANCHER_TOOL_CONTEXT`,
+ *    `PLANCHER_HABILITATIONS`, `PLANCHER_RESERVES_HORS_CONTEXTE`) mordent
+ *    identiquement sur les deux — une projection qui perdrait des noms fait
+ *    LEVER, elle ne rétrécit pas la garde en silence.
+ */
+export const SOURCES_DES_CLES_DAUTORISATION = ["../types.ts", "../types.d.ts"] as const;
+
 export function lireClesDAutorisation(): ClesDAutorisation {
   // Lu dans une variable élargie à `number` : comparer `APPEL_STEPS.length`
   // directement à 0 est une comparaison de types littéraux que TypeScript
@@ -482,6 +502,26 @@ export function lireClesDAutorisation(): ClesDAutorisation {
   if (nombreEtapes === 0) {
     throw new Error("core/types.ts est joignable mais vide — la dérivation ne vaut rien.");
   }
-  const chemin = fileURLToPath(new URL("../types.ts", import.meta.url));
-  return clesDAutorisationDepuisSource(readFileSync(chemin, "utf8"), chemin);
+
+  const essayes: string[] = [];
+  for (const relatif of SOURCES_DES_CLES_DAUTORISATION) {
+    const chemin = fileURLToPath(new URL(relatif, import.meta.url));
+    essayes.push(chemin);
+    let source: string;
+    try {
+      source = readFileSync(chemin, "utf8");
+    } catch {
+      continue;
+    }
+    return clesDAutorisationDepuisSource(source, chemin);
+  }
+
+  // ⚠️ ON LÈVE EN NOMMANT LES DEUX CHEMINS. Un contrôle 7 désarmé est
+  //    exactement ce que `ErreurGardeAveugle` refuse plus loin : mieux vaut un
+  //    refus qui dit où chercher qu'une admission sur une liste vide.
+  throw new Error(
+    `aucune source de déclarations trouvée pour le contrôle 7 — essayé : ${essayes.join(", ")}. ` +
+      "`tsconfig.build.json` n'émet pas de `.ts` : sous `dist/`, c'est le `.d.ts` qui porte " +
+      "les mêmes déclarations.",
+  );
 }

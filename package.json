@@ -26,6 +26,7 @@
     "prisma:validate": "prisma validate",
     "db:deploy": "prisma migrate deploy && prisma db execute --schema prisma/schema.prisma --file prisma/sql/0001-ops-audit-append-only.sql",
     "ops:vault:init": "tsx ops/vault-init.ts",
+    "ops:admettre": "tsx ops/admettre.ts",
     "zoho:bootstrap": "tsx ops/zoho-mail/bootstrap/index.ts --amorcage-explicite",
     "zoho:bootstrap:dist": "node dist/ops/zoho-mail/bootstrap/index.js --amorcage-explicite",
     "ops:vault:init:dist": "node dist/ops/vault-init.js"

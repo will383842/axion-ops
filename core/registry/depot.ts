@@ -224,6 +224,24 @@ export interface DepotDuRegistre {
     outils: readonly EnregistrementOutil[],
   ): Promise<ResultatEcritureDuRegistre>;
 
+  /**
+   * **LE GESTE DE LA CONSOLE — il écrit `enabled`, et RIEN d'autre.**
+   *
+   * ⚠️ **IL EST SUR LE MÊME PORT QUE L'ADMISSION, ET C'EST DÉLIBÉRÉ.** L'ADR 0050
+   *    dit que l'admission ne réécrit pas les cinq colonnes de console ; elle ne
+   *    dit pas que personne ne les écrit. Les séparer en DEUX MÉTHODES, c'est
+   *    rendre l'intention lisible à l'appel : `ecrireAdmission` pose ce qu'un
+   *    manifeste déclare, `basculerActivation` pose ce qu'un humain décide. Un
+   *    seul `ecrire()` générique aurait laissé la distinction dans la tête de
+   *    l'appelant, c'est-à-dire nulle part.
+   *
+   * ⚠️ **IL REND CE QU'IL A TOUCHÉ, PAS UN BOOLÉEN DE SUCCÈS.** `0` veut dire
+   *    « aucune ligne de ce nom et de cette version » — une bascule posée sur
+   *    rien se lirait comme une bascule appliquée, et c'est précisément la
+   *    panne qu'on découvre en incident.
+   */
+  basculerActivation(name: string, version: string, enabled: boolean): Promise<number>;
+
   /** La ligne `ops_adapter` d'un id, ou `null`. Ne lève pas : `null` est un cas. */
   lireAdaptateur(id: string): Promise<EnregistrementAdaptateur | null>;
 
@@ -375,6 +393,14 @@ export class DepotDuRegistreEnMemoire implements DepotDuRegistre {
     });
   }
 
+  public basculerActivation(name: string, version: string, enabled: boolean): Promise<number> {
+    const cle = cleDOutil(name, version);
+    const ligne = this.outils.get(cle);
+    if (ligne === undefined) return Promise.resolve(0);
+    this.outils.set(cle, { ...ligne, enabled });
+    return Promise.resolve(1);
+  }
+
   public lireAdaptateur(id: string): Promise<EnregistrementAdaptateur | null> {
     return Promise.resolve(this.adaptateurs.get(id) ?? null);
   }
@@ -459,6 +485,16 @@ export interface DelegueOpsTool {
     create: EnregistrementOutilPourPrisma;
     update: Omit<EnregistrementOutilPourPrisma, "name" | "version">;
   }): Promise<LignePrismaOpsTool>;
+  /**
+   * L'écriture de CONSOLE. `updateMany` plutôt qu'`update` : sur une ligne
+   * absente, `update` LÈVE là où l'on veut un COMPTE — et un compte de zéro dit
+   * « la bascule n'a touché personne », ce qu'une exception de Prisma raconte
+   * beaucoup moins bien.
+   */
+  updateMany(args: {
+    where: { name: string; version: string };
+    data: { enabled: boolean };
+  }): Promise<{ count: number }>;
 }
 
 /**
@@ -623,6 +659,20 @@ export class DepotDuRegistrePrisma implements DepotDuRegistre {
       outilsMisAJour: misAJour,
       outilsOrphelins: orphelins,
     };
+  }
+
+  public async basculerActivation(
+    name: string,
+    version: string,
+    enabled: boolean,
+  ): Promise<number> {
+    // ⚠️ `data` NE PORTE QUE `enabled`. Une bascule qui en profiterait pour
+    //    réécrire autre chose serait l'ADR 0050 défaite par la porte d'à côté.
+    const touchees = await this.client.opsTool.updateMany({
+      where: { name, version },
+      data: { enabled },
+    });
+    return touchees.count;
   }
 
   public async lireAdaptateur(id: string): Promise<EnregistrementAdaptateur | null> {

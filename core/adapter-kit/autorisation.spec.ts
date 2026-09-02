@@ -1,6 +1,11 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import {
+  SOURCES_DES_CLES_DAUTORISATION,
   clesDAutorisationDepuisSource,
   lireClesDAutorisation,
   proprietesDInterface,
@@ -122,5 +127,84 @@ describe("la dérivation des noms interdits", () => {
     expect(cles.toutes.length).toBeGreaterThanOrEqual(6);
     expect(cles.toutes).toEqual([...cles.toutes].sort());
     expect(new Set(cles.toutes).size).toBe(cles.toutes.length);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  LA SOURCE SOUS `dist/` — ADR 0052
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 🔑 **LE CONTRÔLE 7 DOIT POUVOIR S'ARMER LÀ OÙ LE SOCLE SERT.**
+ *
+ * `tsconfig.build.json` émet du `.js` et du `.d.ts` ; il ne COPIE aucun `.ts`.
+ * Sous `node dist/ops/…`, `../types.ts` n'existe donc pas, et
+ * `lireClesDAutorisation()` levait `ENOENT` — c'est-à-dire que la garde était
+ * impossible à armer dans le SEUL environnement qui sert des appels. Le défaut
+ * n'avait jamais paru parce qu'aucun appelant de production ne l'invoquait.
+ *
+ * ⚠️ **LA GARDE N'AFFIRME PAS QUE LE `.d.ts` PORTE LES MÊMES NOMS : ELLE LE
+ *    MESURE.** Elle fait émettre les déclarations par le VRAI émetteur de
+ *    TypeScript, depuis le VRAI `core/types.ts`, et confronte les deux
+ *    dérivations. Recopier un `.d.ts` témoin ici en ferait une seconde source,
+ *    qui cesserait de suivre au premier champ ajouté.
+ */
+function declarationsEmisesDepuisLeReel(): string {
+  const fichier = fileURLToPath(new URL("../types.ts", import.meta.url));
+  let emis: string | null = null;
+  // `noResolve` + `noLib` : on ne veut que les DÉCLARATIONS de ce fichier. Sans
+  // eux, le programme tire tout le graphe d'imports pour un résultat identique
+  // sur ce qui nous intéresse — des NOMS DE PROPRIÉTÉS — et cinq fois plus lent.
+  const programme = ts.createProgram([fichier], {
+    declaration: true,
+    emitDeclarationOnly: true,
+    noResolve: true,
+    noLib: true,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+  });
+  programme.emit(undefined, (nom, contenu) => {
+    if (nom.endsWith(".d.ts")) emis = contenu;
+  });
+  if (emis === null) throw new Error("le compilateur n'a émis aucune déclaration");
+  return emis;
+}
+
+describe("ADR 0052 — les clés d'autorisation se dérivent AUSSI du `.d.ts`", () => {
+  it("nomme les deux sources, dans l'ordre où elles sont essayées", () => {
+    console.info(`[contrôle 7 · sources] ${SOURCES_DES_CLES_DAUTORISATION.join(" puis ")}`);
+    expect([...SOURCES_DES_CLES_DAUTORISATION]).toEqual(["../types.ts", "../types.d.ts"]);
+  });
+
+  it("🔑 dérive EXACTEMENT les mêmes noms du `.ts` et du `.d.ts` émis par tsc", () => {
+    const cheminSource = fileURLToPath(new URL("../types.ts", import.meta.url));
+    const depuisLeTs = clesDAutorisationDepuisSource(
+      readFileSync(cheminSource, "utf8"),
+      cheminSource,
+    );
+    const declarations = declarationsEmisesDepuisLeReel();
+    const depuisLeDts = clesDAutorisationDepuisSource(declarations, "types.d.ts (émis)");
+
+    console.info(
+      `[contrôle 7 · projection] ${String(declarations.length)} caractère(s) de déclarations ` +
+        `émis · ${String(depuisLeTs.toutes.length)} clé(s) depuis le .ts · ` +
+        `${String(depuisLeDts.toutes.length)} depuis le .d.ts · ` +
+        `écart : [${depuisLeTs.toutes.filter((c) => !depuisLeDts.toutes.includes(c)).join(", ") || "aucun"}]`,
+    );
+
+    // Un dénominateur NUL rendrait l'égalité triviale.
+    expect(depuisLeTs.toutes.length).toBeGreaterThanOrEqual(5);
+    expect(depuisLeDts.toutes).toEqual(depuisLeTs.toutes);
+    expect(depuisLeDts.toolContext).toEqual(depuisLeTs.toolContext);
+    expect(depuisLeDts.habilitations).toEqual(depuisLeTs.habilitations);
+    expect(depuisLeDts.reservesHorsContexte).toEqual(depuisLeTs.reservesHorsContexte);
+  });
+
+  it("LÈVE en nommant les deux chemins quand aucune source n'est trouvée", () => {
+    // On ne peut pas retirer `core/types.ts` du disque ; on éprouve donc le
+    // message par la fonction pure, sur une source VIDE — le même refus, sur le
+    // même chemin de code que celui qui protège la dérivation.
+    expect(() => clesDAutorisationDepuisSource("", "vide.d.ts")).toThrow(/vide\.d\.ts/);
   });
 });
