@@ -5,6 +5,62 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 5 · 2 — le catalogue se lit, et le préfixe cesse d'être posé deux fois — 2026-09-02
+
+### Où vivent les cinq champs qu'`ops_tool` ne porte pas — ADR 0051
+
+`OutilDuCatalogue` exige `pagination`, `compaction`, `maxBytes`, `idFields` et
+`adapterVersion`. Quatre colonnes de plus les auraient **recopiées** depuis le
+manifeste — et une recopie n'est couverte par **aucune empreinte** : le jour où
+une console, une migration ou une main les modifierait, `manifestSha` resterait
+vrai pendant que le socle compacterait selon des annotations que personne n'a
+relues.
+
+Elles se lisent donc dans le **manifeste épinglé**, sous l'empreinte qu'un humain
+a relue. Ce n'est pas une économie de migration : c'est une décision sur
+l'endroit où vit la vérité — sous l'empreinte, ou à côté d'elle. La garde ne le
+dit pas en prose, elle **change le manifeste sans toucher la ligne** et relit
+`maxBytes: 4096`.
+
+Et **une ligne sans épingle n'est pas servie** : inventer un `maxBytes`, ce
+serait servir une charge que personne n'a bornée.
+
+### Le défaut que le premier catalogue réel a fait sortir
+
+`nomCompletDeLOutil()` écrivait `` `${outil.adapterId}.${outil.name}` `` — elle
+**ajoutait** le préfixe. Or `OutilDuCatalogue.name` **est** le nom complet :
+`enregistrerAdaptateur()` le dérive avant de mesurer `bytes` dessus, et
+`composerLeNoyau` le compare tel quel. C'est donc
+**`axionia.axionia.inbox.recent`** qui serait parti dans `params.name`, et
+l'adaptateur d'en face aurait répondu « outil inconnu » sur un appel parfaitement
+autorisé.
+
+Le défaut était invisible pour une raison qui vaut d'être notée : `inventaire`
+rendait `[]` — aucun `OutilDuCatalogue` réel n'existait — et **le seul témoin du
+fichier portait un `name` local**. Une fixture décidait du sens du champ à la
+place du type, et elle a tenu vert tout un lot.
+
+La fonction **refuse** désormais (`nom_non_prefixe`) au lieu de rattraper ; le
+témoin conserve l'ancienne fabrication en une ligne et mesure ce qu'elle rendait.
+
+### La chaîne complète, sur les documents RÉELS
+
+`adapters/axionia/verrou.spec.ts` parcourt manifeste épinglé → admission →
+`ops_tool` → relecture → catalogue → nom sur le fil :
+
+```
+[bout en bout] 7 ligne(s) ops_tool insérée(s) · 7 relue(s) · 7 au catalogue ·
+7 servi(s) au profil « admin » · 0 sans épingle · 0 désaccord(s)
+[bout en bout] sur le fil : axionia.agenda.jour, axionia.agenda.semaine,
+axionia.deploiement.etat, axionia.inbox.recent, axionia.pilotage.alertes,
+axionia.qualiopi.conformite, axionia.rendezvous.list
+```
+
+Elle s'arrête **à la porte du réseau**. Le témoin frère mesure l'autre sens :
+sans le manifeste épinglé, les sept lignes sont en base et **0 outil est servi**.
+
+---
+
 ## Lot 5 · 1 — la persistance de l'admission — 2026-09-02
 
 `enregistrerAdaptateur()` rendait des lignes que **personne ne prenait**. L'étage 5

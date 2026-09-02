@@ -29,6 +29,7 @@
  *    un tiers pour apprendre ce que l'on savait déjà.
  */
 
+import { prefixeDe } from "../adapter-kit/manifest.js";
 import type { Coffre } from "../vault/coffre.js";
 import type { RefusDeCoffre } from "../vault/erreurs.js";
 import type { OutilDuCatalogue } from "../chaine/etapes.js";
@@ -61,6 +62,11 @@ export const MOTIFS_RACCORDEMENT = [
   "secret_ref_absent",
   "secret_illisible",
   "coffre_indisponible",
+  /**
+   * `OutilDuCatalogue.name` ne porte pas le préfixe de son adaptateur — voir
+   * {@link nomCompletDeLOutil}. Le socle refuse au lieu de le rajouter.
+   */
+  "nom_non_prefixe",
 ] as const;
 
 export type MotifRaccordement = (typeof MOTIFS_RACCORDEMENT)[number];
@@ -97,9 +103,44 @@ export function coffreCommeLecture(coffre: Coffre): LectureDuCoffre {
   };
 }
 
-/** Le nom complet servi par `tools/list` : préfixe DÉRIVÉ de l'id + nom local. */
+/**
+ * Le nom complet servi par `tools/list` — **VÉRIFIÉ, PAS FABRIQUÉ.**
+ *
+ * ═══ CE QUE CETTE FONCTION A CESSÉ DE FAIRE, ET CE QUE ÇA COÛTAIT ═══
+ *
+ * Elle écrivait `` `${outil.adapterId}.${outil.name}` ``, c'est-à-dire qu'elle
+ * AJOUTAIT le préfixe. Or `OutilDuCatalogue.name` **est déjà le nom complet** :
+ * `enregistrerAdaptateur()` le dérive par `nomComplet(id, nomLocal)` avant de
+ * mesurer `bytes` dessus, et `composerLeNoyau` compare `outil.name` au nom
+ * complet demandé (`relire(nomComplet)`). Le préfixe était donc posé deux fois,
+ * et c'est `axionia.axionia.inbox.recent` qui serait parti sur le fil, dans
+ * `params.name` — l'adaptateur d'en face aurait répondu « outil inconnu » sur un
+ * appel parfaitement autorisé.
+ *
+ * ⚠️ **LE DÉFAUT N'AVAIT JAMAIS PU RIEN CASSER, ET C'EST CE QUI LE RENDAIT
+ *    INVISIBLE.** `inventaire` rendait `[]` : aucun `OutilDuCatalogue` réel
+ *    n'existait, et le seul témoin du fichier portait un `name` LOCAL — une
+ *    fixture qui décidait du sens du champ à la place du type. Le premier
+ *    catalogue réel l'aurait fait sortir, sur le premier appel de bout en bout.
+ *
+ * ⚠️ **ELLE REFUSE PLUTÔT QUE DE RATTRAPER.** Un `name` sans son préfixe
+ *    signifie que quelqu'un a construit un `OutilDuCatalogue` autrement que par
+ *    le registre. Le re-préfixer masquerait cette construction-là ; le refus la
+ *    NOMME (`nom_non_prefixe`), et le § 15 veut qu'un refus dise quoi corriger.
+ */
 export function nomCompletDeLOutil(outil: OutilDuCatalogue): string {
-  return `${outil.adapterId}.${outil.name}`;
+  const prefixe = `${prefixeDe(outil.adapterId)}.`;
+  if (!outil.name.startsWith(prefixe)) {
+    throw new ErreurRaccordement(
+      "nom_non_prefixe",
+      outil.adapterId,
+      `l'outil « ${outil.name} » ne porte pas le préfixe « ${prefixe} ». ` +
+        "`OutilDuCatalogue.name` EST le nom complet — le registre le dérive à l'admission " +
+        "et le budget le mesure ainsi. Un nom local ici signale un catalogue construit hors " +
+        "du registre ; le socle ne rajoute pas le préfixe, il refuse.",
+    );
+  }
+  return outil.name;
 }
 
 export interface OptionsRaccordement {
