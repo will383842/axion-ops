@@ -37,8 +37,25 @@ const SCHEMA_TEMOIN = {
   additionalProperties: false,
 };
 
+/**
+ * Un SECOND schéma témoin, distinct du premier ET de tout schéma du manifeste :
+ * le test du cache a besoin d'un schéma qui n'a encore jamais été compilé.
+ * ⚠️ Mesuré le 2026-09-02 (run 33624158133) : quand le manifeste est absent,
+ *    l'outil de repli porte déjà `SCHEMA_TEMOIN` — réutiliser ce même schéma
+ *    pour prouver « une compilation de plus » comptait 1 là où le test attendait
+ *    2. Vert sur la machine qui a le manifeste, rouge en CI : le test mesurait
+ *    sa propre installation.
+ */
+const SCHEMA_TEMOIN_BIS = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  type: "object",
+  properties: { page: { type: "integer", minimum: 1 } },
+  additionalProperties: false,
+};
+
+/** `SOCLE_SANS_MANIFESTE=1` force le repli, pour mesurer les DEUX branches ici. */
 function outilsSousTest(): { outils: OutilDuCatalogue[]; source: string } {
-  if (existsSync(CHEMIN_MANIFESTE)) {
+  if (process.env["SOCLE_SANS_MANIFESTE"] !== "1" && existsSync(CHEMIN_MANIFESTE)) {
     const brut = JSON.parse(readFileSync(CHEMIN_MANIFESTE, "utf8")) as {
       manifeste: { tools: OutilDuManifeste[] };
     };
@@ -138,8 +155,10 @@ describe("l'étape 8 sur les schémas ÉPINGLÉS", () => {
     validateur.valider(o, {});
     expect(validateur.schemasCompiles()).toBe(avant);
     // Même nom, AUTRE schéma : une compilation de plus — un cache par nom aurait
-    // servi l'ancien schéma au nouveau.
-    validateur.valider(outil(o.name, SCHEMA_TEMOIN), { limite: 1 });
+    // servi l'ancien schéma au nouveau. Le schéma doit être RÉELLEMENT autre :
+    // on le vérifie, sinon ce test recompte une compilation déjà faite.
+    expect(JSON.stringify(o.inputSchema)).not.toBe(JSON.stringify(SCHEMA_TEMOIN_BIS));
+    validateur.valider(outil(o.name, SCHEMA_TEMOIN_BIS), { page: 1 });
     expect(validateur.schemasCompiles()).toBe(avant + 1);
     console.info(`[validation] ${String(validateur.schemasCompiles())} schéma(s) en cache`);
   });
