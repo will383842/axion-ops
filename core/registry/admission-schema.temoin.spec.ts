@@ -234,6 +234,31 @@ describe("TÉMOIN — ADR 0003 : le schéma d'entrée d'un manifeste reçu", () 
     expect(trouves).toEqual(["champ_d_autorisation_au_schema"]);
   });
 
+  it("REFUSE `roleConsole` — le nom répercuté d'Axion-IA le 2026-09-02", () => {
+    // Avant cette date, `Habilitations` ne portait que `peutVoirAppels` : un
+    // manifeste déclarant `roleConsole` en entrée était ADMIS, et l'adaptateur
+    // d'Axion-IA (qui réserve 12 noms) l'aurait refusé seul. La dérivation lit
+    // `core/types.ts` : retirer la propriété là-bas fait rougir ICI.
+    const base = recu(manifesteTemoin());
+    const avecRole = rebaser({
+      ...base,
+      tools: base.tools.map((outil) => ({
+        ...outil,
+        inputSchema: {
+          type: "object",
+          properties: { roleConsole: { type: "string" } },
+          additionalProperties: false,
+        },
+      })),
+    });
+
+    const trouves = motifs(admettre(avecRole));
+    console.log(
+      `[témoin ADR 0003 · roleConsole] ${String(trouves.length)} refus : ${trouves.join(", ")}`,
+    );
+    expect(trouves).toEqual(["champ_d_autorisation_au_schema"]);
+  });
+
   it("ADMET l'autre dialecte — `unevaluatedProperties: false` (la décision)", () => {
     // C'est le cœur de l'ADR 0003. Un registre qui n'accepterait que le
     // dialecte de Zod rejetterait un manifeste PHP parfaitement correct — et,

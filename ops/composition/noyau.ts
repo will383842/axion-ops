@@ -109,6 +109,12 @@ import type { ProfileName } from "../../core/profiles/index.js";
 import type { CoffreSceauJournal } from "../../core/sceau/index.js";
 import { ErreurCleSceauJournal, scelleurDepuisCoffre } from "../../core/sceau/index.js";
 import type { FabriqueDeNoyau, NoyauUnique } from "../../core/transport/contrat.js";
+import { appelerAdaptateurFedere } from "../../core/federe/appel.js";
+import { construireRaccordement } from "../../core/federe/raccordement.js";
+import { creerCalculFiltersHash } from "../../core/federe/filtres.js";
+import { masquageDelegueALAdaptateur } from "../../core/federe/masquage.js";
+import { creerValidateurFedere } from "../../core/federe/validation.js";
+import type { LectureDesAdaptateurs, LectureDuCoffre } from "../../core/federe/raccordement.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LE REFUS NOMMÉ — CE QUI EXIGE UN ADAPTATEUR, ET N'EN A AUCUN
@@ -270,6 +276,22 @@ export interface PortsDuNoyau {
   /** § 09/§ 26 — la durée de vie d'une réservation d'idempotence, en ms. */
   readonly ttlIdempotenceMs: number;
   /** Le dernier recours de l'étape 6, quand l'alerte n'a pas pu être émise. */
+  /**
+   * De quoi APPELER un adaptateur fédéré — `null` quand aucun n'est admis.
+   *
+   * ⚠️ **OPTIONNEL, ET LE DÉFAUT EST LE REFUS.** Un socle sans adaptateur admis
+   *    doit continuer à refuser bruyamment (`ErreurAdaptateurNonAdmis`) : c'est
+   *    la garde qui empêche qu'un exécutant complaisant traverse tout le dépôt.
+   *    Le fournir, c'est déclarer qu'on a de quoi joindre quelqu'un — pas qu'on
+   *    l'a joint.
+   */
+  readonly federe: {
+    readonly adaptateurs: LectureDesAdaptateurs;
+    readonly coffre: LectureDuCoffre;
+    /** Délai d'appel, en ms. Absent : celui de `core/federe/appel.ts`. */
+    readonly delaiMs?: number;
+  } | null;
+
   readonly secoursDAlerte: (incident: IncidentEpinglage) => void;
   readonly maintenant: () => Date;
 }
@@ -416,16 +438,45 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
 
     // ── LES QUATRE PORTS QUI EXIGENT UN ADAPTATEUR — REFUS NOMMÉ ────────────
     reglages(outil: OutilDuCatalogue): ReglagesDeLOutil {
-      throw new ErreurAdaptateurNonAdmis("reglages", outil.name);
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("reglages", outil.name);
+      }
+      // Trois valeurs LUES, aucune supposée : l'idempotence vient du manifeste
+      // épinglé (via `ops_tool.idempotency`), les deux quotas de la console
+      // (`null` = valeurs de départ du § 26, tranchées par `core/limits`).
+      return {
+        modeIdempotence: outil.idempotency,
+        limiteQuota: outil.limit,
+        warnAtQuota: outil.warnAt,
+      };
     },
-    validerEntree(outil: OutilDuCatalogue): ResultatValidation<unknown> {
-      throw new ErreurAdaptateurNonAdmis("validerEntree", outil.name);
+    validerEntree(outil: OutilDuCatalogue, input: unknown): ResultatValidation<unknown> {
+      // ÉTAPE 8 — l'entrée contre le JSON Schema ÉPINGLÉ du manifeste (ajv,
+      // strict, sans coercition). Décision de Will du 2026-09-02 : une
+      // bibliothèque éprouvée, pas un validateur maison qui laisserait passer.
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("validerEntree", outil.name);
+      }
+      return validateurFedere.valider(outil, input).resultat;
     },
-    empreinteFiltres(outil: OutilDuCatalogue): Promise<string> {
-      throw new ErreurAdaptateurNonAdmis("empreinteFiltres", outil.name);
+    empreinteFiltres(outil: OutilDuCatalogue, valide: unknown): Promise<string> {
+      // § 13.1 — HMAC à clé du curseur, domaine propre. Il ne dépend d'aucun
+      // adaptateur : seuls le nom de l'outil et l'entrée VALIDÉE y entrent.
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("empreinteFiltres", outil.name);
+      }
+      return creerCalculFiltersHash(ports.coffreDuCurseur).calculer(outil, valide);
     },
-    fabriqueMasquage(_habilitations, outil: OutilDuCatalogue): Masquage {
-      throw new ErreurAdaptateurNonAdmis("fabriqueMasquage", outil.name);
+    fabriqueMasquage(habilitations, outil: OutilDuCatalogue): Masquage {
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("fabriqueMasquage", outil.name);
+      }
+      // ⚠️ RIDEAU VIDE, ET ASSUMÉ. Le socle ne connaît aucun métier : il ne sait
+      //    pas quels champs d'un produit tiers sont sensibles, et fabriquer une
+      //    liste de noms plausibles produirait une garde qui rassure sans
+      //    garder. C'est l'adaptateur qui masque, à la source. Lire
+      //    `core/federe/masquage.ts` : l'écart y est écrit, pas caché.
+      return masquageDelegueALAdaptateur(habilitations, outil);
     },
     construireContexteOutil(identite, _appel, profil, niveau) {
       // ⚠️ IL NE FABRIQUE RIEN — il RECOPIE ce que les étapes ont établi. C'est
@@ -444,11 +495,30 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
         habilitations: identite.habilitations,
       };
     },
-    appelAdaptateur(_contexte, _entree): Promise<ChargeAdaptateur> {
-      // L'outil n'est pas nommé par la signature de ce port : il l'est par le
-      // contexte, et le § 15 interdit d'y aller chercher autre chose. Le nom
-      // du port suffit à désigner le geste manquant.
-      return Promise.reject(new ErreurAdaptateurNonAdmis("appelAdaptateur", "(outil du contexte)"));
+    async appelAdaptateur(contexte, entree, outil): Promise<ChargeAdaptateur> {
+      // ── AUCUN MOYEN DE JOINDRE QUI QUE CE SOIT ────────────────────────────
+      //    Le refus reste le défaut, et il reste BRUYANT : un exécutant
+      //    complaisant traverserait toutes les gardes du dépôt.
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("appelAdaptateur", outil.name);
+      }
+
+      // ⚠️ LE RACCORDEMENT EST CONSTRUIT À CHAQUE APPEL, JAMAIS MÉMORISÉ. Il lit
+      //    le coffre, qui peut être verrouillé entre deux appels : un
+      //    raccordement gardé en cache survivrait à l'arrêt d'urgence du § 25.
+      const raccordement = await construireRaccordement(
+        outil,
+        ports.federe.adaptateurs,
+        ports.federe.coffre,
+        ports.federe.delaiMs === undefined ? {} : { delaiMs: ports.federe.delaiMs },
+      );
+
+      // ⚠️ AUCUN `try` ICI, ET C'EST DÉLIBÉRÉ. Une erreur réseau doit remonter
+      //    telle quelle jusqu'à `estAmontInjoignable()`, qui la reconnaît dans
+      //    sa chaîne `cause` et rend `upstream_unavailable`. L'envelopper la
+      //    transformerait en `internal`, et le § 15 ne dirait plus « réessayer ».
+      const { charge } = await appelerAdaptateurFedere(raccordement, contexte, entree);
+      return charge;
     },
     empreintesDuResultat(execution: ExecutionEtablie): readonly string[] {
       return empreintesParDefaut(execution);
@@ -459,6 +529,10 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
   };
 
   let colonnes = 0;
+  // Un validateur PAR NOYAU : ses compilations sont mémorisées par empreinte de
+  // schéma et n'ont pas à survivre au noyau.
+  const validateurFedere = creerValidateurFedere();
+
   const fabrique: FabriqueDeNoyau = (transport: Transport): NoyauUnique => {
     colonnes += 1;
     const dependances: DependancesOrchestrateur = { ...partage, transport };

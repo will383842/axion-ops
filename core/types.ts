@@ -205,6 +205,27 @@ export interface Habilitations {
    * donc `false`, et coordonnées masquées.
    */
   readonly peutVoirAppels: boolean;
+  /**
+   * **LE RÔLE CONSOLE au nom duquel l'adaptateur agit**, ou `null` quand le
+   * socle ne connaît pas les rôles du produit — ce qui est le cas de ce socle
+   * générique, qui n'en nomme aucun. Un produit dont certaines lectures
+   * appliquent ELLES-MÊMES leur prédicat sur un rôle (le dossier de candidat
+   * d'Axion-IA, `src/server/mcp/contrat.ts`) a besoin du rôle, pas d'un booléen
+   * déjà tranché — un booléen rendrait le cloisonnement dépendant de chaque
+   * appelant.
+   *
+   * ⚠️ `null` N'EST PAS UN DROIT : c'est « aucun rôle porté », que l'adaptateur
+   *    doit lire comme le rôle le plus faible (défaut W-6, confirmé le
+   *    2026-09-02). Aucune valeur de rôle n'est recopiée ici : un nom de rôle
+   *    est une valeur qu'un TIERS doit accepter, elle vit chez lui.
+   *
+   * 🔑 Le nom est ici SURTOUT pour la dérivation : `clesDAutorisationDepuisSource`
+   *    lit les propriétés de cette interface et le contrôle 7 refuse chacune dans
+   *    un `inputSchema`. Répercuté d'Axion-IA (qui réserve 12 noms) le
+   *    2026-09-02 ; le socle en réservait 11, et aurait ADMIS un manifeste
+   *    déclarant `roleConsole` en entrée.
+   */
+  readonly roleConsole: string | null;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

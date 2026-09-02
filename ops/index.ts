@@ -370,7 +370,7 @@ export function catalogueDesAdaptateursAdmis(admis: readonly DescripteurOutilSer
  *    tombe du côté strict.
  */
 export const PONT_AU_PLUS_FAIBLE: PontDIdentite = {
-  habilitations: () => ({ peutVoirAppels: false }),
+  habilitations: () => ({ peutVoirAppels: false, roleConsole: null }),
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -557,6 +557,13 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
           coffreDuCurseur: SANS_PONT_DE_CLE_DE_CURSEUR,
           journalStore: new JournalMemoire(),
           coffre,
+          // ⚠️ AUCUN ADAPTATEUR À JOINDRE, ET C'EST DÉCLARÉ. Le champ est
+          //    obligatoire pour que chaque composition doive le DIRE : un
+          //    optionnel absent se serait lu « on n'y a pas pensé ». Le jour où
+          //    `outilsEpingles` cessera d'être vide, cette ligne devra fournir
+          //    la lecture d'`ops_adapter` et le coffre — sinon l'étape 14
+          //    refusera bruyamment, ce qui est le bon échec.
+          federe: null,
           inventaire: () => Promise.resolve(outilsEpingles),
           // § 14 — `ops_runtime` n'est pas câblé : aucune ligne ne couvre ce
           // principal. `null` fait DÉRIVER le repli à l'orchestrateur
@@ -609,7 +616,7 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     //    satisfaite quand la fabrique est là.
     noyau: noyau.fabrique,
     catalogue: catalogue.catalogue,
-    habilitations: () => ({ peutVoirAppels: false }),
+    habilitations: () => ({ peutVoirAppels: false, roleConsole: null }),
     verificateurDeJeton: null,
     registreDesJetons: null,
     pontDIdentite: PONT_AU_PLUS_FAIBLE,

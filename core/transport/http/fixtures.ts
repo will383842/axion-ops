@@ -43,7 +43,7 @@ export const JTI_DE_TEMOIN = "jti-de-demonstration-0001";
 export const PRINCIPAL_DE_TEMOIN = "http.temoin";
 
 /** Les habilitations les plus faibles — § 19 bis, défaut fail-closed. */
-export const HABILITATIONS_DE_TEMOIN: Habilitations = { peutVoirAppels: false };
+export const HABILITATIONS_DE_TEMOIN: Habilitations = { peutVoirAppels: false, roleConsole: null };
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LES DOUBLES QUI COMPTENT

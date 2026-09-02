@@ -30,6 +30,7 @@ import type { Transport } from "../../core/chaine/index.js";
 import { OUTIL_BONJOUR } from "../../core/transport/stdio/fixtures.js";
 
 import type { NoyauCompose, PortsDuNoyau } from "./noyau.js";
+import { ErreurRaccordement } from "../../core/federe/raccordement.js";
 import {
   CONFIRMATION_SANS_DEPOT,
   DECLARATIONS_SANS_ADAPTATEUR_ADMIS,
@@ -74,6 +75,10 @@ function decor(
     readonly outils?: readonly OutilDuCatalogue[];
     /** § 14 — ce que `ops_runtime` répond. `null` fait DÉRIVER le repli. */
     readonly profil?: ProfileName | null;
+    /** De quoi joindre un adaptateur distant. Absent : `null`, le refus. */
+    readonly federe?: PortsDuNoyau["federe"];
+    /** La clé du curseur (§ 13.1). Absente : le pont vide, qui refuse de signer. */
+    readonly coffreDuCurseur?: PortsDuNoyau["coffreDuCurseur"];
   } = {},
 ): DecorDeComposition {
   const journal = new JournalMemoire();
@@ -88,7 +93,10 @@ function decor(
     ports: {
       coffreDuSceau: { lireCleSceauJournal: () => Promise.resolve(cleDuSceau) },
       coffreDeLArgHash: { lireCleArgHash: () => Promise.resolve(CLE_ARGHASH_DU_TEMOIN) },
-      coffreDuCurseur: SANS_PONT_DE_CLE_DE_CURSEUR,
+      coffreDuCurseur: options.coffreDuCurseur ?? SANS_PONT_DE_CLE_DE_CURSEUR,
+      // Le témoin n'a personne à joindre, sauf quand il l'exige : c'est le
+      // refus nommé qu'il éprouve par défaut.
+      federe: options.federe ?? null,
       journalStore: journal,
       // § 23 — le coffre est OUVERT dans ce décor : l'étape 0 laisse passer, et
       // ce sont les étapes suivantes qui sont éprouvées.
@@ -123,7 +131,7 @@ function identiteDuTemoin(): ReturnType<typeof identiteStdio> {
   return identiteStdio({
     requestId: "req-temoin-composition",
     deadline: new Date(INSTANT_DU_TEMOIN.getTime() + 30_000),
-    habilitations: { peutVoirAppels: false },
+    habilitations: { peutVoirAppels: false, roleConsole: null },
   });
 }
 
@@ -323,6 +331,68 @@ describe("ADR 0039 · ④ ce que la composition N'A PAS LE DROIT de fabriquer", 
     expect(leve?.outil).toBe(OUTIL_BONJOUR.name);
     expect(d.lignes()).toHaveLength(1);
     expect(d.lignes()[0]?.decision).toBe("interrompu");
+  });
+
+  it("avec un raccordement fédéré, AUCUN port ne manque plus : la chaîne va jusqu'au réseau", async () => {
+    // ⚠️ **CE QUE CE TÉMOIN FIGE, ET POURQUOI IL EST ÉCRIT AINSI.**
+    //
+    //    Le 2026-09-02, `appelAdaptateur` a cessé d'être un `Promise.reject` :
+    //    la composition sait désormais joindre un adaptateur distant quand on
+    //    lui donne de quoi le faire. Mais servir un outil fédéré de bout en
+    //    bout a demandé quatre autres ports. Trois sont branchés depuis
+    //    (`validerEntree` par ajv, `empreinteFiltres`, `fabriqueMasquage`) ;
+    //    reste `reglages`, dont les trois valeurs n'existent encore ni dans
+    //    `ops_tool` ni dans le catalogue — une couture avec migration.
+    //
+    //    Ce test dit donc exactement où en est la chaîne : le port d'appel est
+    //    branché, et ce qui bute est le PREMIER des quatre restants. Il ne
+    //    prétend pas qu'un outil fédéré fonctionne — ce serait faux.
+    //
+    // 🔑 Il a rougi UTILEMENT le 2026-09-02 quand `reglages` a été branché — le
+    //    dernier des cinq ports. Depuis, plus AUCUNE `ErreurAdaptateurNonAdmis`
+    //    ne peut sortir de cette chaîne : elle traverse les quatorze étapes et
+    //    bute sur le RACCORDEMENT (l'adaptateur témoin n'est pas dans le
+    //    verrou), c'est-à-dire à la porte du réseau. C'est la mesure exacte de
+    //    l'avancement, et elle se relit ici.
+    const federe = {
+      adaptateurs: { relire: () => Promise.resolve(null) },
+      coffre: {
+        lire: () => Promise.resolve(Buffer.from("jamais-atteint", "utf8")),
+        refusDAppelDOutil: () => null,
+      },
+    };
+    const { compose } = await composer({
+      outils: [OUTIL_BONJOUR],
+      profil: OUTIL_BONJOUR.profiles[0] ?? null,
+      federe,
+      // Sans clé de curseur, `empreinteFiltres` refuse de calculer — à raison —
+      // et le témoin s'arrêterait AVANT la porte du réseau, en mesurant la
+      // clé et non la chaîne. Une clé de garde, donc.
+      coffreDuCurseur: {
+        lireCleCurseur: () => Promise.resolve("cle-de-curseur-de-garde-sans-valeur-reelle-48!"),
+      },
+    });
+    expect(compose.fabrique).not.toBeNull();
+    const noyau = compose.fabrique!("stdio");
+
+    let nonAdmis: ErreurAdaptateurNonAdmis | null = null;
+    let raccordement: ErreurRaccordement | null = null;
+    try {
+      await noyau(identiteDuTemoin(), appel(OUTIL_BONJOUR.name));
+    } catch (erreur: unknown) {
+      if (erreur instanceof ErreurAdaptateurNonAdmis) nonAdmis = erreur;
+      else if (erreur instanceof ErreurRaccordement) raccordement = erreur;
+      else throw erreur;
+    }
+
+    console.info(
+      `[④ bis · fédéré] port fédéré : fourni · port manquant : ${nonAdmis === null ? "AUCUN" : nonAdmis.port} · ` +
+        `arrêt : ${raccordement === null ? "?" : `raccordement/${raccordement.motif}`} — la chaîne atteint la porte du réseau`,
+    );
+
+    expect(nonAdmis, "un port de composition manque encore").toBeNull();
+    expect(raccordement, "la chaîne devait buter sur le RACCORDEMENT, pas avant").not.toBeNull();
+    expect(raccordement?.motif).toBe("adaptateur_introuvable");
   });
 
   it("laisse `confronterEpinglage` MESURER l'absence : `null`, jamais une déclaration inventée", async () => {

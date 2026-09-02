@@ -108,6 +108,7 @@ describe("la dérivation des noms interdits", () => {
     expect(cles.toutes).toContain("idempotencyKey");
     expect(cles.toutes).toContain("scopes");
     expect(cles.toutes).toContain("peutVoirAppels");
+    expect(cles.toutes).toContain("roleConsole");
 
     expect(cles.origine).toMatch(/types\.ts$/);
   });

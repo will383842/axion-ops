@@ -848,10 +848,25 @@ export interface ReglagesDeLOutil {
   readonly warnAtQuota: number | null;
 }
 
-/** L'appel de l'adaptateur — § 09. Il rend la charge BRUTE, jamais compactée. */
+/**
+ * L'appel de l'adaptateur — § 09. Il rend la charge BRUTE, jamais compactée.
+ *
+ * ⚠️ **`outil` EST ARRIVÉ LE 2026-09-02, ET IL FALLAIT QU'IL ARRIVE.** Ce port
+ *    ne recevait que le contexte et l'entrée validée. En mode « hébergé », cela
+ *    suffit : la clôture qui l'implémente capture déjà son propre handler. En
+ *    mode **fédéré**, l'implémentation est UNE, partagée par tous les outils —
+ *    il lui faut savoir lequel appeler, à quelle adresse, et avec quels
+ *    `idFields`. Sans ce paramètre, la composition n'avait d'autre issue que de
+ *    fouiller le contexte, ce que le § 15 interdit, ou de fabriquer un noyau
+ *    par outil.
+ *
+ *    Le paramètre est ajouté EN DERNIER : une implémentation à deux arguments
+ *    reste assignable, et aucune des sept déjà écrites n'a eu à changer.
+ */
 export type AppelAdaptateur = (
   contexte: ToolContext<ProfileName>,
   entree: unknown,
+  outil: OutilDuCatalogue,
 ) => Promise<ChargeAdaptateur>;
 
 /**
@@ -2256,7 +2271,7 @@ export async function orchestrerAppel(
         //    `switch` exhaustif ; le recopier ici laisserait `destructive`
         //    dehors le jour où quelqu'un ne relit qu'une des deux listes.
         executer: async () => {
-          const charge = await dependances.appelAdaptateur(contexte, limites.entree);
+          const charge = await dependances.appelAdaptateur(contexte, limites.entree, outil);
           if (estEffetExterieur(outil.effect)) signalerEffetExterieur();
           return charge;
         },

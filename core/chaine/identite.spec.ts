@@ -62,7 +62,7 @@ import type { IdentiteAppelante } from "./orchestrateur.js";
  */
 
 const INSTANT = new Date("2026-08-31T09:00:00.000Z");
-const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+const HABILITATIONS: Habilitations = { peutVoirAppels: false, roleConsole: null };
 
 /** Le domaine chez qui la session lit du `personal`. */
 const DOMAINE_LU = "courrier";

@@ -181,7 +181,7 @@ describe("ADR 0037 — un REJEU est lisible des DEUX côtés, et il l'est pareil
     const serveur = creerServeurStdio({
       noyau: () => Promise.resolve(resultatServi(chargeServie("rejeu", "stdio"))),
       catalogue,
-      habilitations: (): Habilitations => ({ peutVoirAppels: false }),
+      habilitations: (): Habilitations => ({ peutVoirAppels: false, roleConsole: null }),
       maintenant: () => INSTANT,
       ecrire: (ligne) => sortie.push(ligne),
     });

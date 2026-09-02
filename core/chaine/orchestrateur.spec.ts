@@ -93,7 +93,7 @@ const CLE_CURSEUR_D_EPREUVE = "cle-curseur-d-epreuve-non-secrete-0123456789ab";
 
 const INSTANT = new Date("2026-08-31T09:00:00.000Z");
 const PROFIL_TEMOIN: ProfileName = "courrier";
-const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+const HABILITATIONS: Habilitations = { peutVoirAppels: false, roleConsole: null };
 
 /**
  * La session du harnais — FRAPPÉE, jamais écrite (ADR 0014). Elle est gardée
@@ -138,6 +138,9 @@ function outilTemoin(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogu
     retireDeLaListe: false,
     adapterId: "temoin",
     adapterVersion: "1.0.0",
+    idempotency: "n/a",
+    limit: null,
+    warnAt: null,
     effect: "read",
     dataClass: "none",
     pagination: "none",

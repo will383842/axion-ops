@@ -87,7 +87,7 @@ const CLE_CURSEUR_DU_HARNAIS = "cle-curseur-du-harnais-stdio-non-secrete-0123456
 
 export const INSTANT_DU_HARNAIS = new Date("2026-08-31T21:00:00.000Z");
 export const PROFIL_DU_HARNAIS: ProfileName = "courrier";
-export const HABILITATIONS_DU_HARNAIS: Habilitations = { peutVoirAppels: false };
+export const HABILITATIONS_DU_HARNAIS: Habilitations = { peutVoirAppels: false, roleConsole: null };
 
 /**
  * L'OUTIL « BONJOUR » — la surface la plus petite qui traverse les onze étapes.
@@ -113,6 +113,9 @@ export const OUTIL_BONJOUR: OutilDuCatalogue = {
   retireDeLaListe: false,
   adapterId: "bonjour",
   adapterVersion: "1.0.0",
+  idempotency: "n/a",
+  limit: null,
+  warnAt: null,
   effect: "read",
   dataClass: "none",
   pagination: "none",
