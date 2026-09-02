@@ -63,7 +63,13 @@ import {
 import type { ChoixDuVerrou, OuvertureDeSessionDediee } from "../core/instance/postgres.js";
 import { VerrouPostgres, choisirImplementationDuVerrou } from "../core/instance/postgres.js";
 import type { EntreeEnregistrement } from "../core/registry/index.js";
-import { VERSION_VERROU, enregistrerAdaptateur, lireVerrou } from "../core/registry/index.js";
+import {
+  VERSION_VERROU,
+  enregistrerAdaptateur,
+  lireVerrou,
+  versEnregistrementOutil,
+} from "../core/registry/index.js";
+import type { DepotDuRegistre } from "../core/registry/index.js";
 import type { DepotPolitique, ResultatDemarrage } from "../core/policy/index.js";
 import { demarrerPolitique, plancherDuScope } from "../core/policy/index.js";
 import type { PolicyLevel } from "../core/types.js";
@@ -359,6 +365,22 @@ export interface DependancesDuSocle {
   // ── Étage 5 · registre ────────────────────────────────────────────────────
   lireLeLockDAdaptateurs(): Promise<LectureDuLockDAdaptateurs>;
   readonly manifestesAAdmettre: readonly ManifesteAAdmettre[];
+  /**
+   * OÙ L'ADMISSION SE POSE — ou `null` quand elle ne se pose nulle part.
+   *
+   * ⚠️ **OBLIGATOIRE, MÊME POUR VALOIR `null`.** Jusqu'au lot 5, l'étage 5
+   *    admettait, comptait `adaptateursAdmis: 1`, et JETAIT le résultat : aucune
+   *    ligne `ops_adapter`, aucune ligne `ops_tool`, donc aucun catalogue, donc
+   *    aucun outil servi. Un champ facultatif se serait lu « on n'y a pas
+   *    pensé » ; celui-ci oblige chaque montage à DIRE s'il pose ou non.
+   *
+   * ⚠️ **UNE ÉCRITURE QUI ÉCHOUE N'ARRÊTE PAS LE DÉMARRAGE, ELLE LE DIT.** Le
+   *    § 20 veut qu'un adaptateur en défaut soit DÉSACTIVÉ et alerté, pas qu'il
+   *    fasse sortir le processus : un socle qui refuserait de démarrer parce
+   *    qu'une base est momentanément indisponible cesserait aussi de servir la
+   *    console, par laquelle on répare.
+   */
+  readonly depotDuRegistre: DepotDuRegistre | null;
 
   // ── Étage 6 · transports ──────────────────────────────────────────────────
   readonly transports: readonly Transport[];
@@ -588,7 +610,10 @@ export async function demarrerLeSocle(deps: DependancesDuSocle): Promise<SocleDe
   // ───────────────────────────────────────────────────────────────────────────
   let epingles = 0;
   let admis = 0;
+  let lignesPosees = 0;
   const desactives: string[] = [];
+  const orphelins: string[] = [];
+  const echecsDEcriture: string[] = [];
 
   let lock: LectureDuLockDAdaptateurs;
   try {
@@ -623,8 +648,31 @@ export async function demarrerLeSocle(deps: DependancesDuSocle): Promise<SocleDe
       //    PROCESSUS : il DÉSACTIVE SON adaptateur et alerte. C'est l'épinglage
       //    du § 20 — « au lieu de mettre à jour en silence ».
       const resultat = enregistrerAdaptateur({ ...manifeste, verrou: lecture.verrou });
-      if (resultat.admis) admis += 1;
-      else desactives.push(resultat.refus.map((refus) => refus.motif).join("/") || "refusé");
+      if (!resultat.admis) {
+        desactives.push(resultat.refus.map((refus) => refus.motif).join("/") || "refusé");
+        continue;
+      }
+      admis += 1;
+
+      // ── L'ADMISSION SE POSE ────────────────────────────────────────────────
+      // ⚠️ ELLE NE SE POSE QUE SI UN DÉPÔT EST FOURNI, et le contraire n'est
+      //    pas une panne : un socle en mémoire ADMET sans écrire, et l'annonce
+      //    le dit par un compte de lignes posées à zéro.
+      if (deps.depotDuRegistre === null) continue;
+      try {
+        const ecriture = await deps.depotDuRegistre.ecrireAdmission(
+          resultat.adaptateur,
+          resultat.outils.map(versEnregistrementOutil),
+        );
+        lignesPosees += ecriture.outilsInseres + ecriture.outilsMisAJour;
+        orphelins.push(...ecriture.outilsOrphelins);
+      } catch (erreur) {
+        // ⚠️ ON NOMME L'ADAPTATEUR ET LA CLASSE D'ERREUR, JAMAIS SON MESSAGE :
+        //    un message de pilote de base porte volontiers une URL de connexion.
+        echecsDEcriture.push(
+          `${resultat.adaptateur.id} (${erreur instanceof Error ? erreur.name : "erreur"})`,
+        );
+      }
     }
     resultats.push(
       franchir("registre", {
@@ -632,6 +680,12 @@ export async function demarrerLeSocle(deps: DependancesDuSocle): Promise<SocleDe
         manifestesSoumis: deps.manifestesAAdmettre.length,
         adaptateursAdmis: admis,
         adaptateursDesactives: desactives.length,
+        // ⚠️ CES TROIS COMPTES SONT ANNONCÉS MÊME À ZÉRO. Un zéro de lignes
+        //    posées distingue « rien à poser » de « personne n'a écrit », et
+        //    c'est exactement la confusion que le lot 5 est venu défaire.
+        lignesOpsToolPosees: lignesPosees,
+        outilsOrphelins: orphelins.length,
+        echecsDEcriture: echecsDEcriture.length,
       }),
     );
   }

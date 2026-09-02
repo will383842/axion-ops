@@ -41,6 +41,21 @@ import { JournalMemoire } from "../core/audit/index.js";
 import { DepotIdempotenceEnMemoire, DepotQuotaEnMemoire } from "../core/limits/index.js";
 import { DepotPolitiqueMemoire } from "../core/policy/index.js";
 import type { ProfileName } from "../core/profiles/index.js";
+import { PROFILE_NAMES, outilsServis, profilLeMoinsExposant } from "../core/profiles/index.js";
+import {
+  DepotDuRegistreEnMemoire,
+  construireLeCatalogue,
+  indexerLeManifeste,
+  lireManifesteRecu,
+} from "../core/registry/index.js";
+import type { ManifesteIndexe } from "../core/registry/index.js";
+import { coffreCommeLecture } from "../core/federe/raccordement.js";
+import {
+  SOURCE_DU_DEPOT,
+  contributionDuSocle,
+  lireLesAdaptateursEpingles,
+  manifestesAAdmettre,
+} from "./adaptateurs-epingles.js";
 import type {
   CatalogueServiEnStdio,
   DescripteurOutilServi,
@@ -106,7 +121,49 @@ export const VARIABLES_DU_SERVICE = {
    *    reste non rejouable — c'est-à-dire à quel moment un envoi peut repartir.
    */
   ttlIdempotenceMs: "OPS_IDEMPOTENCY_TTL_MS",
+  /**
+   * § 14, correction 3 — LES OUTILS ACTIVÉS, PAR NOM COMPLET, SÉPARÉS PAR DES
+   * VIRGULES. `*` les active tous.
+   *
+   * ⚠️ **C'EST UN REMPLAÇANT PROVISOIRE DE LA CONSOLE, ET IL PORTE LE DÉFAUT QUE
+   *    LE § 14 NOMME.** La correction 3 veut qu'`enabled` bascule « en console,
+   *    SANS redéploiement » ; une variable d'environnement exige exactement un
+   *    redéploiement. Elle existe parce que la console n'existe pas encore, et
+   *    parce qu'un socle dont AUCUN outil n'est activé ne sert rien — ce qui
+   *    rendrait invérifiable tout le reste de la chaîne.
+   *
+   * ⚠️ **ELLE PASSE PAR LE MÊME GESTE QUE LA CONSOLE** (`basculerActivation`),
+   *    jamais par un chemin parallèle : le jour où la console arrive, c'est
+   *    cette variable qui disparaît, pas le geste.
+   *
+   * ⚠️ **ABSENTE = AUCUN OUTIL ACTIVÉ**, et c'est le bon défaut : un outil
+   *    fraîchement admis n'est pas servi (§ 09, harnais, contrôle 1).
+   */
+  outilsActives: "OPS_ENABLED_TOOLS",
+  /**
+   * § 14 — LE PROFIL SERVI PAR CETTE INSTANCE, tant qu'`ops_runtime` n'est pas
+   * câblé.
+   *
+   * ⚠️ **MÊME NATURE PROVISOIRE QUE {@link VARIABLES_DU_SERVICE.outilsActives},
+   *    ET UNE LIMITE DE PLUS.** `ops_runtime.profile` se lit PAR PRINCIPAL ; une
+   *    variable d'environnement n'en distingue aucun. Elle vaut donc pour tous
+   *    les appelants de l'instance, ce qui est plus large que ce que le § 14
+   *    décrit — et c'est écrit ici plutôt que découvert.
+   *
+   * ⚠️ **ABSENTE = LE REPLI LE MOINS EXPOSANT**, dérivé de l'inventaire par
+   *    `profilLeMoinsExposant()`. C'est le comportement d'avant ce lot, et il
+   *    est fail-closed : sur un inventaire tout `admin`, le repli sert ZÉRO
+   *    outil.
+   *
+   * ⚠️ **UNE VALEUR HORS DE L'ÉNUMÉRATION REFUSE LE DÉMARRAGE.** Retomber en
+   *    silence sur le repli ferait d'une faute de frappe un socle qui ne sert
+   *    rien sans que personne ne sache pourquoi.
+   */
+  profilServi: "OPS_PROFILE",
 } as const;
+
+/** La valeur d'{@link VARIABLES_DU_SERVICE.outilsActives} qui active TOUT. */
+export const TOUS_LES_OUTILS = "*";
 
 /**
  * **LE GESTE DE PROVISION, ET IL EST EXPLICITE.**
@@ -345,7 +402,9 @@ async function semerLesClesDuCoffreLocal(
  *    adaptateur n'est épinglé, la question ne se pose pas : la liste est vide.
  *    Le jour où elle ne l'est plus, elle doit passer par `outilsServis()`.
  */
-export function catalogueDesAdaptateursAdmis(admis: readonly DescripteurOutilServi[]): {
+export function catalogueDesAdaptateursAdmis(
+  admis: readonly DescripteurOutilServi[] | (() => Promise<readonly DescripteurOutilServi[]>),
+): {
   readonly catalogue: CatalogueServiEnStdio;
   lectures(): number;
 } {
@@ -354,11 +413,161 @@ export function catalogueDesAdaptateursAdmis(admis: readonly DescripteurOutilSer
     catalogue: {
       listerPourCetAppel(_identite: IdentiteAppelante): Promise<readonly DescripteurOutilServi[]> {
         lectures += 1;
-        return Promise.resolve(admis);
+        // ⚠️ **LA FORME VIVANTE EXISTE PARCE QUE LE § 11 L'EXIGE** : « la liste
+        //    est relue à chaque `tools/list` ». Une liste FIGÉE servirait
+        //    l'ancienne valeur d'`enabled` jusqu'au redémarrage — c'est-à-dire
+        //    qu'une désactivation d'urgence en console ne désactiverait rien
+        //    (§ 14, correction 3). La forme figée reste acceptée pour les
+        //    montages qui n'ont RIEN à servir, où il n'y a rien à relire.
+        return typeof admis === "function" ? admis() : Promise.resolve(admis);
       },
     },
     lectures: () => lectures,
   };
+}
+
+/**
+ * **LA PROJECTION DU FIL, DÉRIVÉE DE L'INVENTAIRE PAR `outilsServis()`.**
+ *
+ * ⚠️ **ELLE PASSE PAR `outilsServis()`, ET C'ÉTAIT LA CONDITION ÉCRITE.** Le
+ *    commentaire de {@link catalogueDesAdaptateursAdmis} disait : « le jour où
+ *    elle ne sera plus vide, elle doit passer par `outilsServis()` ». C'est ce
+ *    jour-là. Servir l'inventaire COMPLET annoncerait des outils que l'étape 7
+ *    refuserait ensuite — un catalogue qui ment, et un modèle qui insiste.
+ *
+ * ⚠️ **LE PROFIL EST CELUI QUI EST RÉGLÉ, SINON LE MOINS EXPOSANT — ET C'EST LE
+ *    MÊME REPLI QUE L'ORCHESTRATEUR.** `profilServi()` porte la règle une seule
+ *    fois, et les deux chemins l'empruntent : sans quoi `tools/list`
+ *    annoncerait des outils que l'étape 7 refuserait ensuite — un catalogue qui
+ *    ment, et un modèle qui insiste.
+ *
+ * ⚠️ **`DescripteurOutilServi` NE PORTE NI `effect`, NI `dataClass`, NI LES
+ *    PROFILS** — c'est la forme du FIL, et `core/transport/stdio` écrit
+ *    pourquoi : les valeurs de gouvernance que le § 20 épingle n'ont aucune
+ *    raison de traverser.
+ */
+export function profilServi(
+  regle: ProfileName | null,
+  inventaire: readonly OutilDuCatalogue[],
+): ProfileName {
+  return regle ?? profilLeMoinsExposant(inventaire).profil;
+}
+
+/**
+ * Le profil réglé pour cette instance, ou `null`. **Lève** sur une valeur hors
+ * de l'énumération fermée — voir {@link VARIABLES_DU_SERVICE.profilServi}.
+ */
+export function lireLeProfilRegle(brut: string | undefined): {
+  readonly profil: ProfileName | null;
+  readonly refus: string | null;
+} {
+  const valeur = (brut ?? "").trim();
+  if (valeur.length === 0) return { profil: null, refus: null };
+  if ((PROFILE_NAMES as readonly string[]).includes(valeur)) {
+    return { profil: valeur as ProfileName, refus: null };
+  }
+  return {
+    profil: null,
+    refus:
+      `Le réglage « ${VARIABLES_DU_SERVICE.profilServi} » vaut « ${valeur} », hors de ` +
+      `l'énumération fermée de \`core/profiles\` [${PROFILE_NAMES.join(", ")}]. Retomber en ` +
+      "silence sur le repli ferait d'une faute de frappe un socle qui ne sert rien sans que " +
+      "personne ne sache pourquoi.",
+  };
+}
+
+export function descripteursServis(
+  outils: readonly OutilDuCatalogue[],
+  regle: ProfileName | null,
+): {
+  readonly profil: ProfileName;
+  readonly descripteurs: readonly DescripteurOutilServi[];
+} {
+  const profil = profilServi(regle, outils);
+  const descripteurs = outilsServis(outils, profil).map((outil) => ({
+    name: outil.name,
+    description: outil.description,
+    inputSchema: outil.inputSchema,
+  }));
+  return { profil, descripteurs };
+}
+
+/**
+ * Les noms complets que {@link VARIABLES_DU_SERVICE.outilsActives} désigne.
+ *
+ * ⚠️ **UNE VARIABLE ABSENTE OU VIDE N'ACTIVE RIEN**, et une liste qui ne
+ *    correspond à aucun outil non plus. Le compte est ANNONCÉ : c'est ce qui
+ *    distingue « personne n'a demandé d'activation » de « la demande n'a
+ *    désigné aucun outil », deux pannes qui se réparent différemment.
+ */
+export function outilsAActiver(
+  brut: string | undefined,
+  inventaire: readonly OutilDuCatalogue[],
+): readonly OutilDuCatalogue[] {
+  const demande = (brut ?? "").trim();
+  if (demande.length === 0) return [];
+  if (demande === TOUS_LES_OUTILS) return inventaire;
+  const noms = new Set(
+    demande
+      .split(",")
+      .map((nom) => nom.trim())
+      .filter((nom) => nom.length > 0),
+  );
+  return inventaire.filter((outil) => noms.has(outil.name));
+}
+
+/**
+ * **LA VARIABLE QUI PORTE LE SECRET PARTAGÉ D'UN ADAPTATEUR FÉDÉRÉ.**
+ *
+ * Le verrou nomme une ligne d'`ops_secret` (`secretRef`) ; il ne porte JAMAIS de
+ * valeur. Sur un coffre partagé, cette ligne est posée une fois par un geste
+ * d'exploitation. Sur le coffre LOCAL — celui qui meurt avec le processus —
+ * elle doit venir de quelque part, et ce quelque part est une variable dont le
+ * NOM est dérivé de la référence, jamais saisi à côté.
+ *
+ * `axionia.mcp.shared` → `OPS_ADAPTER_SECRET_AXIONIA_MCP_SHARED`.
+ *
+ * ⚠️ **DÉRIVÉE, ET C'EST LA PROPRIÉTÉ.** Une table `secretRef → variable`
+ *    écrite à la main diverge au premier adaptateur ajouté, et la divergence se
+ *    découvre en 401 — c'est-à-dire en dérangeant un tiers pour apprendre ce
+ *    qu'on savait déjà.
+ */
+export function variableDuSecretDAdaptateur(secretRef: string): string {
+  return `OPS_ADAPTER_SECRET_${secretRef.replace(/[^A-Za-z0-9]/gu, "_").toUpperCase()}`;
+}
+
+/**
+ * Sème dans le coffre LOCAL les secrets partagés que le verrou NOMME, et rend
+ * les noms de variables — jamais une valeur.
+ *
+ * ⚠️ **UNE VARIABLE ABSENTE N'EST PAS UN ÉCHEC ICI.** Le refus appartient à qui
+ *    a besoin du secret : `construireRaccordement` refuse en NOMMANT
+ *    (`secret_illisible`), à l'appel, quand on sait quel outil est visé.
+ *    Refuser au démarrage ferait sortir un socle qui sert par ailleurs la
+ *    console et le healthcheck.
+ *
+ * ⚠️ **AUCUNE VALEUR N'EST JOURNALISÉE** — § 29, le dépôt est public.
+ */
+async function semerLesSecretsDAdaptateurs(
+  coffre: Coffre,
+  env: Readonly<Record<string, string | undefined>>,
+  references: readonly string[],
+): Promise<{ readonly semes: readonly string[]; readonly absents: readonly string[] }> {
+  const semes: string[] = [];
+  const absents: string[] = [];
+  for (const reference of references) {
+    const variable = variableDuSecretDAdaptateur(reference);
+    const brute = env[variable];
+    // Test de VÉRACITÉ, pas de nullité : un secret VIDE présenté tel quel rend
+    // 401, et `construireRaccordement` le refuse déjà pour cette raison.
+    if (brute === undefined || brute.trim().length === 0) {
+      absents.push(variable);
+      continue;
+    }
+    await coffre.ecrire(reference, 1, Buffer.from(brute.trim(), "utf8"));
+    semes.push(variable);
+  }
+  return { semes, absents };
 }
 
 /**
@@ -416,10 +625,15 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     TTL_IDEMPOTENCE_MAX_MS,
   );
   const { transports, inconnus } = lireLesTransports(deps.env[VARIABLES_DU_SERVICE.transports]);
+  const profilRegle = lireLeProfilRegle(deps.env[VARIABLES_DU_SERVICE.profilServi]);
 
-  const refusDeReglage = [budget.refus, corps.refus, veille.refus, ttlIdempotence.refus].filter(
-    (refus): refus is string => refus !== null,
-  );
+  const refusDeReglage = [
+    budget.refus,
+    corps.refus,
+    veille.refus,
+    ttlIdempotence.refus,
+    profilRegle.refus,
+  ].filter((refus): refus is string => refus !== null);
   if (transports.length === 0) {
     refusDeReglage.push(
       `Le réglage « ${VARIABLES_DU_SERVICE.transports} » ne nomme aucun transport connu. ` +
@@ -443,6 +657,32 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     );
     throw new ErreurDeReglageDuProcessus(refusDeReglage);
   }
+
+  // ── LES ADAPTATEURS ÉPINGLÉS, LUS SUR LE DISQUE ─────────────────────────────
+  //
+  // ⚠️ **AVANT LE SOCLE, ET SANS EFFET DE BORD.** La lecture ne décide rien :
+  //    l'étage 5 confronte, admet ou désactive. La faire ici permet de l'ANNONCER
+  //    avant que quoi que ce soit ne démarre — un exploitant qui voit « 0
+  //    instantané trouvé » sait déjà que son socle ne servira rien.
+  const epinglage = lireLesAdaptateursEpingles(SOURCE_DU_DEPOT);
+  const aAdmettre = manifestesAAdmettre(epinglage, contributionDuSocle());
+  dire(
+    `[registre] verrou ${epinglage.verrouPresent ? "présent" : "ABSENT"} · ` +
+      `${String(epinglage.epingles.length)} adaptateur(s) épinglé(s) ` +
+      `[${epinglage.epingles.join(", ") || "aucun"}] · ` +
+      `${String(aAdmettre.length)} manifeste(s) soumis à l'admission · ` +
+      `${String(epinglage.sansInstantane.length)} sans instantané ` +
+      `[${epinglage.sansInstantane.join(", ") || "aucun"}]`,
+  );
+
+  // ⚠️ **UN DÉPÔT EN MÉMOIRE, ET LE DIRE EST LA MOITIÉ DU TRAVAIL.** Le socle ne
+  //    tourne aujourd'hui sur AUCUNE base — le coffre lui-même vit en mémoire
+  //    (`magasinLocal()`). Les lignes `ops_adapter`/`ops_tool` posées ici
+  //    disparaissent à l'arrêt, et c'est cohérent : elles sont reposées au
+  //    démarrage suivant, l'admission étant idempotente. Le jour où une base
+  //    existe, `pnpm ops:admettre` écrit dans Postgres et cette ligne devient un
+  //    `DepotDuRegistrePrisma`.
+  const depotDuRegistre = new DepotDuRegistreEnMemoire();
 
   // ── LE COFFRE ───────────────────────────────────────────────────────────────
   const local = coffreLocalDemande(environnement.urlDeBase);
@@ -487,6 +727,28 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
             `[${semis.absentes.join(", ")}] : la chaîne des quatorze étapes ne se composera ` +
             "PAS, et le motif sera écrit ci-dessous."),
     );
+
+    // ── LES SECRETS PARTAGÉS QUE LE VERROU NOMME ──────────────────────────
+    // ⚠️ APRÈS LA PROVISION, POUR LA MÊME RAISON QUE LES CLÉS HMAC : un coffre
+    //    déjà ouvert porte ses propres lignes, et les écraser depuis
+    //    l'environnement remplacerait un secret qu'un exploitant a posé.
+    const references = [
+      ...new Set(
+        epinglage.adaptateurs
+          .map((adaptateur) => adaptateur.secretRefAnnoncee)
+          .filter((reference): reference is string => reference !== null),
+      ),
+    ];
+    const secrets = await semerLesSecretsDAdaptateurs(coffre, deps.env, references);
+    dire(
+      `[démarrage · coffre] ${String(secrets.semes.length)} secret(s) d'adaptateur semé(s) sur ` +
+        `${String(references.length)} nommé(s) par le verrou [${secrets.semes.join(", ") || "aucun"}]` +
+        (secrets.absents.length === 0
+          ? "."
+          : ` · ${String(secrets.absents.length)} variable(s) absente(s) ` +
+            `[${secrets.absents.join(", ")}] : l'appel fédéré correspondant sera REFUSÉ à ` +
+            "l'étape 14, en nommant la référence — jamais présenté sans en-tête."),
+    );
   }
 
   const lireLEtatDuCoffre = (): Promise<EtatCoffre> => {
@@ -517,8 +779,18 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     controlerLAuthentification: null,
     depotPolitique,
     motifDuDemarrage: "démarrage du processus (ops/index.ts)",
-    lireLeLockDAdaptateurs: () => Promise.resolve({ present: false, brut: null }),
-    manifestesAAdmettre: [],
+    // ⚠️ **LE VERROU RÉEL, ET LES MANIFESTES RÉELS.** Jusqu'au lot 5 ce montage
+    //    déclarait « aucun verrou, aucun manifeste » : l'étage 5 lisait alors un
+    //    verrou VIDE fabriqué à la volée, franchissait, et le socle servait un
+    //    catalogue vide. Le zéro était une mesure — celle d'un montage qui ne
+    //    regardait pas le disque.
+    lireLeLockDAdaptateurs: () =>
+      Promise.resolve({
+        present: epinglage.verrouPresent,
+        brut: epinglage.verrouBrut,
+      }),
+    manifestesAAdmettre: aAdmettre,
+    depotDuRegistre,
     transports,
     hotesAutorises: environnement.hotesAutorises,
     lireLaProvenance: (): EtatIndexProvenance => index.etat(),
@@ -543,12 +815,88 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
   //    quand même transformerait le deuxième état du § 23 — le socle vit, sert
   //    la console, refuse les outils — en une panne de démarrage.
   //
-  // ⚠️ **L'INVENTAIRE EST VIDE, ET LE ZÉRO EST UNE MESURE, PAS UN BOUCHON.**
-  //    L'étage 5 admet les manifestes que le verrou épingle ; ce processus n'en
-  //    soumet aucun (`manifestesAAdmettre: []`), donc aucun outil n'est servi et
-  //    l'étape 6 refuse tout `tools/call`. C'est la seule liste, et le catalogue
-  //    de la chaîne EN DÉRIVE — deux listes finiraient par se contredire.
-  const outilsEpingles: readonly OutilDuCatalogue[] = [];
+  // ── L'INVENTAIRE : `ops_tool` POSÉ + LE MANIFESTE ÉPINGLÉ ───────────────────
+  //
+  // ⚠️ **C'EST LA SEULE LISTE, ET TOUT LE RESTE EN DÉRIVE.** Le catalogue de la
+  //    chaîne (étape 6), le profil de repli (étape 7) et la projection servie par
+  //    `tools/list` sont tous construits à partir de celle-ci. Deux listes
+  //    finiraient par se contredire, et la contradiction serait « l'outil existe
+  //    pour l'étape 7 et n'existe pas pour l'étape 6 ».
+  //
+  // ⚠️ **LES CINQ CHAMPS QU'`ops_tool` NE PORTE PAS VIENNENT DU MANIFESTE
+  //    ÉPINGLÉ** (ADR 0051) — `pagination`, `compaction`, `maxBytes`, `idFields`,
+  //    `adapterVersion`. Une ligne dont l'épingle manque n'est PAS servie : elle
+  //    est comptée, nommée, et laissée dehors.
+  const manifestesIndexes: readonly ManifesteIndexe[] = epinglage.adaptateurs.flatMap(
+    (adaptateur) => {
+      const lecture = lireManifesteRecu(adaptateur.manifesteBrut);
+      return lecture.manifeste === null ? [] : [indexerLeManifeste(lecture.manifeste)];
+    },
+  );
+  //
+  // ⚠️ **L'INVENTAIRE EST UNE FONCTION, PAS UN TABLEAU, ET C'EST LA CORRECTION 3
+  //    DU § 14.** `ops_tool.enabled` bascule sans redéploiement ; un tableau
+  //    calculé au démarrage servirait l'ancienne valeur jusqu'au suivant,
+  //    c'est-à-dire qu'une désactivation d'urgence ne désactiverait rien.
+  const inventaireVivant = async (): Promise<readonly OutilDuCatalogue[]> =>
+    construireLeCatalogue(
+      await depotDuRegistre.listerOutils(),
+      manifestesIndexes,
+      deps.maintenant(),
+    ).outils;
+
+  const catalogueLu = construireLeCatalogue(
+    await depotDuRegistre.listerOutils(),
+    manifestesIndexes,
+    deps.maintenant(),
+  );
+  const outilsEpingles: readonly OutilDuCatalogue[] = catalogueLu.outils;
+  dire(
+    `[catalogue] ${String(catalogueLu.lignesLues)} ligne(s) ops_tool relue(s) · ` +
+      `${String(catalogueLu.manifestesIndexes)} manifeste(s) épinglé(s) indexé(s) · ` +
+      `${String(outilsEpingles.length)} outil(s) à l'inventaire · ` +
+      `${String(catalogueLu.sansEntreeAuManifeste.length)} sans épingle ` +
+      `[${catalogueLu.sansEntreeAuManifeste.join(", ") || "aucun"}] · ` +
+      `${String(catalogueLu.desaccords.length)} désaccord(s) ligne/manifeste`,
+  );
+  for (const desaccord of catalogueLu.desaccords) {
+    dire(
+      `[catalogue · § 20] « ${desaccord.nomComplet} » ÉCARTÉ : ${desaccord.champ} vaut ` +
+        `« ${desaccord.enBase} » en base et « ${desaccord.auManifeste} » au manifeste épinglé. ` +
+        "Une ligne modifiée hors admission ne se corrige pas en silence.",
+    );
+  }
+
+  // ── L'ACTIVATION — le geste de la console, en attendant la console ─────────
+  const aActiver = outilsAActiver(deps.env[VARIABLES_DU_SERVICE.outilsActives], outilsEpingles);
+  let actives = 0;
+  for (const outil of aActiver) {
+    // ⚠️ `ops_tool.name` PORTE LE NOM LOCAL ; `OutilDuCatalogue.name` porte le
+    //    nom COMPLET. Le préfixe est retiré ici par la MÊME dérivation qui l'a
+    //    posé — jamais par un `slice` recopié.
+    const local = outil.name.slice(`${outil.adapterId}.`.length);
+    actives += await depotDuRegistre.basculerActivation(local, outil.version, true);
+  }
+  dire(
+    `[catalogue · activation] ${VARIABLES_DU_SERVICE.outilsActives} désigne ` +
+      `${String(aActiver.length)} outil(s) sur ${String(outilsEpingles.length)} · ` +
+      `${String(actives)} ligne(s) basculée(s)` +
+      (aActiver.length === 0
+        ? " · AUCUN OUTIL SERVI : un outil admis n'est pas activé (§ 14, correction 3)."
+        : "."),
+  );
+
+  // ⚠️ **CETTE MESURE EST UNE ANNONCE, PAS LA SOURCE.** Ce que `tools/list`
+  //    servira est RELU à chaque appel par `inventaireVivant()` ; on la prend
+  //    ici pour qu'un exploitant voie, au démarrage, ce que le socle servirait
+  //    à cet instant — et sur quel profil de repli.
+  const servisAuDemarrage = descripteursServis(await inventaireVivant(), profilRegle.profil);
+  dire(
+    `[catalogue · servi] profil « ${servisAuDemarrage.profil} » ` +
+      `(${profilRegle.profil === null ? "repli le moins exposant" : `réglé par ${VARIABLES_DU_SERVICE.profilServi}`}) · ` +
+      `${String(servisAuDemarrage.descripteurs.length)} outil(s) servi(s) ` +
+      `[${servisAuDemarrage.descripteurs.map((outil) => outil.name).join(", ") || "aucun"}]`,
+  );
   const noyau: NoyauCompose =
     socle.demarrage.sert && socle.demarrage.appelsDOutilsAcceptes && coffre !== null
       ? await composerLeNoyau({
@@ -557,19 +905,30 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
           coffreDuCurseur: SANS_PONT_DE_CLE_DE_CURSEUR,
           journalStore: new JournalMemoire(),
           coffre,
-          // ⚠️ AUCUN ADAPTATEUR À JOINDRE, ET C'EST DÉCLARÉ. Le champ est
-          //    obligatoire pour que chaque composition doive le DIRE : un
-          //    optionnel absent se serait lu « on n'y a pas pensé ». Le jour où
-          //    `outilsEpingles` cessera d'être vide, cette ligne devra fournir
-          //    la lecture d'`ops_adapter` et le coffre — sinon l'étape 14
-          //    refusera bruyamment, ce qui est le bon échec.
-          federe: null,
-          inventaire: () => Promise.resolve(outilsEpingles),
-          // § 14 — `ops_runtime` n'est pas câblé : aucune ligne ne couvre ce
-          // principal. `null` fait DÉRIVER le repli à l'orchestrateur
-          // (`profilLeMoinsExposant` sur l'inventaire) ; élire un profil ici
-          // reviendrait à choisir la surface servie depuis le montage.
-          profilActif: (): Promise<ProfileName | null> => Promise.resolve(null),
+          // ⚠️ **DE QUOI JOINDRE UN ADAPTATEUR FÉDÉRÉ — LA LECTURE D'`ops_adapter`
+          //    ET LE COFFRE.** Ce champ valait `null` tant qu'`outilsEpingles`
+          //    était vide, avec pour conséquence qu'un `tools/call` traversait
+          //    les quatorze étapes puis butait sur `ErreurAdaptateurNonAdmis`.
+          //    Le fournir déclare qu'on a de quoi joindre quelqu'un — pas qu'on
+          //    l'a joint : `construireRaccordement` refuse encore, en NOMMANT,
+          //    si l'endpoint, le mode ou le secret ne suivent pas.
+          //
+          // ⚠️ LE COFFRE PASSE PAR LE PORT ÉTROIT (`coffreCommeLecture`) : ce
+          //    chemin n'a aucune raison de pouvoir ÉCRIRE un secret, et un port
+          //    large finit toujours par être utilisé largement.
+          federe: {
+            adaptateurs: { relire: (id: string) => depotDuRegistre.lireAdaptateur(id) },
+            coffre: coffreCommeLecture(coffre),
+          },
+          // ⚠️ RELU À CHAQUE APPEL — § 14, correction 3. Voir `inventaireVivant`.
+          inventaire: inventaireVivant,
+          // § 14 — `ops_runtime` n'est toujours PAS câblé ; le réglage
+          // `OPS_PROFILE` en tient lieu, avec sa limite écrite (il ne distingue
+          // aucun principal). `null` fait DÉRIVER le repli à l'orchestrateur
+          // (`profilLeMoinsExposant` sur l'inventaire) — la MÊME règle que
+          // `profilServi()` applique au catalogue servi, pour que la liste
+          // annoncée et la liste acceptée ne puissent pas diverger.
+          profilActif: (): Promise<ProfileName | null> => Promise.resolve(profilRegle.profil),
           depotPolitique,
           depotQuota: new DepotQuotaEnMemoire(),
           depotIdempotence: new DepotIdempotenceEnMemoire(),
@@ -606,7 +965,13 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
   if (noyau.empechement !== null) dire(`[chaîne] ${noyau.empechement}`);
 
   // ── LE SERVICE ──────────────────────────────────────────────────────────────
-  const catalogue = catalogueDesAdaptateursAdmis([]);
+  // ⚠️ **RELU À CHAQUE `tools/list`, JAMAIS MÉMORISÉ.** Le § 11 l'exige, et la
+  //    correction 3 du § 14 en fait la condition d'une désactivation d'urgence :
+  //    la valeur mesurée au démarrage n'est jamais celle qui est servie.
+  const catalogue = catalogueDesAdaptateursAdmis(async () => {
+    const outils = await inventaireVivant();
+    return descripteursServis(outils, profilRegle.profil).descripteurs;
+  });
   const ports: PortsDuService = {
     // ⚠️ **LA FABRIQUE, OU `null` — ET LE `null` RESTE UNE MESURE.** Un noyau
     //    absent fait compter à `monterLeService` l'empêchement « la chaîne des

@@ -105,6 +105,8 @@ async function socleQuiSert(
     motifDuDemarrage: "démarrage du socle (garde du service)",
     lireLeLockDAdaptateurs: () => Promise.resolve({ present: false, brut: null }),
     manifestesAAdmettre: [],
+    // Ce montage n'admet aucun manifeste : il n'a donc rien à poser.
+    depotDuRegistre: null,
     transports: ["http", "stdio"],
     hotesAutorises: environnement.hotesAutorises,
     lireLaProvenance: provenanceTemoin,
