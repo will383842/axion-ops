@@ -36,3 +36,25 @@ export type { LectureManifeste } from "./manifeste-recu.js";
 
 export { enregistrerAdaptateur } from "./enregistrer.js";
 export type { EntreeEnregistrement } from "./enregistrer.js";
+
+export {
+  COLONNES_POSSEDEES_PAR_LA_CONSOLE,
+  DepotDuRegistreEnMemoire,
+  DepotDuRegistrePrisma,
+  ErreurDeDepotDuRegistre,
+  EXEMPLAIRE_D_ADAPTATEUR,
+  EXEMPLAIRE_D_OUTIL,
+  colonnesDAdaptateurTouchees,
+  colonnesDOutilTouchees,
+  versEnregistrementOutil,
+} from "./depot.js";
+export type {
+  ClientPrismaDuRegistre,
+  DelegueOpsAdapter,
+  DelegueOpsTool,
+  DepotDuRegistre,
+  EnregistrementAdaptateur,
+  EnregistrementOutil,
+  LigneOutilPersistee,
+  ResultatEcritureDuRegistre,
+} from "./depot.js";

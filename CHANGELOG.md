@@ -5,6 +5,59 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 5 · 1 — la persistance de l'admission — 2026-09-02
+
+`enregistrerAdaptateur()` rendait des lignes que **personne ne prenait**. L'étage 5
+admettait `axionia` à chaque démarrage, comptait `adaptateursAdmis: 1`, et jetait
+le résultat : mesure transcrite, **un seul module de production touchait Prisma**
+(`core/vault/depot.ts`). Aucune ligne `ops_adapter`, aucune ligne `ops_tool`
+n'avait jamais pu être écrite par ce dépôt — d'où `outilsEpingles = []` à la
+racine, et d'où aucun outil servi.
+
+### Ce que ce lot pose — ADR 0050
+
+`core/registry/depot.ts` : un port `DepotDuRegistre`, deux prises (mémoire et
+Prisma par interface **structurelle**), sur le patron exact de
+`core/vault/depot.ts`. `depot.spec.ts` **dérive de `prisma/schema.prisma`** la
+liste des colonnes et confronte celles que le module touche.
+
+### La décision qui porte le reste : les cinq colonnes de la console
+
+`enabled`, `retiredAt`, `sunsetAt`, `limit`, `warnAt` sont **absentes de la
+branche `update`** des deux prises — le type l'exige, le corps le fait.
+
+Le motif est une mesure, pas une précaution : le socle admet ses adaptateurs **à
+chaque démarrage**. Une prise qui réécrirait `enabled` remettrait donc `false` à
+chaque redéploiement, alors que le § 14, correction 3, fait précisément
+d'`enabled` la bascule d'urgence « en console, **sans redéploiement** ». C'est
+mot pour mot le motif qui exclut `bootstrapCount` de l'upsert du coffre : **un
+réglage qu'un redémarrage peut faire reculer ne règle rien.**
+
+La garde ne lit pas le corps des méthodes : elle **admet deux fois**, pose
+entre-temps le geste de console, et **relit** `enabled: true`, `limit: 200`,
+`warnAt: 160`. Le témoin joue la prise fautive en une ligne et mesure le retour à
+`enabled: false`.
+
+### Ce qui est NOMMÉ plutôt que fait
+
+Un outil disparu du manifeste sort en `outilsOrphelins` et **rien ne le touche** :
+le supprimer effacerait les réglages d'un outil que le § 13.4 veut « retiré de la
+liste, encore appelable six mois » ; le désactiver serait la mise à jour
+silencieuse que le § 20 interdit dans l'autre sens. La garde relit la ligne
+orpheline et exige qu'elle soit **là ET encore activée**.
+
+### Ce que ce lot ne fait pas
+
+Il ne branche rien : `ops/main.ts` et `ops/index.ts` admettent toujours en
+mémoire. Il ne lit pas le catalogue : les cinq champs qu'`OutilDuCatalogue` exige
+et qu'`ops_tool` ne porte pas sont l'objet du lot suivant. Et `pnpm db:deploy`
+n'a toujours **aucune cible** — la décision est éprouvée sur le jumeau en mémoire
+et sur un client Prisma feint qui tient de vraies tables, ce qui permet
+d'admettre deux fois et de relire, mais ne remplace pas une application réelle de
+la migration.
+
+---
+
 ## Lot 4, RECETTE — la garde des assertions attaquée, et ce qu'elle laissait passer — 2026-09-01
 
 Le lot 4 a posé G4 pour rendre impossible qu'une décision soit déclarée fermée
