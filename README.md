@@ -135,10 +135,11 @@ axion-ops/
 │  ├─ limits/        débit avec dénominateur, idempotence avec statut
 │  ├─ transport/     stdio + Streamable HTTP, même noyau
 │  └─ adapter-kit/   defineAdapter(), manifeste JSON Schema, harnais à 9 contrôles
-├─ adapters/zoho-mail/   seul adaptateur en mode HÉBERGÉ
+├─ adapters/axionia/     adaptateur FÉDÉRÉ — le code vit dans axion-ia ; ici, le manifeste ÉPINGLÉ et le témoin du verrou
 ├─ console/              8 écrans, dont Arrêt d'urgence et Déverrouillage
 ├─ voice/                démon local, verrouillé après inactivité
 ├─ ops/                  chaîne d'intégration, healthcheck, exploitation
+│  ├─ zoho-mail/             amorçage OAuth (jamais lancé) et cinq sondes M2 — PAS un adaptateur : aucun manifeste
 │  ├─ alertes.ts             la TABLE D'ALERTES du § 24 — huit lignes, plus l'écart d'épinglage
 │  ├─ codes-hors-tableau.ts  les codes que le § 15 n'énumère pas, et leur motif écrit
 │  └─ mono-instance.ts       l'observation du healthcheck : un SECOND socle est détectable

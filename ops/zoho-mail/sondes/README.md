@@ -1,4 +1,4 @@
-# `adapters/zoho-mail/sondes/` — la mesure M2
+# `ops/zoho-mail/sondes/` — la mesure M2
 
 **Ce dossier ne contient aucun code de production.** Il contient cinq sondes
 d'exploitation, faites pour être lancées **une fois**, à la main, et pour rendre
@@ -31,10 +31,10 @@ eu lieu. **Aucune des cinq sondes ne peut donc tourner en l'état.**
 
 Deux voies, et **la première est la bonne pour M2** :
 
-| Voie                                                   | Ce qu'elle coûte                                                         | Quand la prendre                                                                       |
-| ------------------------------------------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| **« Client seul »** → `ZOHO_ACCESS_TOKEN`              | une heure de validité · **aucun coffre engagé, aucun amorçage consommé** | **pour M2.** C'est une mesure jetable, elle ne doit rien décider du transfert du jeton |
-| `adapters/zoho-mail/bootstrap/` → `ZOHO_REFRESH_TOKEN` | un amorçage, compté et plafonné (`ops_secret.bootstrapCount`, § 27)      | quand l'adaptateur sera écrit — pas pour une mesure d'une heure                        |
+| Voie                                              | Ce qu'elle coûte                                                         | Quand la prendre                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| **« Client seul »** → `ZOHO_ACCESS_TOKEN`         | une heure de validité · **aucun coffre engagé, aucun amorçage consommé** | **pour M2.** C'est une mesure jetable, elle ne doit rien décider du transfert du jeton |
+| `ops/zoho-mail/bootstrap/` → `ZOHO_REFRESH_TOKEN` | un amorçage, compté et plafonné (`ops_secret.bootstrapCount`, § 27)      | quand l'adaptateur sera écrit — pas pour une mesure d'une heure                        |
 
 **Voie courte, pas à pas** — sur `api-console.zoho.eu`, créer un client de type
 **Self Client**, générer un code avec les quatre scopes du § 27, l'échanger
@@ -45,7 +45,7 @@ export ZOHO_ACCESS_TOKEN="…"      # une heure. Jamais commité, jamais affich�
 ```
 
 > ⚠️ **`ZOHO_REFRESH_TOKEN` est un SECOND chemin vers un secret qui vit au
-> coffre.** `adapters/zoho-mail/bootstrap/` dépose le sien dans le coffre du
+> coffre.** `ops/zoho-mail/bootstrap/` dépose le sien dans le coffre du
 > socle. Cette variable-ci existe parce que M2 doit pouvoir tourner **avant que
 > le socle, sa base et son coffre n'existent** — le § 35 la place au lot 0b,
 > avant le lot 1. **Elle ne doit jamais servir en production** : sortir un jeton
@@ -82,7 +82,7 @@ est au lot 0b, **avant** le lot 1.
 ## Comment les lancer
 
 ```sh
-pnpm exec tsx adapters/zoho-mail/sondes/sonde-01-abonnement.ts
+pnpm exec tsx ops/zoho-mail/sondes/sonde-01-abonnement.ts
 ```
 
 Il n'y a **pas de script `pnpm`** pour ces sondes, et c'est écrit dans
@@ -127,7 +127,7 @@ charges l'écrit lui-même : cela « se tranche par M2, **pas par la lecture** �
 ### ② `sonde-02-brouillon.ts` — `mode: "draft"` enregistre-t-il, ou envoie-t-il ?
 
 ```sh
-pnpm exec tsx adapters/zoho-mail/sondes/sonde-02-brouillon.ts --je-possede-le-destinataire
+pnpm exec tsx ops/zoho-mail/sondes/sonde-02-brouillon.ts --je-possede-le-destinataire
 ```
 
 **Un `HTTP 200` sur le POST ne prouve rien** : il est le même que le message soit
@@ -157,7 +157,7 @@ pièce jointe n'est téléchargée (§ 31).
 ### ④ `sonde-04-relecture.ts` — **l'unique critère de fin du lot 6**
 
 ```sh
-pnpm exec tsx adapters/zoho-mail/sondes/sonde-04-relecture.ts --je-possede-le-destinataire [--nettoyer]
+pnpm exec tsx ops/zoho-mail/sondes/sonde-04-relecture.ts --je-possede-le-destinataire [--nettoyer]
 ```
 
 Elle poste un brouillon **avec** la pièce, dans le **même appel**, puis relit le
@@ -243,7 +243,7 @@ n'est qu'une phrase.
 
 ## Les écarts signalés, et ce qu'ils attendent
 
-1. **`ops/conformite-ci.ts` échoue tant que `adapters/zoho-mail/` n'est pas au
+1. **`ops/conformite-ci.ts` échoue tant que `ops/zoho-mail/` n'est pas au
    verrou.** Il tient tout dossier sous `adapters/` pour un adaptateur, et
    `core/registry/adapters.lock.json` n'existe pas encore. **Épingler un dossier
    qui ne porte ni manifeste ni `defineAdapter()` serait épingler un fantôme** —

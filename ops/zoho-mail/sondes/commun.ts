@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/sondes/commun.ts` — **CE QUE LES CINQ SONDES PARTAGENT.**
+ * `ops/zoho-mail/sondes/commun.ts` — **CE QUE LES CINQ SONDES PARTAGENT.**
  *
  * ═══ CE QUE CE DOSSIER EST, ET CE QU'IL N'EST PAS ═══
  *
@@ -89,7 +89,7 @@ import {
 /**
  * LA RÉGION, **LUE CHEZ LE VOISIN QUI LA POSSÈDE DÉJÀ.**
  *
- * ⚠️ **`adapters/zoho-mail/bootstrap/autorisation.ts` EST LA SEULE ÉCRITURE DE
+ * ⚠️ **`ops/zoho-mail/bootstrap/autorisation.ts` EST LA SEULE ÉCRITURE DE
  *    CES FAITS DANS LE DÉPÔT, ET CE DOSSIER-CI NE LA REDOUBLE PAS.** Il porte
  *    les sept régions, l'hôte des comptes, l'URL d'échange de jetons, les noms
  *    des deux variables de client et la table des scopes du § 27. Les réécrire
@@ -289,7 +289,7 @@ export const REGLAGES = {
   clientSecret: VARIABLE_CLIENT_SECRET,
   /**
    * ⚠️ **ÉCART SIGNALÉ, ET ASSUMÉ : LE JETON DE RAFRAÎCHISSEMENT VIT AU COFFRE,
-   *    PAS ICI.** `adapters/zoho-mail/bootstrap/` dépose le sien dans le coffre
+   *    PAS ICI.** `ops/zoho-mail/bootstrap/` dépose le sien dans le coffre
    *    du socle, versionné et compté (`ops_secret.bootstrapCount`, § 27). Cette
    *    variable-ci est un SECOND chemin vers le même secret, et il est
    *    délibéré : M2 est une mesure d'une heure qui doit pouvoir tourner **avant
@@ -348,7 +348,7 @@ export function exigerReglage(nom: string): string {
   if (valeur === null) {
     throw new ErreurDeSonde(
       `le réglage \`${nom}\` est absent de l'environnement. Voyez ` +
-        "`adapters/zoho-mail/sondes/README.md`, § « Ce qu'il faut avoir avant de lancer ».",
+        "`ops/zoho-mail/sondes/README.md`, § « Ce qu'il faut avoir avant de lancer ».",
     );
   }
   return valeur;

@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/index.ts` — **LE PROGRAMME. LA SEULE PORTE.**
+ * `ops/zoho-mail/bootstrap/index.ts` — **LE PROGRAMME. LA SEULE PORTE.**
  *
  * ═══ CE FICHIER EST LE SEUL DU DOSSIER QUI TOUCHE `process` ═══
  *
@@ -99,7 +99,7 @@ export async function executerLAmorcage(monde: MondeDuProcessus): Promise<number
     arguments: monde.arguments,
     entreeEstUnTerminal: monde.entreeEstUnTerminal,
     estLeProgrammeLance: monde.estLeProgrammeLance,
-    programme: "adapters/zoho-mail/bootstrap",
+    programme: "ops/zoho-mail/bootstrap",
   });
   if (!issue.delivre) {
     monde.ecrireErreur(`[zoho:amorçage] refus : ${issue.refus}`);
