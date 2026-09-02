@@ -3116,6 +3116,80 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "par différence des clés, plutôt que de la recopier — c'est ce qui la fait rougir le " +
       "jour où un champ de plus tomberait sans qu'on l'ait décidé.",
   },
+
+  // ── ADR 0051 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0051",
+    decision:
+      "Les cinq champs qu'`ops_tool` ne porte pas se lisent dans le MANIFESTE ÉPINGLÉ, pas en " +
+      "colonnes neuves ; une ligne sans épingle n'est PAS servie.",
+    etat: "à-coudre",
+    symbole: "construireLeCatalogue",
+    genre: "fonction",
+    module: "core/registry/catalogue.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/registry/catalogue.spec.ts",
+      nom: "🔑 change le MANIFESTE sans toucher la ligne, et la valeur servie SUIT",
+      nomme: ["construireLeCatalogue", "maxBytes", "idFields"],
+    },
+    motif:
+      "Quatre colonnes de plus auraient été RECOPIÉES depuis le manifeste, et une recopie n'est " +
+      "couverte par AUCUNE empreinte : `manifestSha` resterait vrai pendant que le socle " +
+      "compacterait selon des annotations que personne n'a relues. Or ces cinq valeurs " +
+      "gouvernent ce qui SORT (`maxBytes`, `compaction.tier2`, `idFields` → `recordIds` du " +
+      "§ 31). L'assertion ne le dit pas en prose : elle CHANGE le manifeste sans toucher la " +
+      "ligne et relit la valeur servie. Aucun appelant de production : le câblage de la racine " +
+      "appartient au lot suivant.",
+  },
+  {
+    adr: "0051",
+    decision:
+      "Un désaccord `effect`/`dataClass`/`idempotency` entre `ops_tool` et le manifeste épinglé " +
+      "ÉCARTE l'outil et le NOMME — le socle ne choisit pas entre deux gouvernances.",
+    etat: "à-coudre",
+    symbole: "DesaccordDeCatalogue",
+    genre: "type",
+    module: "core/registry/catalogue.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/registry/catalogue.spec.ts",
+      nom: "refuse de servir un outil dont `effect` diverge de son épingle",
+      nomme: ["desaccords", "construireLeCatalogue"],
+    },
+    motif:
+      "`ops_tool` EST l'épingle de gouvernance du § 20 — préférer le manifeste retirerait à " +
+      "l'étape 6 la valeur qu'elle est chargée de confronter. Les deux documents doivent donc " +
+      "coïncider, puisque la ligne a été écrite depuis le manifeste ; une divergence signale " +
+      "une ligne modifiée HORS admission. Le témoin joue le cas nommé par le § 20 lui-même : " +
+      "un `effect` basculé de `send` à `read`, « ni un champ ajouté ni un champ disparu ».",
+  },
+  {
+    adr: "0051",
+    decision:
+      "Le préfixe d'un outil se pose UNE fois : `nomCompletDeLOutil` le VÉRIFIE au lieu de " +
+      "l'ajouter, et refuse (`nom_non_prefixe`) un `name` qui ne le porte pas.",
+    etat: "à-coudre",
+    symbole: "nomCompletDeLOutil",
+    genre: "fonction",
+    module: "core/federe/raccordement.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/federe/raccordement.spec.ts",
+      nom: "🔑 TÉMOIN — l'ancienne fabrication rendait `axionia.axionia.inbox.recent`",
+      nomme: ["nomCompletDeLOutil", "outilDeTemoin"],
+    },
+    motif:
+      "La fonction AJOUTAIT le préfixe à un `name` qui le portait déjà — " +
+      "`axionia.axionia.inbox.recent` serait parti dans `params.name`, et l'adaptateur aurait " +
+      "répondu « outil inconnu » sur un appel autorisé. Le défaut était invisible parce que " +
+      "`inventaire` rendait `[]` et que le seul témoin du fichier portait un nom LOCAL : une " +
+      "fixture décidait du sens du champ à la place du type. Le témoin CONSERVE l'ancienne " +
+      "fabrication en une ligne et mesure ce qu'elle rendait, plutôt que de la décrire. " +
+      "`à-coudre` et non `cousue` : le SEUL appelant est `construireRaccordement`, dans le " +
+      "module qui la DÉFINIT — donc exclu du compte, à juste titre. Elle deviendra cousue " +
+      "quand la racine composera `federe`.",
+  },
 ];
 
 /**

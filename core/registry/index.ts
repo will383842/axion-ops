@@ -58,3 +58,6 @@ export type {
   LigneOutilPersistee,
   ResultatEcritureDuRegistre,
 } from "./depot.js";
+
+export { construireLeCatalogue, indexerLeManifeste } from "./catalogue.js";
+export type { DesaccordDeCatalogue, ManifesteIndexe, ResultatDeCatalogue } from "./catalogue.js";

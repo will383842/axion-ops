@@ -45,7 +45,12 @@ function outilDeTemoin(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalo
     idempotency: "n/a",
     limit: null,
     warnAt: null,
-    name: "inbox.recent",
+    // ⚠️ LE NOM COMPLET, ET C'EST LE POINT. `OutilDuCatalogue.name` est ce que
+    //    `enregistrerAdaptateur()` dérive par `nomComplet(id, nomLocal)` et ce
+    //    que `composerLeNoyau` compare. Cette fixture portait le nom LOCAL :
+    //    elle décidait du sens du champ à la place du type, et elle a rendu
+    //    verte pendant tout un lot une fonction qui préfixait DEUX FOIS.
+    name: "axionia.inbox.recent",
     effect: "read",
     dataClass: "personal",
     pagination: "page",
@@ -259,11 +264,35 @@ describe("le secret ne fuit pas, et le nom complet est dérivé", () => {
     expect(refus.message).not.toContain(secret);
   });
 
-  it("le nom complet dérive de l'adapterId — un outil ne saisit jamais son préfixe", () => {
+  it("le nom complet est VÉRIFIÉ, pas fabriqué — il n'est jamais préfixé deux fois", () => {
     expect(nomCompletDeLOutil(outilDeTemoin())).toBe("axionia.inbox.recent");
-    expect(nomCompletDeLOutil(outilDeTemoin({ adapterId: "zoho-mail", name: "mail.send" }))).toBe(
-      "zoho-mail.mail.send",
+    expect(
+      nomCompletDeLOutil(outilDeTemoin({ adapterId: "zoho-mail", name: "zoho-mail.mail.send" })),
+    ).toBe("zoho-mail.mail.send");
+  });
+
+  it("🔑 TÉMOIN — l'ancienne fabrication rendait `axionia.axionia.inbox.recent`", () => {
+    const outil = outilDeTemoin();
+    // Ce qu'écrivait la fonction AVANT : elle ajoutait le préfixe à un nom qui
+    // le portait déjà. C'est ce que le fil aurait reçu dans `params.name`.
+    const ancienne = `${outil.adapterId}.${outil.name}`;
+    console.info(`[raccordement · témoin] l'ancienne fabrication rendait « ${ancienne} »`);
+    expect(ancienne).toBe("axionia.axionia.inbox.recent");
+    expect(nomCompletDeLOutil(outil)).not.toBe(ancienne);
+  });
+});
+
+describe("le nom local est un REFUS, pas un rattrapage", () => {
+  it("REFUSE un `OutilDuCatalogue` dont le `name` n'est pas préfixé", async () => {
+    const refus = await attendreRefus(
+      // La levée est SYNCHRONE : on la fait traverser une promesse pour la
+      // confronter au même utilitaire que les six autres motifs — un second
+      // chemin d'assertion finirait par diverger du premier.
+      Promise.resolve().then(() => nomCompletDeLOutil(outilDeTemoin({ name: "inbox.recent" }))),
+      "nom_non_prefixe",
     );
+    console.info(`[raccordement · nom] ${refus.message}`);
+    expect(refus.message).toContain("inbox.recent");
   });
 });
 
