@@ -111,6 +111,8 @@ import { ErreurCleSceauJournal, scelleurDepuisCoffre } from "../../core/sceau/in
 import type { FabriqueDeNoyau, NoyauUnique } from "../../core/transport/contrat.js";
 import { appelerAdaptateurFedere } from "../../core/federe/appel.js";
 import { construireRaccordement } from "../../core/federe/raccordement.js";
+import { creerCalculFiltersHash } from "../../core/federe/filtres.js";
+import { masquageDelegueALAdaptateur } from "../../core/federe/masquage.js";
 import type { LectureDesAdaptateurs, LectureDuCoffre } from "../../core/federe/raccordement.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -440,11 +442,24 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
     validerEntree(outil: OutilDuCatalogue): ResultatValidation<unknown> {
       throw new ErreurAdaptateurNonAdmis("validerEntree", outil.name);
     },
-    empreinteFiltres(outil: OutilDuCatalogue): Promise<string> {
-      throw new ErreurAdaptateurNonAdmis("empreinteFiltres", outil.name);
+    empreinteFiltres(outil: OutilDuCatalogue, valide: unknown): Promise<string> {
+      // § 13.1 — HMAC à clé du curseur, domaine propre. Il ne dépend d'aucun
+      // adaptateur : seuls le nom de l'outil et l'entrée VALIDÉE y entrent.
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("empreinteFiltres", outil.name);
+      }
+      return creerCalculFiltersHash(ports.coffreDuCurseur).calculer(outil, valide);
     },
-    fabriqueMasquage(_habilitations, outil: OutilDuCatalogue): Masquage {
-      throw new ErreurAdaptateurNonAdmis("fabriqueMasquage", outil.name);
+    fabriqueMasquage(habilitations, outil: OutilDuCatalogue): Masquage {
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("fabriqueMasquage", outil.name);
+      }
+      // ⚠️ RIDEAU VIDE, ET ASSUMÉ. Le socle ne connaît aucun métier : il ne sait
+      //    pas quels champs d'un produit tiers sont sensibles, et fabriquer une
+      //    liste de noms plausibles produirait une garde qui rassure sans
+      //    garder. C'est l'adaptateur qui masque, à la source. Lire
+      //    `core/federe/masquage.ts` : l'écart y est écrit, pas caché.
+      return masquageDelegueALAdaptateur(habilitations, outil);
     },
     construireContexteOutil(identite, _appel, profil, niveau) {
       // ⚠️ IL NE FABRIQUE RIEN — il RECOPIE ce que les étapes ont établi. C'est
