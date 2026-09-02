@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/coffre-du-jeton.ts` — **LE COMPTEUR QUI REND LE
+ * `ops/zoho-mail/bootstrap/coffre-du-jeton.ts` — **LE COMPTEUR QUI REND LE
  * MUR VISIBLE, ET LE DÉPÔT DU JETON.**
  *
  * ═══ LE § 27, MOT POUR MOT ═══

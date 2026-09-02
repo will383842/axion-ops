@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/mandat.ts` — **CE QUI REND UN AMORÇAGE
+ * `ops/zoho-mail/bootstrap/mandat.ts` — **CE QUI REND UN AMORÇAGE
  * AUTOMATIQUE IMPOSSIBLE, ET NON SEULEMENT DÉCONSEILLÉ.**
  *
  * ═══ LE DANGER, ÉCRIT AVANT LE REMÈDE ═══

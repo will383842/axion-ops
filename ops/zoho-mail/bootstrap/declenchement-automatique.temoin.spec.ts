@@ -23,7 +23,7 @@ import { sansProse } from "../../../core/coutures/verifier.js";
  *
  * ⚠️ **CE N'EST PAS LE DOSSIER QUI EST FERMÉ, C'EST LE GESTE.** Une première
  *    écriture de cette garde interdisait tout import du dossier, et elle a
- *    trouvé un « coupable » : `adapters/zoho-mail/sondes/commun.ts`, qui importe
+ *    trouvé un « coupable » : `ops/zoho-mail/sondes/commun.ts`, qui importe
  *    la TABLE DES SCOPES d'`autorisation.ts`. C'est exactement ce qu'il faut
  *    faire — le § 27 exige une seule écriture des scopes, et un voisin qui les
  *    retaperait serait le vrai défaut. Interdire cet import aurait poussé à
@@ -43,7 +43,7 @@ import { sansProse } from "../../../core/coutures/verifier.js";
  */
 
 /** Le dossier gardé. */
-const DOSSIER_DU_BOOTSTRAP = "adapters/zoho-mail/bootstrap/";
+const DOSSIER_DU_BOOTSTRAP = "ops/zoho-mail/bootstrap/";
 
 /**
  * **LES SYMBOLES QUI LANCENT UN AMORÇAGE.** C'est la seule liste de ce fichier,
@@ -202,7 +202,7 @@ describe("épreuve — le geste d'amorçage n'a AUCUN appelant hors de son dossi
   it("SAIT rougir : un module de production fabriqué qui appelle le geste est trouvé", () => {
     // Les témoins sont FABRIQUÉS EN MÉMOIRE, jamais écrits sur le disque : une
     // garde qui mutilerait le dépôt pour se prouver laisserait un jour ses dégâts.
-    const fichiersDuGeste = new Set(["adapters/zoho-mail/bootstrap/amorcage.ts"]);
+    const fichiersDuGeste = new Set(["ops/zoho-mail/bootstrap/amorcage.ts"]);
     const symbolesGardes = new Set<string>(SYMBOLES_DU_GESTE);
 
     const temoins: readonly {
@@ -214,7 +214,7 @@ describe("épreuve — le geste d'amorçage n'a AUCUN appelant hors de son dossi
         nom: "repli qui importe le porteur",
         chemin: "ops/repli-en-cas-de-panne.ts",
         source:
-          'import { amorcer } from "../adapters/zoho-mail/bootstrap/amorcage.js";\n' +
+          'import { amorcer } from "../ops/zoho-mail/bootstrap/amorcage.js";\n' +
           "export const repli = amorcer;\n",
       },
       {
@@ -240,7 +240,7 @@ describe("épreuve — le geste d'amorçage n'a AUCUN appelant hors de son dossi
     // TÉMOIN DE CONTRASTE — celui-ci NE doit PAS être signalé : c'est l'usage
     // légitime que la première écriture de cette garde condamnait à tort.
     const voisinLegitime = {
-      chemin: "adapters/zoho-mail/sondes/commun.ts",
+      chemin: "ops/zoho-mail/sondes/commun.ts",
       source: 'import { SCOPES_DU_CDC } from "../bootstrap/autorisation.js";\n',
     };
     const signale = importsEcrits(voisinLegitime.source).some((clause) => {
@@ -264,7 +264,7 @@ describe("épreuve — le geste d'amorçage n'a AUCUN appelant hors de son dossi
     // Sans `sansProse`, ce fichier-ci — qui documente le défaut qu'il garde —
     // serait son propre coupable, et la garde serait rouge pour toujours.
     const source =
-      '// import { amorcer } from "../adapters/zoho-mail/bootstrap/amorcage.js";\n' +
+      '// import { amorcer } from "../ops/zoho-mail/bootstrap/amorcage.js";\n' +
       '/* import { demanderUnMandat } from "./mandat.js"; */\n' +
       'import { z } from "zod";\n';
     const lus = importsEcrits(source);

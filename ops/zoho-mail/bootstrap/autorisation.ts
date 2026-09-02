@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/autorisation.ts` — **L'URL SUR LAQUELLE WILL
+ * `ops/zoho-mail/bootstrap/autorisation.ts` — **L'URL SUR LAQUELLE WILL
  * CLIQUE, ET LA LISTE DE SCOPES QU'ON NE POURRA PLUS ÉLARGIR SANS TOUT
  * REFAIRE.**
  *

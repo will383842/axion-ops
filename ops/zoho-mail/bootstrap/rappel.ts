@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/rappel.ts` — **LE SERVEUR QUI REÇOIT UN SEUL
+ * `ops/zoho-mail/bootstrap/rappel.ts` — **LE SERVEUR QUI REÇOIT UN SEUL
  * CODE, PUIS S'ARRÊTE.**
  *
  * ═══ CE QU'IL EST, ET CE QU'IL N'EST PAS ═══

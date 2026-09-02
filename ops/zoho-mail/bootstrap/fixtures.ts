@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/fixtures.ts` — **LE DÉCOR DES GARDES.**
+ * `ops/zoho-mail/bootstrap/fixtures.ts` — **LE DÉCOR DES GARDES.**
  *
  * ⚠️ **CE FICHIER N'EST PAS LIVRÉ.** `tsconfig.build.json` exclut
  *    `**\/fixtures.ts` ; il ne compte donc pas pour un module de production, et
