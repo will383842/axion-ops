@@ -57,6 +57,9 @@ function outil(name: string, inputSchema: unknown): OutilDuCatalogue {
   return {
     adapterId: "axionia",
     adapterVersion: "1.0.0",
+    idempotency: "n/a",
+    limit: null,
+    warnAt: null,
     name,
     inputSchema,
     effect: "read",

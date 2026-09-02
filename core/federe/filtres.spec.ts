@@ -45,6 +45,9 @@ function outil(surcharge: Partial<OutilDuCatalogue> = {}): OutilDuCatalogue {
   return {
     adapterId: "axionia",
     adapterVersion: "1.0.0",
+    idempotency: "n/a",
+    limit: null,
+    warnAt: null,
     name: "inbox.recent",
     effect: "read",
     dataClass: "personal",

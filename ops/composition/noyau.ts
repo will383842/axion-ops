@@ -438,7 +438,17 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
 
     // ── LES QUATRE PORTS QUI EXIGENT UN ADAPTATEUR — REFUS NOMMÉ ────────────
     reglages(outil: OutilDuCatalogue): ReglagesDeLOutil {
-      throw new ErreurAdaptateurNonAdmis("reglages", outil.name);
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("reglages", outil.name);
+      }
+      // Trois valeurs LUES, aucune supposée : l'idempotence vient du manifeste
+      // épinglé (via `ops_tool.idempotency`), les deux quotas de la console
+      // (`null` = valeurs de départ du § 26, tranchées par `core/limits`).
+      return {
+        modeIdempotence: outil.idempotency,
+        limiteQuota: outil.limit,
+        warnAtQuota: outil.warnAt,
+      };
     },
     validerEntree(outil: OutilDuCatalogue, input: unknown): ResultatValidation<unknown> {
       // ÉTAPE 8 — l'entrée contre le JSON Schema ÉPINGLÉ du manifeste (ajv,

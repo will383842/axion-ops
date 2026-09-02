@@ -56,6 +56,15 @@ enum PolicyLevel {
 
 /// § 12 — une clé réutilisée avec un payload différent rend `invalid_input`,
 /// PAS l'autre résultat en silence.
+/// § 09 — ce que l'outil promet quand on le rejoue. Recopié du manifeste
+/// épinglé à l'admission. Les valeurs de fil (`non-rejouable`, `n/a`) ne sont
+/// pas des identifiants SQL : elles sont MAPPÉES, jamais réécrites.
+enum Idempotency {
+  key
+  non_rejouable @map("non-rejouable")
+  n_a           @map("n/a")
+}
+
 enum IdempotencyStatus {
   in_flight
   done
@@ -247,6 +256,11 @@ model OpsTool {
 
   effect    Effect
   dataClass DataClass
+
+  /// § 09 — lu par le port `reglages` de l'étape 8 (mode fédéré, 2026-09-02).
+  /// Pas de défaut : un « n/a » implicite ferait passer une écriture rejouable
+  /// pour une lecture pure. La table était vide à l'ajout de la colonne.
+  idempotency Idempotency
 
   /// Typé côté code sur l'ÉNUMÉRATION FERMÉE de `core/profiles/` (§ 14).
   /// Un profil inconnu est une erreur de compilation chez l'adaptateur ; ici

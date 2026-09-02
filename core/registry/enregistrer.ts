@@ -778,6 +778,11 @@ export function enregistrerAdaptateur(entree: EntreeEnregistrement): ResultatEnr
       bytes: octetsDeLaDefinition(definition),
       effect: outil.effect,
       dataClass: outil.dataClass,
+      // § 09 — recopié du manifeste, qui l'a déclaré sans défaut permissif.
+      idempotency: outil.idempotency,
+      // Réglés en console, jamais à l'admission : `null` = valeurs de départ du § 26.
+      limit: null,
+      warnAt: null,
       profiles: profils,
       // ⚠️ RECOPIÉ DU MANIFESTE, ET C'EST LÉGITIME — au contraire de `trustTier`
       //    (fixé côté socle) et de `bytes` (recalculé). Une déclaration qui ne

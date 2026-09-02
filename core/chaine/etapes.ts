@@ -73,6 +73,7 @@ import type {
   OpsScope,
   PolicyLevel,
 } from "../types.js";
+import type { Idempotency } from "../adapter-kit/types.js";
 import type { AnnotationsCompaction, Pagination } from "../adapter-kit/types.js";
 // ADR 0014 — import de TYPE, jamais de valeur : nommer `SessionId` n'est pas le
 // droit d'en frapper une, et la garde G2 fait la différence.
@@ -338,6 +339,17 @@ export interface OutilDuCatalogue extends DefinitionOutil {
    *    renseigner et rouvrir le trou. Ce champ ne sert donc plus qu'au § 12.
    */
   readonly idFields: readonly string[];
+  /**
+   * § 09 — `key`, `non-rejouable` ou `n/a`. Lu dans le manifeste ÉPINGLÉ, porté
+   * par `ops_tool.idempotency`, consommé par le port `reglages`. JAMAIS supposé :
+   * une valeur par défaut « n/a » ferait passer une écriture rejouable pour une
+   * lecture pure. Arrivé le 2026-09-02 avec le mode fédéré.
+   */
+  readonly idempotency: Idempotency;
+  /** `ops_tool.limit` — `null` = la limite de départ du § 26. Réglé en console. */
+  readonly limit: number | null;
+  /** `ops_tool.warnAt` — `null` = 80 % du dénominateur retenu. Réglé en console. */
+  readonly warnAt: number | null;
   /**
    * § 09 — les champs d'entrée que l'outil DÉCLARE de gouvernance (ADR 0016).
    *

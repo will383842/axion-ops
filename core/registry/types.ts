@@ -7,6 +7,7 @@
  */
 
 import type { AdapterMode, DataClass } from "../types.js";
+import type { Idempotency } from "../adapter-kit/types.js";
 import type { Verdict } from "../adapter-kit/verdict.js";
 import type { ProfileName } from "../profiles/index.js";
 
@@ -377,6 +378,11 @@ export interface LigneOpsTool {
   readonly bytes: number;
   readonly effect: string;
   readonly dataClass: DataClass;
+  /** § 09 — recopié du manifeste à l'admission, jamais deviné. */
+  readonly idempotency: Idempotency;
+  /** `null` à l'admission : la console règle, le § 26 fournit le départ. */
+  readonly limit: number | null;
+  readonly warnAt: number | null;
   /**
    * Resserré sur l'ÉNUMÉRATION FERMÉE, pas sur `string`. Le registre validait
    * déjà les valeurs au runtime, mais le TYPE s'ouvrait en chemin : la
