@@ -26,7 +26,7 @@ const INTENTION_CONFORME: IntentionConstatee = {
   arguments: [ARGUMENT_SENTINELLE],
   entreeEstUnTerminal: true,
   estLeProgrammeLance: true,
-  programme: "adapters/zoho-mail/bootstrap",
+  programme: "ops/zoho-mail/bootstrap",
 };
 
 describe("le mandat — trois constats du monde réel, et un type inhabitable", () => {

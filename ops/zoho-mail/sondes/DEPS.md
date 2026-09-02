@@ -1,4 +1,4 @@
-# `adapters/zoho-mail/sondes/` — dépendances et scripts
+# `ops/zoho-mail/sondes/` — dépendances et scripts
 
 ## Dépendances de paquet : **aucune**
 
@@ -30,17 +30,17 @@ Rien n'y a été touché. Voici ce qui y manque, avec le motif.
 Elles se lancent aujourd'hui par leur chemin :
 
 ```sh
-pnpm exec tsx adapters/zoho-mail/sondes/sonde-01-abonnement.ts
+pnpm exec tsx ops/zoho-mail/sondes/sonde-01-abonnement.ts
 ```
 
 Ce qui pourrait être ajouté, **si quelqu'un le juge utile** :
 
 ```jsonc
-"ops:sonde:zoho:01": "tsx adapters/zoho-mail/sondes/sonde-01-abonnement.ts",
-"ops:sonde:zoho:02": "tsx adapters/zoho-mail/sondes/sonde-02-brouillon.ts",
-"ops:sonde:zoho:03": "tsx adapters/zoho-mail/sondes/sonde-03-piece-jointe.ts",
-"ops:sonde:zoho:04": "tsx adapters/zoho-mail/sondes/sonde-04-relecture.ts",
-"ops:sonde:zoho:05": "tsx adapters/zoho-mail/sondes/sonde-05-envoi.ts",
+"ops:sonde:zoho:01": "tsx ops/zoho-mail/sondes/sonde-01-abonnement.ts",
+"ops:sonde:zoho:02": "tsx ops/zoho-mail/sondes/sonde-02-brouillon.ts",
+"ops:sonde:zoho:03": "tsx ops/zoho-mail/sondes/sonde-03-piece-jointe.ts",
+"ops:sonde:zoho:04": "tsx ops/zoho-mail/sondes/sonde-04-relecture.ts",
+"ops:sonde:zoho:05": "tsx ops/zoho-mail/sondes/sonde-05-envoi.ts",
 ```
 
 > ⚠️ **UN SCRIPT `sondes:toutes` SERAIT UN DÉFAUT, PAS UNE COMMODITÉ.** Les
@@ -59,7 +59,7 @@ dans `README.md`, § « Ce qu'il faut avoir AVANT de lancer quoi que ce soit ».
 Si quelqu'un décide de les y ajouter, **ce sont des noms, jamais des valeurs** :
 
 ```
-# — Mesure M2 (adapters/zoho-mail/sondes/). Jetables, jamais en production.
+# — Mesure M2 (ops/zoho-mail/sondes/). Jetables, jamais en production.
 ZOHO_ACCESS_TOKEN=""      # voie courte « client seul » — une heure, aucun coffre engagé
 ZOHO_REFRESH_TOKEN=""     # ⚠️ SECOND chemin vers un secret qui vit au COFFRE — voyez README
 ZOHO_SONDE_FROM=""        # doit figurer parmi les identités validées de la sonde ①
@@ -70,18 +70,18 @@ ZOHO_SONDE_RELAIS=""      # hors du dépôt, toujours. Vide = répertoire tempor
 
 `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REGION` et `ZOHO_REDIRECT_URI` ne
 figurent pas dans cette liste : ils appartiennent à
-`adapters/zoho-mail/bootstrap/`, et les sondes **importent leurs noms** de là
+`ops/zoho-mail/bootstrap/`, et les sondes **importent leurs noms** de là
 plutôt que de les retaper.
 
 ---
 
 ## Ce que ce dossier importe, et pourquoi chacun est une décision
 
-| Import                                         | Motif                                                                                                                                                                                                  |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `core/audit/canonique.js` → `sha256Hex`        | l'ADR 0020 interdit nommément une **seconde** implémentation de l'empreinte. Et le motif est plus fort ici : la mesure ne vaut que si elle est prise avec **la fonction que l'adaptateur emploiera**   |
-| `core/transport/anti-fuite.js`                 | ADR 0044 : « un seul filet, deux appelants — jamais deux écritures ». Les sondes en sont le **troisième** appelant                                                                                     |
-| `adapters/zoho-mail/bootstrap/autorisation.js` | il porte déjà les régions, l'hôte des comptes, l'URL des jetons, les noms des variables de client et la table des scopes du § 27. Les réécrire ici aurait fabriqué **deux dérivations d'un même fait** |
+| Import                                    | Motif                                                                                                                                                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `core/audit/canonique.js` → `sha256Hex`   | l'ADR 0020 interdit nommément une **seconde** implémentation de l'empreinte. Et le motif est plus fort ici : la mesure ne vaut que si elle est prise avec **la fonction que l'adaptateur emploiera**   |
+| `core/transport/anti-fuite.js`            | ADR 0044 : « un seul filet, deux appelants — jamais deux écritures ». Les sondes en sont le **troisième** appelant                                                                                     |
+| `ops/zoho-mail/bootstrap/autorisation.js` | il porte déjà les régions, l'hôte des comptes, l'URL des jetons, les noms des variables de client et la table des scopes du § 27. Les réécrire ici aurait fabriqué **deux dérivations d'un même fait** |
 
 Le **seul fait neuf** écrit dans ce dossier est l'hôte de l'API du courrier —
 `mail.zoho.<région>` — parce que le voisin n'en a jamais eu besoin : il autorise,

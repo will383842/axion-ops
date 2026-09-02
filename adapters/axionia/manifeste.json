@@ -1,0 +1,1643 @@
+{
+  "$note": "Généré par `pnpm mcp:manifeste`. Ne pas éditer à la main : la garde compare au code. `manifestSha` couvre le texte canonique, pas ce fichier.",
+  "manifestSha": "sha256:b2fe01044f8940afdca5fb0eceb9c3cc133c94f466edad500fc7877cede543df",
+  "octetsCanoniques": 25391,
+  "manifeste": {
+    "manifestVersion": 1,
+    "id": "axionia",
+    "version": "1.0.0",
+    "mode": "fédéré",
+    "profilesVersion": "1.0.0",
+    "profilesSha": "6b9646f62b9451abeb4a5744e983bd1870cd62c5b9dccf0cc9af4c1fec27ed0a",
+    "profiles": ["admin"],
+    "secrets": [],
+    "tools": [
+      {
+        "name": "inbox.recent",
+        "version": "1.0.0",
+        "description": "Ce qui est arrivé : appels réservés, messages, candidatures et demandes de tournage, dans l'ordre chronologique, avec ce qui reste à traiter par canal.",
+        "effect": "read",
+        "dataClass": "personal",
+        "idempotency": "n/a",
+        "pagination": "page",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "canal": {
+              "type": "string",
+              "enum": ["appel", "message", "candidature", "podcast"]
+            },
+            "seulementAction": {
+              "type": "boolean"
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "limite": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "canal": {
+                    "type": "string",
+                    "enum": ["appel", "message", "candidature", "podcast"]
+                  },
+                  "recuLe": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "objet": {
+                    "type": "string"
+                  },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "contexte": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "statut": {
+                    "type": "string"
+                  },
+                  "aAgir": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["id", "canal", "recuLe", "objet", "contact", "aAgir"],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            },
+            "synthese": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "parCanal": {
+                  "type": "object",
+                  "properties": {
+                    "appel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "message": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidature": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "podcast": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["appel", "message", "candidature", "podcast"],
+                  "additionalProperties": false
+                },
+                "aAgir": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "aAgirParCanal": {
+                  "type": "object",
+                  "properties": {
+                    "appel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "message": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidature": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "podcast": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["appel", "message", "candidature", "podcast"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["total", "parCanal", "aAgir", "aAgirParCanal"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta", "synthese"],
+          "additionalProperties": false
+        },
+        "maxBytes": 20480,
+        "compaction": {
+          "free": ["objet", "contexte"],
+          "tier2": ["contexte", "statut"],
+          "aggregateBy": "canal"
+        },
+        "idFields": ["id"],
+        "governanceFields": [],
+        "bytes": 4031
+      },
+      {
+        "name": "agenda.jour",
+        "version": "1.0.0",
+        "description": "Tout ce qui occupe une journée : réservations en ligne, agenda personnel et indisponibilités posées depuis la console, fusionnés et triés.",
+        "effect": "read",
+        "dataClass": "personal",
+        "idempotency": "n/a",
+        "pagination": "none",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "jour": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            }
+          },
+          "required": ["jour"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": ["calendly", "google", "console"]
+                  },
+                  "titre": {
+                    "type": "string"
+                  },
+                  "debut": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fin": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "journeeEntiere": {
+                    "type": "boolean"
+                  },
+                  "occupe": {
+                    "type": "boolean"
+                  },
+                  "jour": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": ["telephone", "visio", "inconnu"]
+                  },
+                  "annule": {
+                    "type": "boolean"
+                  },
+                  "lieu": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "titre",
+                  "debut",
+                  "fin",
+                  "journeeEntiere",
+                  "occupe",
+                  "jour",
+                  "contact",
+                  "format",
+                  "annule"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta"],
+          "additionalProperties": false
+        },
+        "maxBytes": 20480,
+        "compaction": {
+          "free": ["titre", "note"],
+          "tier2": ["lieu", "note"],
+          "aggregateBy": "source"
+        },
+        "idFields": ["id"],
+        "governanceFields": [],
+        "bytes": 3831
+      },
+      {
+        "name": "agenda.semaine",
+        "version": "1.0.0",
+        "description": "Les sept jours à partir d'une date : réservations, agenda personnel et indisponibilités, fusionnés et triés, avec le jour civil de chaque élément.",
+        "effect": "read",
+        "dataClass": "personal",
+        "idempotency": "n/a",
+        "pagination": "none",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "depuis": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            }
+          },
+          "required": ["depuis"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": ["calendly", "google", "console"]
+                  },
+                  "titre": {
+                    "type": "string"
+                  },
+                  "debut": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fin": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "journeeEntiere": {
+                    "type": "boolean"
+                  },
+                  "occupe": {
+                    "type": "boolean"
+                  },
+                  "jour": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": ["telephone", "visio", "inconnu"]
+                  },
+                  "annule": {
+                    "type": "boolean"
+                  },
+                  "lieu": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "titre",
+                  "debut",
+                  "fin",
+                  "journeeEntiere",
+                  "occupe",
+                  "jour",
+                  "contact",
+                  "format",
+                  "annule"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta"],
+          "additionalProperties": false
+        },
+        "maxBytes": 49152,
+        "compaction": {
+          "free": ["titre", "note"],
+          "tier2": ["lieu", "note"],
+          "aggregateBy": "jour"
+        },
+        "idFields": ["id"],
+        "governanceFields": [],
+        "bytes": 3845
+      },
+      {
+        "name": "rendezvous.list",
+        "version": "1.0.0",
+        "description": "Les rendez-vous réservés en ligne, filtrables par statut et par période, avec leur créneau et leur format (téléphone ou visio).",
+        "effect": "read",
+        "dataClass": "personal",
+        "idempotency": "n/a",
+        "pagination": "page",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "statut": {
+              "type": "string",
+              "enum": ["scheduled", "past", "pending", "completed", "canceled", "no_show"]
+            },
+            "depuis": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "jusqua": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "limite": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "titre": {
+                    "type": "string"
+                  },
+                  "debut": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fin": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "heureConfirmee": {
+                    "type": "boolean"
+                  },
+                  "jour": {
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "statut": {
+                    "type": "string",
+                    "enum": ["scheduled", "past", "pending", "completed", "canceled", "no_show"]
+                  },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": ["telephone", "visio", "inconnu"]
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "titre",
+                  "debut",
+                  "fin",
+                  "heureConfirmee",
+                  "jour",
+                  "statut",
+                  "contact",
+                  "format"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta"],
+          "additionalProperties": false
+        },
+        "maxBytes": 32768,
+        "compaction": {
+          "free": ["titre", "notes"],
+          "tier2": ["notes"],
+          "aggregateBy": "statut"
+        },
+        "idFields": ["id"],
+        "governanceFields": [],
+        "bytes": 4192
+      },
+      {
+        "name": "pilotage.alertes",
+        "version": "1.0.0",
+        "description": "Les signaux du planning d'un mois : sessions sans formateur, conflits, indisponibilités, conformité et charge des formateurs, relevés et rémunérations.",
+        "effect": "read",
+        "dataClass": "personal",
+        "idempotency": "n/a",
+        "pagination": "none",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "annee": {
+              "type": "integer",
+              "minimum": 2020,
+              "maximum": 2100
+            },
+            "mois": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "niveau": {
+                    "type": "string",
+                    "enum": ["critique", "attention"]
+                  },
+                  "titre": {
+                    "type": "string"
+                  },
+                  "explication": {
+                    "type": "string"
+                  },
+                  "nombre": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "elements": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "libelle": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["libelle"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["code", "niveau", "titre", "explication", "nombre"],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta"],
+          "additionalProperties": false
+        },
+        "maxBytes": 32768,
+        "compaction": {
+          "free": ["explication"],
+          "tier2": ["elements"],
+          "aggregateBy": "niveau"
+        },
+        "idFields": [],
+        "governanceFields": [],
+        "bytes": 2557
+      },
+      {
+        "name": "qualiopi.conformite",
+        "version": "1.0.0",
+        "description": "Les alertes de conformité Qualiopi et réglementaires, non résolues par défaut, par niveau (info, important, critique), les plus récentes en premier.",
+        "effect": "read",
+        "dataClass": "personal",
+        "idempotency": "n/a",
+        "pagination": "none",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "resolues": {
+              "type": "boolean"
+            },
+            "niveau": {
+              "type": "string",
+              "enum": ["info", "important", "critique"]
+            },
+            "limite": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "niveau": {
+                    "type": "string",
+                    "enum": ["info", "important", "critique"]
+                  },
+                  "titre": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "lu": {
+                    "type": "boolean"
+                  },
+                  "creeLe": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "resolueLe": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "cible": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["type", "id"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "code",
+                  "niveau",
+                  "titre",
+                  "message",
+                  "lu",
+                  "creeLe",
+                  "resolueLe"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta"],
+          "additionalProperties": false
+        },
+        "maxBytes": 40960,
+        "compaction": {
+          "free": ["message", "titre"],
+          "tier2": ["cible"],
+          "aggregateBy": "niveau"
+        },
+        "idFields": ["id"],
+        "governanceFields": [],
+        "bytes": 3489
+      },
+      {
+        "name": "deploiement.etat",
+        "version": "1.0.0",
+        "description": "L'état du dernier déploiement du site : réussi, en cours ou en échec, et si le commit déployé est bien celui qui est servi en ce moment.",
+        "effect": "read",
+        "dataClass": "internal",
+        "idempotency": "n/a",
+        "pagination": "none",
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "etat": {
+                    "type": "string",
+                    "enum": [
+                      "a-jour",
+                      "en-retard",
+                      "en-cours",
+                      "echec",
+                      "non-configure",
+                      "indisponible"
+                    ]
+                  },
+                  "resume": {
+                    "type": "string"
+                  },
+                  "commit": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{7}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "commitEnService": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{7}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "branche": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "termineLe": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "titreDuCommit": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dureeSecondes": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "numeroDeRun": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["etat", "resume", "commit", "commitEnService", "branche", "termineLe"],
+                "additionalProperties": false
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "returned": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hasMore": {
+                  "type": "boolean"
+                },
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["items", "aggregate"]
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "truncationNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceIncomplete": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "failedSources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "deprecated": {
+                  "type": "boolean"
+                },
+                "sunsetAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "asOf": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                }
+              },
+              "required": [
+                "returned",
+                "hasMore",
+                "cursor",
+                "mode",
+                "truncated",
+                "truncationNote",
+                "sourceIncomplete",
+                "sourceNote",
+                "failedSources",
+                "version",
+                "deprecated",
+                "sunsetAt",
+                "asOf"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["items", "meta"],
+          "additionalProperties": false
+        },
+        "maxBytes": 2048,
+        "compaction": {
+          "free": ["resume", "titreDuCommit"],
+          "tier2": ["titreDuCommit", "dureeSecondes", "numeroDeRun"],
+          "aggregateBy": null
+        },
+        "idFields": ["commit", "commitEnService"],
+        "governanceFields": [],
+        "bytes": 3124
+      }
+    ]
+  }
+}

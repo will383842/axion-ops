@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/jetons.ts` — **L'ÉCHANGE `code` → JETONS, ET LA
+ * `ops/zoho-mail/bootstrap/jetons.ts` — **L'ÉCHANGE `code` → JETONS, ET LA
  * LECTURE D'UNE RÉPONSE QUI MENT PAR SON CODE HTTP.**
  *
  * ═══ LE PIÈGE PRINCIPAL, ET IL N'EST PAS THÉORIQUE ═══

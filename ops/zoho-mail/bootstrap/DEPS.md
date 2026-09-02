@@ -1,4 +1,4 @@
-# `adapters/zoho-mail/bootstrap/` — ce qu'il manque, et ce qui reste à trancher
+# `ops/zoho-mail/bootstrap/` — ce qu'il manque, et ce qui reste à trancher
 
 Ce dossier est **écrit et non exécuté**. Rien n'a été lancé, rien n'a été commité,
 aucun appel réseau n'a été fait, aucun identifiant n'a été lu.
@@ -11,8 +11,8 @@ aucun appel réseau n'a été fait, aucun identifiant n'a été lu.
 exacte à insérer dans `scripts`, entre `ops:vault:init` et `ops:vault:init:dist` :
 
 ```json
-"zoho:bootstrap": "tsx adapters/zoho-mail/bootstrap/index.ts --amorcage-explicite",
-"zoho:bootstrap:dist": "node dist/adapters/zoho-mail/bootstrap/index.js --amorcage-explicite",
+"zoho:bootstrap": "tsx ops/zoho-mail/bootstrap/index.ts --amorcage-explicite",
+"zoho:bootstrap:dist": "node dist/ops/zoho-mail/bootstrap/index.js --amorcage-explicite",
 ```
 
 ### Pourquoi l'argument est dans le script et non tapé par Will
@@ -51,7 +51,7 @@ les messages d'exploitation : la garde la confrontera alors pour de bon.
 `.github/workflows/ci.yml` — **liste les dossiers présents sous `adapters/` et
 exige que chacun ait une entrée dans `core/registry/adapters.lock.json`.**
 
-La création de `adapters/zoho-mail/` fait donc **échouer cette étape** avec :
+La création de `ops/zoho-mail/` fait donc **échouer cette étape** avec :
 
 > adaptateur « zoho-mail » présent mais ABSENT DU VERROU
 
@@ -62,7 +62,7 @@ encore**, puisque seul l'amorçage OAuth est écrit. Fabriquer une empreinte
 
 **Trois issues, par ordre de préférence :**
 
-1. **Attendre l'adaptateur.** Écrire `adapters/zoho-mail/` (manifeste + outils du
+1. **Attendre l'adaptateur.** Écrire `ops/zoho-mail/` (manifeste + outils du
    § 27), produire son manifeste, l'épingler. La conformité redevient verte
    d'elle-même. C'est la voie propre, et elle suppose que ce dossier ne soit pas
    fusionné seul.

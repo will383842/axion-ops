@@ -1,5 +1,5 @@
 /**
- * `adapters/zoho-mail/bootstrap/amorcage.ts` — **LE GESTE, EN ENTIER, ET LA
+ * `ops/zoho-mail/bootstrap/amorcage.ts` — **LE GESTE, EN ENTIER, ET LA
  * PART DE WILL RÉDUITE À UN CLIC.**
  *
  * ═══ CE QUE CE FICHIER SÉQUENCE, ET DANS CET ORDRE ═══

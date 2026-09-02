@@ -1,0 +1,16 @@
+{
+  "lockVersion": 1,
+  "adapters": [
+    {
+      "id": "axionia",
+      "version": "1.0.0",
+      "mode": "fédéré",
+      "manifestSha": "sha256:b2fe01044f8940afdca5fb0eceb9c3cc133c94f466edad500fc7877cede543df",
+      "trustTier": 1,
+      "maxDataClass": "personal",
+      "endpoint": "https://axion-ia.com/api/mcp",
+      "authMode": "secret-partage",
+      "secretRef": "axionia.mcp.shared"
+    }
+  ]
+}
