@@ -132,7 +132,7 @@ const CLE_CURSEUR_D_EPREUVE = "cle-curseur-du-lot3-non-secrete-0123456789abcd";
 
 const INSTANT = new Date("2026-09-01T09:00:00.000Z");
 const PROFIL_TEMOIN: ProfileName = "courrier";
-const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+const HABILITATIONS: Habilitations = { peutVoirAppels: false, roleConsole: null };
 const SESSION_TEMOIN: SessionId = sessionIdDeTemoin();
 
 /** Le domaine qui a MARQUÉ la session — jamais celui qu'on appelle ensuite. */

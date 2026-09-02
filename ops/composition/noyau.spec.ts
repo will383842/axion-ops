@@ -131,7 +131,7 @@ function identiteDuTemoin(): ReturnType<typeof identiteStdio> {
   return identiteStdio({
     requestId: "req-temoin-composition",
     deadline: new Date(INSTANT_DU_TEMOIN.getTime() + 30_000),
-    habilitations: { peutVoirAppels: false },
+    habilitations: { peutVoirAppels: false, roleConsole: null },
   });
 }
 

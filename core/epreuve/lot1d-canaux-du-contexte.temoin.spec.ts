@@ -137,7 +137,7 @@ const CLE_CURSEUR_DU_LOT_1D = "cle-curseur-de-l-epreuve-du-lot-1d-non-secrete";
 
 const INSTANT = new Date("2026-08-31T12:00:00.000Z");
 const PROFIL: ProfileName = "courrier";
-const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+const HABILITATIONS: Habilitations = { peutVoirAppels: false, roleConsole: null };
 
 /** Le domaine où la session LIT du `personal` : c'est lui qui MARQUE. */
 const DOMAINE_LU = "boite-courrier";

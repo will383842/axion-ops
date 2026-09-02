@@ -125,7 +125,7 @@ const CLE_CURSEUR_D_EPREUVE = "cle-curseur-d-epreuve-lot1c-non-secrete-012345678
 
 const INSTANT = new Date("2026-08-31T10:00:00.000Z");
 const PROFIL_TEMOIN: ProfileName = "courrier";
-const HABILITATIONS: Habilitations = { peutVoirAppels: false };
+const HABILITATIONS: Habilitations = { peutVoirAppels: false, roleConsole: null };
 const SESSION_TEMOIN = sessionIdDeTemoin();
 
 const SCHEMA_VIDE = { type: "object", properties: {}, additionalProperties: false } as const;

@@ -282,7 +282,7 @@ async function surLeFilStdio(
     //    l'apprendre.
     noyau,
     catalogue,
-    habilitations: (): Habilitations => ({ peutVoirAppels: false }),
+    habilitations: (): Habilitations => ({ peutVoirAppels: false, roleConsole: null }),
     maintenant: () => INSTANT,
     ecrire: (ligne) => sortie.push(ligne),
   });

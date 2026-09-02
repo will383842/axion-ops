@@ -155,7 +155,7 @@ describe("l'empreinte des filtres — stable, discriminante, et à clé", () => 
 });
 
 describe("le masquage du mode fédéré — vide, et NOMMÉ", () => {
-  const habilitations: Habilitations = { peutVoirAppels: false };
+  const habilitations: Habilitations = { peutVoirAppels: false, roleConsole: null };
 
   it("rend la charge intacte et annonce zéro champ masqué", () => {
     const charge = { items: [{ id: "a1", contact: "quelqu un" }] };
@@ -169,8 +169,14 @@ describe("le masquage du mode fédéré — vide, et NOMMÉ", () => {
 
   it("ne dépend NI des habilitations NI de l'outil — ce qui est précisément le point", () => {
     const charge = { items: [{ id: "a1" }] };
-    const a = masquageDelegueALAdaptateur({ peutVoirAppels: false }, outil()).appliquer(charge);
-    const b = masquageDelegueALAdaptateur({ peutVoirAppels: true }, outil()).appliquer(charge);
+    const a = masquageDelegueALAdaptateur(
+      { peutVoirAppels: false, roleConsole: null },
+      outil(),
+    ).appliquer(charge);
+    const b = masquageDelegueALAdaptateur(
+      { peutVoirAppels: true, roleConsole: null },
+      outil(),
+    ).appliquer(charge);
     // 🔑 Un rideau qui varierait avec les habilitations laisserait croire qu'il
     //    garde quelque chose. Il n'en garde rien : c'est l'adaptateur qui masque,
     //    à la source, et l'écart est écrit dans `masquage.ts`.

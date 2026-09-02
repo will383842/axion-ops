@@ -47,7 +47,7 @@ function contexteDeTemoin(surcharge: Partial<ToolContext<string>> = {}): ToolCon
     idempotencyRef: null,
     requestId: "req-de-temoin-0001",
     deadline: new Date("2026-09-02T06:00:00Z"),
-    habilitations: { peutVoirAppels: false },
+    habilitations: { peutVoirAppels: false, roleConsole: null },
     ...surcharge,
   };
 }

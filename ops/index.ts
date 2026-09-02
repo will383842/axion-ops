@@ -370,7 +370,7 @@ export function catalogueDesAdaptateursAdmis(admis: readonly DescripteurOutilSer
  *    tombe du côté strict.
  */
 export const PONT_AU_PLUS_FAIBLE: PontDIdentite = {
-  habilitations: () => ({ peutVoirAppels: false }),
+  habilitations: () => ({ peutVoirAppels: false, roleConsole: null }),
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -616,7 +616,7 @@ export async function demarrerLeProcessus(deps: DependancesDuProcessus): Promise
     //    satisfaite quand la fabrique est là.
     noyau: noyau.fabrique,
     catalogue: catalogue.catalogue,
-    habilitations: () => ({ peutVoirAppels: false }),
+    habilitations: () => ({ peutVoirAppels: false, roleConsole: null }),
     verificateurDeJeton: null,
     registreDesJetons: null,
     pontDIdentite: PONT_AU_PLUS_FAIBLE,
