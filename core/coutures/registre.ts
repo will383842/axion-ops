@@ -3190,6 +3190,83 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "module qui la DÉFINIT — donc exclu du compte, à juste titre. Elle deviendra cousue " +
       "quand la racine composera `federe`.",
   },
+  // ── ADR 0052 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0052",
+    decision:
+      "`pnpm ops:admettre` pose l'admission en base ; il refuse en NOMMANT `DATABASE_URL`, et " +
+      "l'admission est TOUT OU RIEN.",
+    etat: "à-coudre",
+    symbole: "executerLAdmission",
+    genre: "fonction",
+    module: "ops/admettre.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "ops/admettre.spec.ts",
+      nom: "REFUSE quand `DATABASE_URL` manque — et le dit SANS accuser le verrou",
+      nomme: ["executerLAdmission", "VARIABLE_DE_BASE"],
+    },
+    motif:
+      "Le geste est nommé dans `package.json` et la garde `verifierLesCommandesNommees` " +
+      "(ADR 0046) confronte chaque `pnpm …` cité dans un module aux scripts réellement " +
+      "déclarés. L'assertion mesure la distinction qui coûte : le refus porte sur l'ÉCRITURE, " +
+      "pas sur l'admission — le message dit « pourtant ADMIS », sans quoi un exploitant " +
+      "chercherait un défaut de manifeste là où il manque une variable (§ 15). " +
+      "`à-coudre` avec 0 appelant MESURÉ, et c'est l'état attendu d'un programme " +
+      "d'exploitation : son unique appelant est le bloc d'entrée du MÊME fichier, sous la " +
+      "garde `estLeProgrammeLance`, et le définisseur est exclu par construction — comme " +
+      "`provisionnerLeCoffre` (ADR 0046).",
+  },
+  {
+    adr: "0052",
+    decision:
+      "Le geste de la console est une méthode DISTINCTE de l'admission (`basculerActivation`), " +
+      "et elle rend un COMPTE, pas un booléen.",
+    etat: "cousue",
+    symbole: "DepotDuRegistre",
+    genre: "type",
+    module: "core/registry/depot.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/registry/depot.spec.ts",
+      nom: "active, désactive, et n'écrit QUE `enabled` — les autres réglages survivent",
+      nomme: ["basculerActivation", "DepotDuRegistrePrisma"],
+    },
+    motif:
+      "L'ADR 0050 dit que l'admission ne réécrit pas les cinq colonnes de console ; elle ne dit " +
+      "pas que personne ne les écrit. Deux méthodes rendent l'intention lisible À L'APPEL — un " +
+      "`ecrire()` générique l'aurait laissée dans la tête de l'appelant. L'assertion tourne sur " +
+      "LES DEUX PRISES dans la même boucle : une règle tenue d'un seul côté rendrait verte une " +
+      "garde sur un jumeau qui ne représente plus la production. 1 appelant de production " +
+      "mesuré : `ops/admettre.ts`.",
+  },
+  {
+    adr: "0052",
+    decision:
+      "Les clés du contrôle 7 se dérivent AUSSI de `types.d.ts` : sous `dist/`, aucun `.ts` " +
+      "n'est émis et la garde levait `ENOENT`.",
+    etat: "à-coudre",
+    symbole: "SOURCES_DES_CLES_DAUTORISATION",
+    genre: "constante",
+    module: "core/adapter-kit/autorisation.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "core/adapter-kit/autorisation.spec.ts",
+      nom: "🔑 dérive EXACTEMENT les mêmes noms du `.ts` et du `.d.ts` émis par tsc",
+      nomme: ["clesDAutorisationDepuisSource", "toolContext"],
+    },
+    motif:
+      "Le contrôle 7 était impossible à ARMER dans le seul environnement qui sert des appels, " +
+      "et le défaut n'avait jamais paru parce qu'aucun appelant de production ne l'invoquait — " +
+      "ce lot lui donne son premier. L'assertion n'AFFIRME pas que le `.d.ts` porte les mêmes " +
+      "noms : elle fait émettre les déclarations par le VRAI émetteur de TypeScript depuis le " +
+      "VRAI `core/types.ts`, et confronte les deux dérivations. Un `.d.ts` témoin recopié ici " +
+      "serait une seconde source, qui cesserait de suivre au premier champ ajouté. " +
+      "0 appelant MESURÉ : la constante est consommée par `lireClesDAutorisation()` dans le " +
+      "module qui la DÉFINIT, donc exclu du compte. Ce que ce compte ne porterait pas de " +
+      "toute façon : l'ORDRE des deux sources, et le fait que le second chemin soit ESSAYÉ " +
+      "plutôt que supposé.",
+  },
 ];
 
 /**

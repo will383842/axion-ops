@@ -90,6 +90,7 @@ export type {
 
 export {
   clesDAutorisationDepuisSource,
+  SOURCES_DES_CLES_DAUTORISATION,
   lireClesDAutorisation,
   proprietesDInterface,
   sansCommentaires,

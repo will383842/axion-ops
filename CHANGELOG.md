@@ -5,6 +5,69 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 5 · 3 — le geste qui pose l'admission, et la source des clés sous `dist/` — 2026-09-02
+
+### `pnpm ops:admettre` — ADR 0052
+
+Le socle admet ses adaptateurs à chaque démarrage, **en mémoire**, dans un
+processus qui peut n'avoir aucune base. Ce geste est le chemin par lequel une
+admission atteint Postgres. Il **ne refait aucun contrôle** — `lireVerrou()` et
+`enregistrerAdaptateur()` les portent déjà, et une seconde version ne suit
+jamais.
+
+Ce qu'il tient :
+
+- **tout ou rien** — un seul adaptateur refusé, et rien n'est écrit ;
+- **le refus d'écriture ne se confond pas avec le refus d'admission** : quand
+  `DATABASE_URL` manque, le message dit que les adaptateurs sont **pourtant
+  admis**, sans quoi on chercherait un défaut de manifeste là où il manque une
+  variable ;
+- **aucune variante `:dist`**, et c'est motivé : `tsconfig.build.json` n'émet ni
+  le verrou ni les instantanés, et un script incapable de trouver ses documents
+  serait le défaut même de l'ADR 0046.
+
+### Le geste de la console est une méthode à part
+
+`basculerActivation` écrit `enabled`, et rien d'autre. L'ADR 0050 dit que
+l'admission ne réécrit pas les cinq colonnes de console ; elle ne dit pas que
+personne ne les écrit. **Deux méthodes, deux intentions**, lisibles à l'appel.
+Elle rend un **compte** : `0` veut dire « aucune ligne de ce nom » — une bascule
+posée sur rien se lirait sinon comme une bascule appliquée.
+
+### 🔴 Le contrôle 7 était impossible à ARMER sous `dist/`
+
+`lireClesDAutorisation()` lisait `../types.ts` et rien d'autre. Or
+`tsconfig.build.json` ne copie aucun `.ts` : sous `node dist/ops/…`, la fonction
+levait `ENOENT`. **La garde du § 09 ne pouvait pas s'armer dans le seul
+environnement qui sert des appels** — et le défaut n'avait jamais paru parce
+qu'aucun appelant de production ne l'invoquait. Ce lot lui donne son premier.
+
+Le `.d.ts` porte les mêmes déclarations, projetées par le compilateur. La garde
+ne l'affirme pas, elle le **mesure** — elle fait émettre les déclarations par le
+vrai émetteur de TypeScript depuis le vrai `core/types.ts` :
+
+```
+[contrôle 7 · projection] 37616 caractère(s) de déclarations émis · 12 clé(s)
+depuis le .ts · 12 depuis le .d.ts · écart : [aucun]
+```
+
+### Ce que le geste a mesuré sur le manifeste RÉEL
+
+```
+[admettre] 1 dossier(s) sous adapters/ [axionia] · verrou présent · 1 épinglé(s)
+[axionia] · 1 instantané(s) trouvé(s)
+[admettre] 1 adaptateur(s) admis · 7 ligne(s) ops_tool posée(s) · 7 activée(s)
+```
+
+Et une **garde annoncée** (ADR 0015, G2) qui mérite d'être consignée : les sept
+outils d'Axion-IA déclarent des `idFields` (`id`, `commit`, `commitEnService`)
+qui ne nomment aucune propriété de leur schéma d'**entrée**. C'est sans effet —
+l'ADR 0015 a retiré à `idFields` tout pouvoir à l'entrée, et ces noms désignent
+des identifiants de **sortie**. La garde annonce, elle ne refuse pas. À arbitrer
+à la prochaine ré-épingle plutôt qu'à redécouvrir.
+
+---
+
 ## Lot 5 · 2 — le catalogue se lit, et le préfixe cesse d'être posé deux fois — 2026-09-02
 
 ### Où vivent les cinq champs qu'`ops_tool` ne porte pas — ADR 0051
