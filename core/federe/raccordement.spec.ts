@@ -76,7 +76,7 @@ const COFFRE_VERROUILLE: RefusDeCoffre = {
   etape: 0,
   etat: "verrouillé",
   message: "déverrouiller depuis la console.",
-} as RefusDeCoffre;
+};
 
 /** Ce que chaque témoin a su déclencher — confronté à la liste, tout en bas. */
 const motifsDeclenches = new Set<MotifRaccordement>();
@@ -211,7 +211,11 @@ describe("chaque refus, fabriqué un par un", () => {
       construireRaccordement(
         outilDeTemoin(),
         adaptateurs(LIGNE_SAINE),
-        coffre({ leve: Object.assign(new Error("/var/secrets/axionia.age illisible"), { name: "ErreurDeCoffre" }) }),
+        coffre({
+          leve: Object.assign(new Error("/var/secrets/axionia.age illisible"), {
+            name: "ErreurDeCoffre",
+          }),
+        }),
       ),
       "secret_illisible",
     );

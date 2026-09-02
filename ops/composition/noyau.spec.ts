@@ -74,6 +74,8 @@ function decor(
     readonly outils?: readonly OutilDuCatalogue[];
     /** § 14 — ce que `ops_runtime` répond. `null` fait DÉRIVER le repli. */
     readonly profil?: ProfileName | null;
+    /** De quoi joindre un adaptateur distant. Absent : `null`, le refus. */
+    readonly federe?: PortsDuNoyau["federe"];
   } = {},
 ): DecorDeComposition {
   const journal = new JournalMemoire();
@@ -89,6 +91,9 @@ function decor(
       coffreDuSceau: { lireCleSceauJournal: () => Promise.resolve(cleDuSceau) },
       coffreDeLArgHash: { lireCleArgHash: () => Promise.resolve(CLE_ARGHASH_DU_TEMOIN) },
       coffreDuCurseur: SANS_PONT_DE_CLE_DE_CURSEUR,
+      // Le témoin n'a personne à joindre, sauf quand il l'exige : c'est le
+      // refus nommé qu'il éprouve par défaut.
+      federe: options.federe ?? null,
       journalStore: journal,
       // § 23 — le coffre est OUVERT dans ce décor : l'étape 0 laisse passer, et
       // ce sont les étapes suivantes qui sont éprouvées.
@@ -323,6 +328,58 @@ describe("ADR 0039 · ④ ce que la composition N'A PAS LE DROIT de fabriquer", 
     expect(leve?.outil).toBe(OUTIL_BONJOUR.name);
     expect(d.lignes()).toHaveLength(1);
     expect(d.lignes()[0]?.decision).toBe("interrompu");
+  });
+
+  it("accepte un raccordement fédéré, et le refus qui SUBSISTE n'est plus celui de l'appel", async () => {
+    // ⚠️ **CE QUE CE TÉMOIN FIGE, ET POURQUOI IL EST ÉCRIT AINSI.**
+    //
+    //    Le 2026-09-02, `appelAdaptateur` a cessé d'être un `Promise.reject` :
+    //    la composition sait désormais joindre un adaptateur distant quand on
+    //    lui donne de quoi le faire. Mais servir un outil fédéré de bout en
+    //    bout demande QUATRE autres ports — `reglages`, `validerEntree`,
+    //    `empreinteFiltres`, `fabriqueMasquage` — qui exigent, eux, un
+    //    validateur de schéma distant : un arbitrage, pas une improvisation.
+    //
+    //    Ce test dit donc exactement où en est la chaîne : le port d'appel est
+    //    branché, et ce qui bute est le PREMIER des quatre restants. Il ne
+    //    prétend pas qu'un outil fédéré fonctionne — ce serait faux.
+    //
+    // 🔑 Il est écrit pour rougir UTILEMENT : le jour où `reglages` sera
+    //    branché, la levée changera de port et ce témoin le dira. C'est le
+    //    but — un compte-rendu d'avancement qui se met à jour tout seul est
+    //    une fiction ; celui-ci exige qu'on vienne le relire.
+    const federe = {
+      adaptateurs: { relire: () => Promise.resolve(null) },
+      coffre: {
+        lire: () => Promise.resolve(Buffer.from("jamais-atteint", "utf8")),
+        refusDAppelDOutil: () => null,
+      },
+    };
+    const { compose } = await composer({
+      outils: [OUTIL_BONJOUR],
+      profil: OUTIL_BONJOUR.profiles[0] ?? null,
+      federe,
+    });
+    expect(compose.fabrique).not.toBeNull();
+    const noyau = compose.fabrique!("stdio");
+
+    let leve: ErreurAdaptateurNonAdmis | null = null;
+    try {
+      await noyau(identiteDuTemoin(), appel(OUTIL_BONJOUR.name));
+    } catch (erreur: unknown) {
+      if (erreur instanceof ErreurAdaptateurNonAdmis) leve = erreur;
+      else throw erreur;
+    }
+
+    console.info(
+      `[④ bis · fédéré] port fédéré : fourni · levée : ${leve === null ? "AUCUNE" : leve.port} · ` +
+        "ports restant à brancher : reglages, validerEntree, empreinteFiltres, fabriqueMasquage",
+    );
+
+    expect(leve, "la chaîne devait encore buter — quatre ports manquent").not.toBeNull();
+    // Le point du témoin : ce n'est PLUS l'appel qui manque.
+    expect(leve?.port).not.toBe("appelAdaptateur");
+    expect(leve?.port).toBe("reglages");
   });
 
   it("laisse `confronterEpinglage` MESURER l'absence : `null`, jamais une déclaration inventée", async () => {

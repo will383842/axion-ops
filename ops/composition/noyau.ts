@@ -109,6 +109,9 @@ import type { ProfileName } from "../../core/profiles/index.js";
 import type { CoffreSceauJournal } from "../../core/sceau/index.js";
 import { ErreurCleSceauJournal, scelleurDepuisCoffre } from "../../core/sceau/index.js";
 import type { FabriqueDeNoyau, NoyauUnique } from "../../core/transport/contrat.js";
+import { appelerAdaptateurFedere } from "../../core/federe/appel.js";
+import { construireRaccordement } from "../../core/federe/raccordement.js";
+import type { LectureDesAdaptateurs, LectureDuCoffre } from "../../core/federe/raccordement.js";
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  LE REFUS NOMMÉ — CE QUI EXIGE UN ADAPTATEUR, ET N'EN A AUCUN
@@ -270,6 +273,22 @@ export interface PortsDuNoyau {
   /** § 09/§ 26 — la durée de vie d'une réservation d'idempotence, en ms. */
   readonly ttlIdempotenceMs: number;
   /** Le dernier recours de l'étape 6, quand l'alerte n'a pas pu être émise. */
+  /**
+   * De quoi APPELER un adaptateur fédéré — `null` quand aucun n'est admis.
+   *
+   * ⚠️ **OPTIONNEL, ET LE DÉFAUT EST LE REFUS.** Un socle sans adaptateur admis
+   *    doit continuer à refuser bruyamment (`ErreurAdaptateurNonAdmis`) : c'est
+   *    la garde qui empêche qu'un exécutant complaisant traverse tout le dépôt.
+   *    Le fournir, c'est déclarer qu'on a de quoi joindre quelqu'un — pas qu'on
+   *    l'a joint.
+   */
+  readonly federe: {
+    readonly adaptateurs: LectureDesAdaptateurs;
+    readonly coffre: LectureDuCoffre;
+    /** Délai d'appel, en ms. Absent : celui de `core/federe/appel.ts`. */
+    readonly delaiMs?: number;
+  } | null;
+
   readonly secoursDAlerte: (incident: IncidentEpinglage) => void;
   readonly maintenant: () => Date;
 }
@@ -444,11 +463,30 @@ export async function composerLeNoyau(ports: PortsDuNoyau): Promise<NoyauCompose
         habilitations: identite.habilitations,
       };
     },
-    appelAdaptateur(_contexte, _entree): Promise<ChargeAdaptateur> {
-      // L'outil n'est pas nommé par la signature de ce port : il l'est par le
-      // contexte, et le § 15 interdit d'y aller chercher autre chose. Le nom
-      // du port suffit à désigner le geste manquant.
-      return Promise.reject(new ErreurAdaptateurNonAdmis("appelAdaptateur", "(outil du contexte)"));
+    async appelAdaptateur(contexte, entree, outil): Promise<ChargeAdaptateur> {
+      // ── AUCUN MOYEN DE JOINDRE QUI QUE CE SOIT ────────────────────────────
+      //    Le refus reste le défaut, et il reste BRUYANT : un exécutant
+      //    complaisant traverserait toutes les gardes du dépôt.
+      if (ports.federe === null) {
+        throw new ErreurAdaptateurNonAdmis("appelAdaptateur", outil.name);
+      }
+
+      // ⚠️ LE RACCORDEMENT EST CONSTRUIT À CHAQUE APPEL, JAMAIS MÉMORISÉ. Il lit
+      //    le coffre, qui peut être verrouillé entre deux appels : un
+      //    raccordement gardé en cache survivrait à l'arrêt d'urgence du § 25.
+      const raccordement = await construireRaccordement(
+        outil,
+        ports.federe.adaptateurs,
+        ports.federe.coffre,
+        ports.federe.delaiMs === undefined ? {} : { delaiMs: ports.federe.delaiMs },
+      );
+
+      // ⚠️ AUCUN `try` ICI, ET C'EST DÉLIBÉRÉ. Une erreur réseau doit remonter
+      //    telle quelle jusqu'à `estAmontInjoignable()`, qui la reconnaît dans
+      //    sa chaîne `cause` et rend `upstream_unavailable`. L'envelopper la
+      //    transformerait en `internal`, et le § 15 ne dirait plus « réessayer ».
+      const { charge } = await appelerAdaptateurFedere(raccordement, contexte, entree);
+      return charge;
     },
     empreintesDuResultat(execution: ExecutionEtablie): readonly string[] {
       return empreintesParDefaut(execution);

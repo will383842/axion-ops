@@ -100,7 +100,10 @@ function reponseOk(structure: unknown): Response {
 }
 
 const CHARGE_TYPE = {
-  items: [{ id: "a1", objet: "un" }, { id: "a2", objet: "deux" }],
+  items: [
+    { id: "a1", objet: "un" },
+    { id: "a2", objet: "deux" },
+  ],
   meta: { failedSources: ["podcast"], sourceIncomplete: true, returned: 2 },
 };
 
@@ -119,11 +122,17 @@ describe("1 · le corps de l'appel — ce qui part sur le fil", () => {
 
   it("n'envoie l'idempotence QUE sous forme d'empreinte, et jamais quand il n'y en a pas", () => {
     const sans = corpsDeLAppel(RACCORDEMENT, contexteDeTemoin(), {});
-    const metaSans = (sans["params"] as Record<string, unknown>)["_meta"] as Record<string, unknown>;
+    const metaSans = (sans["params"] as Record<string, unknown>)["_meta"] as Record<
+      string,
+      unknown
+    >;
     expect(Object.keys(metaSans)).toEqual(["ops/requestId", "ops/principal"]);
 
     const avec = corpsDeLAppel(RACCORDEMENT, contexteDeTemoin({ idempotencyRef: "sha-abc" }), {});
-    const metaAvec = (avec["params"] as Record<string, unknown>)["_meta"] as Record<string, unknown>;
+    const metaAvec = (avec["params"] as Record<string, unknown>)["_meta"] as Record<
+      string,
+      unknown
+    >;
     expect(metaAvec["ops/idempotencyKey"]).toBe("sha-abc");
     // ⚠️ L'EMPREINTE, jamais la clé (ADR 0020) : elle voyage vers un tiers.
     expect(JSON.stringify(avec)).not.toContain("idempotencyKey:");
@@ -144,7 +153,9 @@ describe("1 · le corps de l'appel — ce qui part sur le fil", () => {
     // Une redirection rejouerait le secret vers une autre origine.
     expect(options.redirect).toBe("manual");
     expect(options.signal).toBeDefined();
-    console.info(`[fédéré] en-tête « ${ENTETE_SECRET_PARTAGE} » · délai ${String(DELAI_PAR_DEFAUT_MS)} ms`);
+    console.info(
+      `[fédéré] en-tête « ${ENTETE_SECRET_PARTAGE} » · délai ${String(DELAI_PAR_DEFAUT_MS)} ms`,
+    );
   });
 });
 
@@ -197,7 +208,10 @@ describe("2 · les trois formes de réponse, qui ne se confondent pas", () => {
           id: 1,
           result: {
             isError: true,
-            structuredContent: { code: "upstream_unavailable", message: "la source n'a pas répondu" },
+            structuredContent: {
+              code: "upstream_unavailable",
+              message: "la source n'a pas répondu",
+            },
           },
         },
         200,
@@ -258,7 +272,11 @@ describe("3 · `recordIds` — DÉRIVÉS du manifeste, jamais reçus de l'adapta
     // renomme un champ sans régénérer son manifeste cesse d'être collecté. Le
     // compte est là pour que ce zéro ne passe pas inaperçu.
     const { verdict, charge } = lireReponseDeLAdaptateur(
-      { jsonrpc: "2.0", id: 1, result: { isError: false, structuredContent: { items: [{ identifiant: "x" }], meta: {} } } },
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        result: { isError: false, structuredContent: { items: [{ identifiant: "x" }], meta: {} } },
+      },
       200,
       ["id"],
     );
