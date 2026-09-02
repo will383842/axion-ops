@@ -66,6 +66,16 @@ export interface AdaptateurEpingle {
   readonly manifesteBrut: unknown;
   /** Le `manifestSha` que l'instantané ANNONCE. Le socle le recalcule. */
   readonly shaAnnonce: string | null;
+  /**
+   * La ligne d'`ops_secret` que le VERROU nomme, ou `null`.
+   *
+   * ⚠️ **ELLE NE SERT QU'À NOMMER**, jamais à autoriser : le raccordement lit
+   *    `ops_adapter.secretRef`, écrit par une admission VALIDÉE. Ici, elle sert
+   *    à dériver le nom de la variable qui sème le secret dans un coffre local.
+   *    Confondre les deux ferait entrer une valeur du verrou brut dans le chemin
+   *    d'authentification, sans être passée par `lireVerrou()`.
+   */
+  readonly secretRefAnnoncee: string | null;
 }
 
 /** Ce que la lecture rapporte. Des NOMBRES et des NOMS, jamais une couleur. */
@@ -88,18 +98,23 @@ export interface LectureDesAdaptateursEpingles {
 //  La lecture
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** Les identifiants portés par un verrou brut, sans le valider. */
-function idsDuVerrou(brut: unknown): readonly string[] {
+/** Les entrées d'un verrou brut, SANS le valider — `lireVerrou()` en a la charge. */
+function entreesDuVerrou(
+  brut: unknown,
+): readonly { readonly id: string; readonly secretRef: string | null }[] {
   if (brut === null || typeof brut !== "object") return [];
   const adapters = (brut as Record<string, unknown>)["adapters"];
   if (!Array.isArray(adapters)) return [];
-  return adapters
-    .map((entree) =>
-      entree !== null && typeof entree === "object"
-        ? (entree as Record<string, unknown>)["id"]
-        : undefined,
-    )
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  const entrees: { id: string; secretRef: string | null }[] = [];
+  for (const brute of adapters) {
+    if (brute === null || typeof brute !== "object") continue;
+    const objet = brute as Record<string, unknown>;
+    const id = objet["id"];
+    if (typeof id !== "string" || id.length === 0) continue;
+    const secretRef = objet["secretRef"];
+    entrees.push({ id, secretRef: typeof secretRef === "string" ? secretRef : null });
+  }
+  return entrees;
 }
 
 /** Sépare l'instantané en son manifeste et le SHA qu'il annonce. */
@@ -120,23 +135,23 @@ export function lireLesAdaptateursEpingles(
 ): LectureDesAdaptateursEpingles {
   const present = source.verrouPresent();
   const brut = present ? source.lireLeVerrou() : null;
-  const epingles = idsDuVerrou(brut);
+  const entrees = entreesDuVerrou(brut);
 
   const adaptateurs: AdaptateurEpingle[] = [];
   const sansInstantane: string[] = [];
-  for (const id of epingles) {
-    const ouvert = ouvrirLInstantane(source.lireLInstantane(id));
+  for (const entree of entrees) {
+    const ouvert = ouvrirLInstantane(source.lireLInstantane(entree.id));
     if (ouvert === null) {
-      sansInstantane.push(id);
+      sansInstantane.push(entree.id);
       continue;
     }
-    adaptateurs.push({ id, ...ouvert });
+    adaptateurs.push({ id: entree.id, ...ouvert, secretRefAnnoncee: entree.secretRef });
   }
 
   return {
     verrouPresent: present,
     verrouBrut: brut,
-    epingles,
+    epingles: entrees.map((entree) => entree.id),
     adaptateurs,
     sansInstantane,
   };

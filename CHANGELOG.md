@@ -5,6 +5,74 @@ déploiement — **rien n'a été déployé.**
 
 ---
 
+## Lot 5 · 4 — la racine branchée : un outil d'Axion-IA servi de bout en bout — 2026-09-02
+
+`ops/index.ts` déclarait « aucun verrou, aucun manifeste » et servait
+`outilsEpingles = []`, avec ce commentaire : « le zéro est une mesure, pas un
+bouchon ». **Le zéro était bien une mesure — celle d'un montage qui ne regardait
+pas le disque.**
+
+### Ce que la racine fait maintenant — ADR 0053
+
+Elle lit les deux documents avant tout démarrage, l'étage 5 **pose** ce qu'il
+admet (`depotDuRegistre`, obligatoire même pour valoir `null`), l'inventaire est
+une **fonction** relue à chaque appel, et le port `federe` est fourni : lecture
+d'`ops_adapter` et coffre au **port étroit**, celui qui ne sait pas écrire.
+
+Une seule règle de profil, deux lecteurs (`profilServi`) : sans quoi
+`tools/list` annoncerait des outils que l'étape 7 refuserait ensuite — un
+catalogue qui ment, et un modèle qui insiste.
+
+### Ce qui tient lieu de console, avec son défaut ÉCRIT
+
+`OPS_ENABLED_TOOLS` et `OPS_PROFILE` portent **le défaut même que le § 14
+nomme** : la correction 3 veut qu'`enabled` bascule « en console, sans
+redéploiement », et une variable exige exactement un redéploiement. Ils passent
+par **les mêmes gestes** que la console : le jour où elle arrive, ce sont ces
+deux variables qui disparaissent, pas les gestes. Un `OPS_PROFILE` hors de
+l'énumération **refuse le démarrage** — retomber en silence sur un repli
+fail-closed ferait d'une faute de frappe un socle muet.
+
+### La chaîne complète, mesurée
+
+```
+[catalogue] 7 ligne(s) ops_tool relue(s) · 1 manifeste(s) épinglé(s) indexé(s) ·
+7 outil(s) à l'inventaire · 0 sans épingle · 0 désaccord(s)
+[catalogue · servi] profil « admin » (réglé par OPS_PROFILE) · 7 outil(s) servi(s)
+[chaîne] 28 champ(s) de `DependancesOrchestrateur` composé(s) · fabrique : posée
+[démarrage] 7 étage(s) confronté(s), 7 franchi(s) · sert : true · coffre : ouvert
+· appels d'outils acceptés : true
+```
+
+`tools/list` sur le fil stdio rend les **sept outils d'Axion-IA**. Et l'appel
+fédéré atteint **réellement la production** — sonde du 2026-09-02 sur
+`https://axion-ia.com/api/mcp`, secret volontairement faux :
+
+```
+ErreurAdaptateurDistant: l'adaptateur refuse le secret partagé :
+vérifier `secretRef` et la variable côté produit.
+```
+
+Un **401 d'Axion-IA** : tout le trajet est câblé — nom complet correct sur le
+fil, en-tête `x-mcp-secret` présent, route atteinte. Seule la VALEUR du secret
+manque localement ; elle vit dans Coolify et n'a pas à descendre ici.
+
+### Deux constats MESURÉS, laissés ouverts
+
+1. **Les sept outils d'Axion-IA débordent le budget d'octets du § 14** —
+   `23 403` octets pour un plafond de `19 500`, refusé par l'étape 7. Ce n'est
+   pas un défaut du socle : c'est le § 14 qui mord pour la première fois sur un
+   catalogue réel. Trois issues, aucune prise ici : alléger, répartir sur
+   plusieurs profils, ou relever le plafond en le justifiant.
+2. **Un 401 de l'adaptateur ressort en `internal`**, dont le message conseille de
+   « réessayer » — exactement le mauvais conseil pour un secret absent.
+   `estAmontInjoignable()` ne le reconnaît pas, à juste titre : l'adaptateur a
+   RÉPONDU. Le précédent est nommé (`CODE_COFFRE_VERROUILLE`, lot 1b) ; le même
+   arbitrage est à refaire, avec son ADR et ses dérivations. **Ce lot le NOMME,
+   il ne le fait pas.**
+
+---
+
 ## Lot 5 · 3 — le geste qui pose l'admission, et la source des clés sous `dist/` — 2026-09-02
 
 ### `pnpm ops:admettre` — ADR 0052

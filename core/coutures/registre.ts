@@ -3123,7 +3123,7 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
     decision:
       "Les cinq champs qu'`ops_tool` ne porte pas se lisent dans le MANIFESTE ÉPINGLÉ, pas en " +
       "colonnes neuves ; une ligne sans épingle n'est PAS servie.",
-    etat: "à-coudre",
+    etat: "cousue",
     symbole: "construireLeCatalogue",
     genre: "fonction",
     module: "core/registry/catalogue.ts",
@@ -3139,8 +3139,8 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "compacterait selon des annotations que personne n'a relues. Or ces cinq valeurs " +
       "gouvernent ce qui SORT (`maxBytes`, `compaction.tier2`, `idFields` → `recordIds` du " +
       "§ 31). L'assertion ne le dit pas en prose : elle CHANGE le manifeste sans toucher la " +
-      "ligne et relit la valeur servie. Aucun appelant de production : le câblage de la racine " +
-      "appartient au lot suivant.",
+      "ligne et relit la valeur servie. 1 appelant de production : `ops/index.ts`, qui en fait " +
+      "l'INVENTAIRE de la chaîne — relu à chaque appel, jamais mémorisé (§ 14, correction 3).",
   },
   {
     adr: "0051",
@@ -3266,6 +3266,113 @@ export const REGISTRE_DES_COUTURES: readonly EntreeDeCouture[] = [
       "module qui la DÉFINIT, donc exclu du compte. Ce que ce compte ne porterait pas de " +
       "toute façon : l'ORDRE des deux sources, et le fait que le second chemin soit ESSAYÉ " +
       "plutôt que supposé.",
+  },
+  // ── ADR 0053 ───────────────────────────────────────────────────────────────
+  {
+    adr: "0053",
+    decision:
+      "Une seule règle de profil, DEUX lecteurs : `tools/list` et l'étape 7 l'empruntent tous " +
+      "les deux, sans quoi le catalogue annonce ce que l'étape 7 refuse.",
+    etat: "à-coudre",
+    symbole: "profilServi",
+    genre: "fonction",
+    module: "ops/index.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "ops/racine-branchee.spec.ts",
+      nom: "🔑 `tools/list` et l'étape 7 lisent la MÊME règle — sinon le catalogue ment",
+      nomme: ["profilServi", "descripteursServis"],
+    },
+    motif:
+      "Deux écritures de « quel profil sert cette instance » divergeraient au premier réglage " +
+      "ajouté, et la divergence produirait le pire cas : un modèle qui LIT un outil dans " +
+      "`tools/list` et se le fait refuser à l'appel. L'assertion confronte le profil ANNONCÉ " +
+      "au profil REMIS à l'étape 7, sur le même inventaire. 0 appelant MESURÉ : le SEUL appelant est `demarrerLeProcessus`, dans `ops/index.ts` qui DÉFINIT le symbole — donc exclu du compte, à juste titre. C'est l'état attendu d'une décision de RACINE : la racine n'a pas d'appelant, elle est le point d'entrée.",
+  },
+  {
+    adr: "0053",
+    decision:
+      "Le catalogue servi est RELU à chaque `tools/list` (§ 11) : `catalogueDesAdaptateursAdmis` " +
+      "accepte un FOURNISSEUR, pas seulement une liste figée.",
+    etat: "à-coudre",
+    symbole: "catalogueDesAdaptateursAdmis",
+    genre: "fonction",
+    module: "ops/index.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "ops/racine-branchee.spec.ts",
+      nom: "🔑 sert la NOUVELLE valeur après une désactivation, sans redémarrage",
+      nomme: ["catalogueDesAdaptateursAdmis", "listerPourCetAppel"],
+    },
+    motif:
+      "Une liste figée servirait l'ancienne valeur d'`enabled` jusqu'au redémarrage : la " +
+      "bascule d'urgence du § 14, correction 3, ne désactiverait rien. L'assertion ne DÉCRIT " +
+      "pas la relecture, elle DÉSACTIVE entre deux lectures et compte « avant : 1 · après : " +
+      "0 » — un compte de lectures seul aurait été vert sur une liste figée. 0 appelant MESURÉ : le SEUL appelant est `demarrerLeProcessus`, dans `ops/index.ts` qui DÉFINIT le symbole — donc exclu du compte, à juste titre. C'est l'état attendu d'une décision de RACINE : la racine n'a pas d'appelant, elle est le point d'entrée.",
+  },
+  {
+    adr: "0053",
+    decision:
+      "L'étage 5 POSE ce qu'il admet ; `depotDuRegistre` est OBLIGATOIRE même pour valoir " +
+      "`null`, et une écriture qui échoue est COMPTÉE, pas fatale.",
+    etat: "cousue",
+    symbole: "demarrerLeSocle",
+    genre: "fonction",
+    module: "ops/main.ts",
+    mesureeAilleurs: "ops/main.spec.ts",
+    assertion: {
+      fichier: "ops/admettre.spec.ts",
+      nom: "pose l'adaptateur RÉEL et ses 7 outils, et ne les active PAS sans le drapeau",
+      nomme: ["executerLAdmission", "listerOutils"],
+    },
+    motif:
+      "Un champ facultatif se serait lu « on n'y a pas pensé » — c'est le motif écrit pour " +
+      "`federe` avant lui. Une écriture qui ferait SORTIR le processus priverait aussi de la " +
+      "console, par laquelle on répare une base indisponible ; elle est donc comptée et " +
+      "l'adaptateur NOMMÉ, jamais le message du pilote, qui porte volontiers une URL de " +
+      "connexion. L'assertion mesure la POSE elle-même sur le manifeste réel.",
+  },
+  {
+    adr: "0053",
+    decision:
+      "`OPS_ENABLED_TOOLS` et `OPS_PROFILE` tiennent lieu de console, et portent le défaut que " +
+      "le § 14 nomme — un réglage hors énumération REFUSE le démarrage.",
+    etat: "à-coudre",
+    symbole: "lireLeProfilRegle",
+    genre: "fonction",
+    module: "ops/index.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "ops/racine-branchee.spec.ts",
+      nom: "REFUSE une valeur hors de l'énumération, au lieu de retomber en silence",
+      nomme: ["lireLeProfilRegle", "PROFILE_NAMES"],
+    },
+    motif:
+      "Retomber en silence sur le repli ferait d'une faute de frappe un socle qui ne sert rien " +
+      "sans que personne ne sache pourquoi — et le repli est fail-closed, donc parfaitement " +
+      "silencieux. L'assertion distingue les TROIS cas : réglage valide, variable vide (qui " +
+      "n'est pas une faute), faute de frappe (qui en est une). 0 appelant MESURÉ : le SEUL appelant est `demarrerLeProcessus`, dans `ops/index.ts` qui DÉFINIT le symbole — donc exclu du compte, à juste titre. C'est l'état attendu d'une décision de RACINE : la racine n'a pas d'appelant, elle est le point d'entrée.",
+  },
+  {
+    adr: "0053",
+    decision:
+      "Le nom de la variable qui sème un secret partagé est DÉRIVÉ de la `secretRef` du " +
+      "verrou, jamais saisi à côté.",
+    etat: "à-coudre",
+    symbole: "variableDuSecretDAdaptateur",
+    genre: "fonction",
+    module: "ops/index.ts",
+    mesureeAilleurs: null,
+    assertion: {
+      fichier: "ops/racine-branchee.spec.ts",
+      nom: "transforme `axionia.mcp.shared` en `OPS_ADAPTER_SECRET_AXIONIA_MCP_SHARED`",
+      nomme: ["variableDuSecretDAdaptateur", "OPS_ADAPTER_SECRET_AXIONIA_MCP_SHARED"],
+    },
+    motif:
+      "Une table `secretRef → variable` écrite à la main diverge au premier adaptateur ajouté, " +
+      "et la divergence se découvre EN 401 — c'est-à-dire en dérangeant un tiers pour " +
+      "apprendre ce qu'on savait déjà. La dérivation vaut pour tout adaptateur à venir, et " +
+      "l'assertion le mesure sur DEUX références, dont une portant un tiret. 0 appelant MESURÉ : le SEUL appelant est `demarrerLeProcessus`, dans `ops/index.ts` qui DÉFINIT le symbole — donc exclu du compte, à juste titre. C'est l'état attendu d'une décision de RACINE : la racine n'a pas d'appelant, elle est le point d'entrée.",
   },
 ];
 

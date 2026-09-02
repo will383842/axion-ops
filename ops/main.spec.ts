@@ -167,6 +167,8 @@ function dependances(reglages: Reglages = {}): DependancesDuSocle {
     motifDuDemarrage: "démarrage du socle (garde)",
     lireLeLockDAdaptateurs: () => Promise.resolve(reglages.lock ?? { present: false, brut: null }),
     manifestesAAdmettre: [],
+    // Ce montage n'admet aucun manifeste : il n'a donc rien à poser.
+    depotDuRegistre: null,
     transports: ["http", "stdio"],
     hotesAutorises: environnement.hotesAutorises,
     lireLaProvenance: provenanceTemoin,
